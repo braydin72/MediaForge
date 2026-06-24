@@ -26,7 +26,7 @@ func TestReviewQueueCRUD(t *testing.T) {
 	}
 
 	// Add
-	if err := st.AddToReviewQueue(e); err != nil {
+	if err := st.AddToReviewQueue(&e); err != nil {
 		t.Fatalf("AddToReviewQueue: %v", err)
 	}
 
@@ -40,7 +40,7 @@ func TestReviewQueueCRUD(t *testing.T) {
 	}
 
 	// Duplicate is silently ignored
-	if err := st.AddToReviewQueue(e); err != nil {
+	if err := st.AddToReviewQueue(&e); err != nil {
 		t.Fatalf("duplicate AddToReviewQueue: %v", err)
 	}
 	count, _ = st.GetReviewQueueCount()
@@ -85,7 +85,7 @@ func TestReviewQueueCRUD(t *testing.T) {
 	// A new pending entry for the same path can be added after it's discarded
 	e2 := e
 	e2.ID = "test-id-2"
-	if err := st.AddToReviewQueue(e2); err != nil {
+	if err := st.AddToReviewQueue(&e2); err != nil {
 		t.Fatalf("AddToReviewQueue after discard: %v", err)
 	}
 	count, _ = st.GetReviewQueueCount()

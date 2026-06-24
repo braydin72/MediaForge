@@ -606,7 +606,7 @@ func (s *SQLiteStore) SessionLifetimeStats() (sessionSaved, lifetimeSaved int64,
 
 // AddToReviewQueue inserts a new review queue entry.
 // Returns without error if an entry with the same original_path already exists and is pending.
-func (s *SQLiteStore) AddToReviewQueue(e ReviewEntry) error {
+func (s *SQLiteStore) AddToReviewQueue(e *ReviewEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

@@ -67,7 +67,7 @@ func TestWatcherStabilityCheck(t *testing.T) {
 	// Force sub-second stability interval for the test.
 	cfg.StabilityCheck.IntervalSeconds = 1
 
-	w := NewWatcher(cfg, "ffprobe", st)
+	w := NewWatcher(&cfg, "ffprobe", st)
 	w.ScanInterval = 200 * time.Millisecond
 
 	// Use a very short stability interval by patching the config.
@@ -162,7 +162,7 @@ func TestWatcherIgnoresNonVideo(t *testing.T) {
 		},
 	}
 
-	w := NewWatcher(cfg, "ffprobe", st)
+	w := NewWatcher(&cfg, "ffprobe", st)
 	w.ScanInterval = 100 * time.Millisecond
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -207,7 +207,7 @@ func TestWatcherMissingFolder(t *testing.T) {
 		},
 	}
 
-	w := NewWatcher(cfg, "ffprobe", st)
+	w := NewWatcher(&cfg, "ffprobe", st)
 	w.ScanInterval = 100 * time.Millisecond
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)

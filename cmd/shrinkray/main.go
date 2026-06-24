@@ -179,7 +179,7 @@ func main() {
 	// Start intake watcher if enabled
 	var intakeWatcher *intake.Watcher
 	if cfg.Intake.Enabled {
-		intakeWatcher = intake.NewWatcher(cfg.Intake, cfg.FFprobePath, jobStore)
+		intakeWatcher = intake.NewWatcher(&cfg.Intake, cfg.FFprobePath, jobStore)
 		go intakeWatcher.Start(context.Background())
 	} else {
 		logger.Info("Intake pipeline disabled (enable in Settings to activate)")

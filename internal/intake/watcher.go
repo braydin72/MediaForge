@@ -48,9 +48,9 @@ type Watcher struct {
 }
 
 // NewWatcher creates a Watcher. Call Start in a goroutine to begin polling.
-func NewWatcher(cfg config.IntakeConfig, ffprobePath string, st *store.SQLiteStore) *Watcher {
+func NewWatcher(cfg *config.IntakeConfig, ffprobePath string, st *store.SQLiteStore) *Watcher {
 	return &Watcher{
-		cfg:          cfg,
+		cfg:          *cfg,
 		prober:       ffmpeg.NewProber(ffprobePath),
 		st:           st,
 		ScanInterval: defaultScanInterval,
@@ -241,7 +241,7 @@ func (w *Watcher) sendToReviewQueue(path, reason string, probe *ffmpeg.ProbeResu
 		CreatedAt:    time.Now().UTC(),
 	}
 
-	if err := w.st.AddToReviewQueue(entry); err != nil {
+	if err := w.st.AddToReviewQueue(&entry); err != nil {
 		logger.Error("Intake: failed to save review queue entry", "file", entry.Filename, "error", err)
 	} else {
 		logger.Info("Intake: added to review queue", "file", entry.Filename, "reason", reason)
