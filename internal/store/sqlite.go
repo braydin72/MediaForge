@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 7
+const schemaVersion = 8
 
 const schema = `
 CREATE TABLE IF NOT EXISTS jobs (
@@ -86,6 +86,35 @@ CREATE TABLE IF NOT EXISTS review_queue (
 
 CREATE INDEX IF NOT EXISTS idx_review_queue_status ON review_queue(status);
 CREATE INDEX IF NOT EXISTS idx_review_queue_created ON review_queue(created_at);
+
+CREATE TABLE IF NOT EXISTS processing_records (
+	id TEXT PRIMARY KEY,
+	filename TEXT NOT NULL,
+	source_path TEXT NOT NULL,
+	detected_codec TEXT NOT NULL DEFAULT '',
+	container TEXT NOT NULL DEFAULT '',
+	resolution TEXT NOT NULL DEFAULT '',
+	duration_secs INTEGER NOT NULL DEFAULT 0,
+	matched_title TEXT NOT NULL DEFAULT '',
+	matched_year INTEGER NOT NULL DEFAULT 0,
+	tmdb_id TEXT NOT NULL DEFAULT '',
+	tvdb_id TEXT NOT NULL DEFAULT '',
+	pipeline_mode TEXT NOT NULL DEFAULT '',
+	original_size_bytes INTEGER NOT NULL DEFAULT 0,
+	output_size_bytes INTEGER NOT NULL DEFAULT 0,
+	size_reduction_pct REAL NOT NULL DEFAULT 0,
+	encode_duration_secs INTEGER NOT NULL DEFAULT 0,
+	encode_preset TEXT NOT NULL DEFAULT '',
+	encode_speed TEXT NOT NULL DEFAULT '',
+	encode_gpu TEXT NOT NULL DEFAULT '',
+	encode_fps REAL NOT NULL DEFAULT 0,
+	outcome TEXT NOT NULL,
+	failure_reason TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_processing_records_created ON processing_records(created_at);
+CREATE INDEX IF NOT EXISTS idx_processing_records_outcome ON processing_records(outcome);
 `
 
 // ReviewEntryStatus values for review_queue.status.
@@ -186,7 +215,9 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		_, err = db.Exec(`
 			INSERT OR IGNORE INTO stats_metadata (key, value) VALUES
 				('session_saved', '0'),
-				('lifetime_saved', '0')
+				('lifetime_saved', '0'),
+				('intake_lifetime_reset_at', ''),
+				('intake_period_reset_at', '')
 		`)
 		if err != nil {
 			db.Close()
@@ -294,6 +325,46 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 				if _, err := db.Exec(m); err != nil {
 					db.Close()
 					return nil, fmt.Errorf("migration v6->v7 failed: %w", err)
+				}
+			}
+		}
+		if version < 8 {
+			// Migrate v7 -> v8: Add processing_records table for per-file intake stats.
+			migrations := []string{
+				`CREATE TABLE IF NOT EXISTS processing_records (
+					id TEXT PRIMARY KEY,
+					filename TEXT NOT NULL,
+					source_path TEXT NOT NULL,
+					detected_codec TEXT NOT NULL DEFAULT '',
+					container TEXT NOT NULL DEFAULT '',
+					resolution TEXT NOT NULL DEFAULT '',
+					duration_secs INTEGER NOT NULL DEFAULT 0,
+					matched_title TEXT NOT NULL DEFAULT '',
+					matched_year INTEGER NOT NULL DEFAULT 0,
+					tmdb_id TEXT NOT NULL DEFAULT '',
+					tvdb_id TEXT NOT NULL DEFAULT '',
+					pipeline_mode TEXT NOT NULL DEFAULT '',
+					original_size_bytes INTEGER NOT NULL DEFAULT 0,
+					output_size_bytes INTEGER NOT NULL DEFAULT 0,
+					size_reduction_pct REAL NOT NULL DEFAULT 0,
+					encode_duration_secs INTEGER NOT NULL DEFAULT 0,
+					encode_preset TEXT NOT NULL DEFAULT '',
+					encode_speed TEXT NOT NULL DEFAULT '',
+					encode_gpu TEXT NOT NULL DEFAULT '',
+					encode_fps REAL NOT NULL DEFAULT 0,
+					outcome TEXT NOT NULL,
+					failure_reason TEXT NOT NULL DEFAULT '',
+					created_at TEXT NOT NULL
+				)`,
+				`CREATE INDEX IF NOT EXISTS idx_processing_records_created ON processing_records(created_at)`,
+				`CREATE INDEX IF NOT EXISTS idx_processing_records_outcome ON processing_records(outcome)`,
+				`INSERT OR IGNORE INTO stats_metadata (key, value) VALUES ('intake_lifetime_reset_at', '')`,
+				`INSERT OR IGNORE INTO stats_metadata (key, value) VALUES ('intake_period_reset_at', '')`,
+			}
+			for _, m := range migrations {
+				if _, err := db.Exec(m); err != nil {
+					db.Close()
+					return nil, fmt.Errorf("migration v7->v8 failed: %w", err)
 				}
 			}
 		}
