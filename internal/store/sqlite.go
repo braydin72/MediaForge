@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 6
+const schemaVersion = 7
 
 const schema = `
 CREATE TABLE IF NOT EXISTS jobs (
@@ -73,7 +73,38 @@ CREATE TABLE IF NOT EXISTS stats_metadata (
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs(status, created_at);
+
+CREATE TABLE IF NOT EXISTS review_queue (
+	id TEXT PRIMARY KEY,
+	original_path TEXT NOT NULL,
+	filename TEXT NOT NULL,
+	reason TEXT NOT NULL,
+	ffprobe_info TEXT,
+	status TEXT NOT NULL DEFAULT 'pending',
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_queue_status ON review_queue(status);
+CREATE INDEX IF NOT EXISTS idx_review_queue_created ON review_queue(created_at);
 `
+
+// ReviewEntryStatus values for review_queue.status.
+const (
+	ReviewStatusPending   = "pending"
+	ReviewStatusResolved  = "discarded" // kept for compat; "resolved" set programmatically
+	ReviewStatusDiscarded = "discarded"
+)
+
+// ReviewEntry is a single item in the Review Queue.
+type ReviewEntry struct {
+	ID           string    `json:"id"`
+	OriginalPath string    `json:"original_path"`
+	Filename     string    `json:"filename"`
+	Reason       string    `json:"reason"`
+	FFProbeInfo  string    `json:"ffprobe_info"` // JSON blob from ffprobe
+	Status       string    `json:"status"`       // "pending" | "resolved" | "discarded"
+	CreatedAt    time.Time `json:"created_at"`
+}
 
 // jobColumns lists all job table columns for INSERT statements.
 const jobColumns = `id, input_path, output_path, temp_path, preset_id, encoder, is_hardware,
@@ -241,6 +272,28 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 				if _, err := db.Exec(m); err != nil {
 					db.Close()
 					return nil, fmt.Errorf("migration v5->v6 failed: %w", err)
+				}
+			}
+		}
+		if version < 7 {
+			// Migrate v6 -> v7: Add review_queue table for the intake pipeline
+			migrations := []string{
+				`CREATE TABLE IF NOT EXISTS review_queue (
+					id TEXT PRIMARY KEY,
+					original_path TEXT NOT NULL,
+					filename TEXT NOT NULL,
+					reason TEXT NOT NULL,
+					ffprobe_info TEXT,
+					status TEXT NOT NULL DEFAULT 'pending',
+					created_at TEXT NOT NULL
+				)`,
+				`CREATE INDEX IF NOT EXISTS idx_review_queue_status ON review_queue(status)`,
+				`CREATE INDEX IF NOT EXISTS idx_review_queue_created ON review_queue(created_at)`,
+			}
+			for _, m := range migrations {
+				if _, err := db.Exec(m); err != nil {
+					db.Close()
+					return nil, fmt.Errorf("migration v6->v7 failed: %w", err)
 				}
 			}
 		}
@@ -549,6 +602,76 @@ func (s *SQLiteStore) SessionLifetimeStats() (sessionSaved, lifetimeSaved int64,
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.getSavedStats()
+}
+
+// AddToReviewQueue inserts a new review queue entry.
+// Returns without error if an entry with the same original_path already exists and is pending.
+func (s *SQLiteStore) AddToReviewQueue(e ReviewEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var existing string
+	err := s.db.QueryRow(
+		`SELECT id FROM review_queue WHERE original_path = ? AND status = 'pending' LIMIT 1`,
+		e.OriginalPath,
+	).Scan(&existing)
+	if err == nil {
+		return nil // already queued, skip duplicate
+	}
+
+	_, err = s.db.Exec(
+		`INSERT INTO review_queue (id, original_path, filename, reason, ffprobe_info, status, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		e.ID, e.OriginalPath, e.Filename, e.Reason,
+		nullString(e.FFProbeInfo), e.Status, formatTime(e.CreatedAt),
+	)
+	return err
+}
+
+// GetReviewQueue returns all review queue entries, newest first.
+func (s *SQLiteStore) GetReviewQueue() ([]ReviewEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(
+		`SELECT id, original_path, filename, reason, COALESCE(ffprobe_info,''), status, created_at
+		 FROM review_queue ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []ReviewEntry
+	for rows.Next() {
+		var e ReviewEntry
+		var createdAt string
+		if err := rows.Scan(&e.ID, &e.OriginalPath, &e.Filename, &e.Reason, &e.FFProbeInfo, &e.Status, &createdAt); err != nil {
+			return nil, err
+		}
+		e.CreatedAt = parseTime(createdAt)
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+// GetReviewQueueCount returns the number of pending review queue entries.
+func (s *SQLiteStore) GetReviewQueueCount() (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM review_queue WHERE status = 'pending'`).Scan(&count)
+	return count, err
+}
+
+// UpdateReviewQueueStatus changes the status of a review queue entry.
+func (s *SQLiteStore) UpdateReviewQueueStatus(id, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`UPDATE review_queue SET status = ? WHERE id = ?`, status, id)
+	return err
 }
 
 // Close closes the database connection.

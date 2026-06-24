@@ -18,6 +18,7 @@ import (
 	"github.com/gwlsn/shrinkray/internal/config"
 	"github.com/gwlsn/shrinkray/internal/ffmpeg"
 	"github.com/gwlsn/shrinkray/internal/ffmpeg/vmaf"
+	"github.com/gwlsn/shrinkray/internal/intake"
 	"github.com/gwlsn/shrinkray/internal/jobs"
 	"github.com/gwlsn/shrinkray/internal/logger"
 	"github.com/gwlsn/shrinkray/internal/store"
@@ -175,6 +176,15 @@ func main() {
 	// Start worker pool
 	workerPool.Start()
 
+	// Start intake watcher if enabled
+	var intakeWatcher *intake.Watcher
+	if cfg.Intake.Enabled {
+		intakeWatcher = intake.NewWatcher(cfg.Intake, cfg.FFprobePath, jobStore)
+		go intakeWatcher.Start(context.Background())
+	} else {
+		logger.Info("Intake pipeline disabled (enable in Settings to activate)")
+	}
+
 	fmt.Printf("  Starting server on port %d\n", *port)
 	fmt.Println()
 	fmt.Println("  Press Ctrl+C to stop")
@@ -208,6 +218,9 @@ func main() {
 		<-sigChan
 		fmt.Println("\n  Shutting down...")
 		logger.Info("Shutdown signal received")
+		if intakeWatcher != nil {
+			intakeWatcher.Stop()
+		}
 		workerPool.Stop()
 		server.Close()
 	}()
