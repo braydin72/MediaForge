@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>MediaForge</Name>
+  <Repository>ghcr.io/braydin72/mediaforge:dev</Repository>
+  <Registry>https://github.com/braydin72/mediaforge/pkgs/container/mediaforge</Registry>
+  <Branch>
+    <Tag>dev</Tag>
+    <TagDescription>Latest development release</TagDescription>
+  </Branch>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/braydin72/mediaforge/issues</Support>
+  <Project>https://github.com/braydin72/mediaforge</Project>
+  <Overview>MediaForge is a self-hosted media ingest engine — a single application and single Docker container that handles the complete journey of a raw video file from arrival to library-ready:[br]
+[b]Ingest[/b] - watch a folder, detect new files, verify they are fully written[br]
+[b]Identify[/b] - codec detection via ffprobe, metadata lookup via TVDB/TMDB/OMDb, LLM-assisted verification for ambiguous matches[br][b]Transcode[/b] - AVC (H.264) files are queued and encoded to HEVC (H.265) using hardware acceleration (NVIDIA, AMD, Intel, or CPU fallback)[br][b]Organize[/b] - rename and move to library with media-server-compatible folder and file naming[br]
+[br][br]MediaForge is not a media server. It is designed to feed Plex, Jellyfin, Emby, or any other media server that watches a library folder.[br][br][b]GPU Setup (Recommended):[/b][br]Without GPU passthrough, MediaForge falls back to slower CPU encoding.[br][br][b]Intel/AMD:[/b] Add --device=/dev/dri to Extra Parameters.[br][br][b]NVIDIA:[/b] Install the Nvidia-Driver plugin (reboot after) and add --runtime=nvidia to Extra Parameters.</Overview>
+  <Category>MediaApp:Video</Category>
+  <Icon>https://raw.githubusercontent.com/braydin72/mediaforge/main/web/templates/logo.png</Icon>
+  <WebUI>http://[IP]:[PORT:8080]</WebUI>
+  <ExtraSearchTerms>transcode ffmpeg compression video hevc av1 shrink encode</ExtraSearchTerms>
+  <Requires>For hardware acceleration, GPU passthrough is required. See Overview for setup instructions.</Requires>
+  <ReadMe>https://github.com/braydin72/mediaforge#readme</ReadMe>
+  <Beta>false</Beta>
+
+  <!-- Ports -->
+  <Config Name="WebUI Port" Target="8080" Default="8080" Mode="tcp" Type="Port" Description="Web interface port" Display="always" Required="true"/>
+
+  <!-- Volumes -->
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/mediaforge" Mode="rw" Type="Path" Description="Configuration and database directory" Display="always" Required="true"/>
+  <Config Name="Incoming" Target="/incoming" Default="/mnt/user/incoming" Mode="rw" Type="Path" Description="Watch folder — drop new media files here for processing" Display="always" Required="true"/>
+  <Config Name="Staging" Target="/staging" Default="/mnt/cache/staging" Mode="rw" Type="Path" Description="Fast storage for AVC files awaiting encode and transcode working directory. SSD or cache pool strongly recommended." Display="always" Required="true"/>
+  <Config Name="Movies Library" Target="/media/Movies" Default="/mnt/user/media/Movies" Mode="rw" Type="Path" Description="Movie library output folder. Can be a locally mounted network share." Display="always" Required="true"/>
+  <Config Name="TV Library" Target="/media/TV Shows" Default="/mnt/user/media/TV Shows" Mode="rw" Type="Path" Description="TV show library output folder. Can be a locally mounted network share." Display="always" Required="true"/>
+
+  <!-- Environment Variables -->
+  <Config Name="PUID" Target="PUID" Default="99" Type="Variable" Description="User ID for file permissions" Display="advanced" Required="false"/>
+  <Config Name="PGID" Target="PGID" Default="100" Type="Variable" Description="Group ID for file permissions. For GPU encoding, set this to the group that owns /dev/dri/renderD128 on your host." Display="advanced" Required="false"/>
+  <Config Name="NVIDIA_VISIBLE_DEVICES" Target="NVIDIA_VISIBLE_DEVICES" Default="all" Type="Variable" Description="Exposes NVIDIA GPUs to the container. Default 'all' works for single-GPU systems. For multi-GPU, set to a specific GPU UUID from the Nvidia-Driver plugin page." Display="advanced" Required="false"/>
+  <Config Name="NVIDIA_DRIVER_CAPABILITIES" Target="NVIDIA_DRIVER_CAPABILITIES" Default="all" Type="Variable" Description="NVIDIA driver features exposed to the container." Display="always-hide" Required="false"/>
+</Container>

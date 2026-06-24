@@ -1,0 +1,4399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Shrinkray</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #FAFAFA;
+            --bg-secondary: #FFFFFF;
+            --bg-tertiary: #F5F5F5;
+            --text-primary: #1A1A1A;
+            --text-secondary: #6B6B6B;
+            --text-tertiary: #9A9A9A;
+            --accent: #2563EB;
+            --accent-hover: #1D4ED8;
+            --accent-light: #EFF6FF;
+            --success: #059669;
+            --success-light: #ECFDF5;
+            --warning: #D97706;
+            --warning-light: #FFFBEB;
+            --error: #DC2626;
+            --error-light: #FEF2F2;
+            --purple: #7C3AED;
+            --purple-light: #F3E8FF;
+            --border: #E5E5E5;
+            --border-hover: #D4D4D4;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+            --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+            --shadow-lg: 0 12px 32px rgba(0,0,0,0.12);
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 24px;
+            --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --transition-fast: 150ms ease;
+            --transition-normal: 250ms ease;
+        }
+
+        [data-theme="dark"] {
+            --bg-primary: #0F0F0F;
+            --bg-secondary: #1A1A1A;
+            --bg-tertiary: #252525;
+            --text-primary: #F5F5F5;
+            --text-secondary: #A0A0A0;
+            --text-tertiary: #6B6B6B;
+            --accent: #3B82F6;
+            --accent-hover: #60A5FA;
+            --accent-light: #1E3A5F;
+            --success: #10B981;
+            --success-light: #064E3B;
+            --warning: #F59E0B;
+            --warning-light: #78350F;
+            --error: #EF4444;
+            --error-light: #7F1D1D;
+            --purple: #A78BFA;
+            --purple-light: #4C1D95;
+            --border: #2D2D2D;
+            --border-hover: #404040;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+            --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
+            --shadow-lg: 0 12px 32px rgba(0,0,0,0.4);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html {
+            font-size: 16px;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.5;
+        }
+
+        /* Layout */
+        .app {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            height: 100dvh;
+            overflow: hidden;
+        }
+
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 0 24px;
+            height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            font-size: 1.125rem;
+            letter-spacing: -0.02em;
+        }
+
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+        }
+
+        .logo-icon img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .stats-bar {
+            display: flex;
+            gap: 16px;
+            margin-left: 20px;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .stat-value {
+            font-weight: 600;
+            font-size: 0.9375rem;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+
+        .stat-label {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .stat-item.success .stat-value { color: var(--success); }
+        .stat-item.running .stat-value { color: var(--accent); }
+        .stat-item.error .stat-value { color: var(--error); }
+
+        /* Queue stat dropdown */
+        .stat-queue-wrapper {
+            position: relative;
+        }
+
+        .stat-queue-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            padding: 4px 0;
+            margin: -4px 0;
+            border-radius: var(--radius-sm);
+            transition: opacity var(--transition-fast);
+        }
+
+        .stat-queue-toggle:hover {
+            opacity: 0.8;
+        }
+
+        .stat-queue-chevron {
+            width: 14px;
+            height: 14px;
+            color: var(--text-tertiary);
+            transition: transform var(--transition-fast);
+            flex-shrink: 0;
+        }
+
+        .stat-queue-wrapper.open .stat-queue-chevron {
+            transform: rotate(180deg);
+        }
+
+        .stat-queue-dropdown {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%) translateY(-4px);
+            opacity: 0;
+            visibility: hidden;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            box-shadow: var(--shadow-md);
+            padding: 12px 16px;
+            min-width: 140px;
+            z-index: 200;
+            transition: opacity var(--transition-fast), transform var(--transition-fast), visibility var(--transition-fast);
+        }
+
+        .stat-queue-wrapper.open .stat-queue-dropdown {
+            opacity: 1;
+            visibility: visible;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* Hover behavior for desktop */
+        @media (hover: hover) {
+            .stat-queue-wrapper:hover .stat-queue-dropdown,
+            .stat-saved-wrapper:hover .stat-saved-dropdown {
+                opacity: 1;
+                visibility: visible;
+                transform: translateX(-50%) translateY(0);
+            }
+
+            .stat-queue-wrapper:hover .stat-queue-chevron,
+            .stat-saved-wrapper:hover .stat-saved-chevron {
+                transform: rotate(180deg);
+            }
+        }
+
+        .stat-queue-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+        }
+
+        .stat-queue-row:not(:last-child) {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .stat-queue-row-label {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+        }
+
+        .stat-queue-row-value {
+            font-size: 0.9375rem;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .stat-queue-row-value.running {
+            color: var(--accent);
+        }
+
+        /* Saved stat dropdown */
+        .stat-saved-wrapper {
+            position: relative;
+        }
+
+        .stat-saved-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            padding: 4px 0;
+            margin: -4px 0;
+            border-radius: var(--radius-sm);
+            transition: opacity var(--transition-fast);
+        }
+
+        .stat-saved-toggle:hover {
+            opacity: 0.8;
+        }
+
+        .stat-saved-chevron {
+            width: 14px;
+            height: 14px;
+            color: var(--text-tertiary);
+            transition: transform var(--transition-fast);
+            flex-shrink: 0;
+        }
+
+        .stat-saved-wrapper.open .stat-saved-chevron {
+            transform: rotate(180deg);
+        }
+
+        .stat-saved-dropdown {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%) translateY(-4px);
+            opacity: 0;
+            visibility: hidden;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            box-shadow: var(--shadow-md);
+            padding: 12px 16px;
+            min-width: 180px;
+            z-index: 200;
+            transition: opacity var(--transition-fast), transform var(--transition-fast), visibility var(--transition-fast);
+        }
+
+        .stat-saved-wrapper.open .stat-saved-dropdown {
+            opacity: 1;
+            visibility: visible;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .stat-saved-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+        }
+
+        .stat-saved-row:not(:last-child) {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .stat-saved-row-label {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+        }
+
+        .stat-saved-row-value {
+            font-size: 0.9375rem;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .stat-saved-row-value.lifetime {
+            color: var(--success);
+        }
+
+        .stat-saved-reset {
+            width: 100%;
+            margin-top: 4px;
+            padding: 8px 12px;
+            font-size: 0.8125rem;
+            font-family: var(--font-sans);
+            font-weight: 500;
+            color: var(--text-secondary);
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+
+        .stat-saved-reset:hover {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border-color: var(--border-hover);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .menu-btn {
+            width: 40px;
+            height: 40px;
+            border: none;
+            background: transparent;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            transition: all var(--transition-fast);
+        }
+
+        .menu-btn:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .menu-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Theme toggle icons */
+        .theme-icon-light { display: none; }
+        .theme-icon-dark { display: block; }
+        [data-theme="dark"] .theme-icon-light { display: block; }
+        [data-theme="dark"] .theme-icon-dark { display: none; }
+
+        .main {
+            flex: 1;
+            display: flex;
+            align-items: flex-start;
+            max-width: 1600px;
+            margin: 0 auto;
+            width: 100%;
+            padding: 24px;
+            gap: 24px;
+            min-height: 0;
+            overflow: hidden;
+            height: 100%;
+        }
+
+        /* Browser Panel */
+        .browser-panel {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .panel {
+            background: var(--bg-secondary);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        /* File browser panel - sizes to content */
+        .browser-panel > .panel {
+            display: flex;
+            flex-direction: column;
+            max-height: calc(100vh - 112px);
+            max-height: calc(100dvh - 112px);
+            min-height: 0;
+        }
+
+        .panel-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .panel-title {
+            font-weight: 600;
+            font-size: 0.9375rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .breadcrumb-bar {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+            gap: 12px;
+        }
+
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            overflow: hidden;
+            white-space: nowrap;
+            flex: 1;
+        }
+
+        .breadcrumb-refresh {
+            flex-shrink: 0;
+            background: none;
+            border: none;
+            color: var(--text-tertiary);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color var(--transition-fast), background var(--transition-fast);
+        }
+
+        .breadcrumb-refresh:hover {
+            color: var(--text-primary);
+            background: var(--bg-secondary);
+        }
+
+        .breadcrumb-refresh svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .breadcrumb-refresh.refreshing {
+            opacity: 0.5;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .breadcrumb a {
+            color: var(--accent);
+            text-decoration: none;
+            transition: color var(--transition-fast);
+        }
+
+        .breadcrumb a:hover {
+            color: var(--accent-hover);
+        }
+
+        .breadcrumb-sep {
+            color: var(--text-tertiary);
+            margin: 0 4px;
+        }
+
+        .breadcrumb-current {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .breadcrumb-collapsed {
+            color: var(--text-tertiary);
+        }
+
+        .file-list {
+            list-style: none;
+            overflow-y: auto;
+            flex: 1 1 auto;
+            min-height: 0;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .file-list-header {
+            display: flex;
+            align-items: center;
+            padding: 10px 20px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            gap: 12px;
+            flex-shrink: 0;
+        }
+
+        .file-list-header label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: background var(--transition-fast);
+            gap: 12px;
+        }
+
+        .file-item:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-item.selected {
+            background: var(--accent-light);
+        }
+
+        .file-item.selected:hover {
+            background: #DBEAFE;
+        }
+
+        .file-checkbox {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: var(--accent);
+            flex-shrink: 0;
+        }
+
+        .file-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            font-size: 1rem;
+        }
+
+        .file-icon.folder {
+            background: #FEF3C7;
+            color: #D97706;
+        }
+
+        .file-icon.video {
+            background: var(--accent-light);
+            color: var(--accent);
+        }
+
+        .file-icon.other {
+            background: var(--bg-tertiary);
+            color: var(--text-tertiary);
+        }
+
+        .file-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .file-name {
+            font-weight: 500;
+            font-size: 0.9375rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .file-meta {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            margin-top: 2px;
+            display: flex;
+            gap: 12px;
+        }
+
+        .file-size {
+            font-variant-numeric: tabular-nums;
+            color: var(--text-tertiary);
+            font-size: 0.8125rem;
+            flex-shrink: 0;
+        }
+
+        .codec-badge {
+            display: inline-flex;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.6875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+        }
+
+        .codec-badge.hevc,
+        .codec-badge.av1 {
+            background: var(--success-light);
+            color: var(--success);
+        }
+
+        .codec-badge.h264 {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+
+        .codec-badge.hdr {
+            background: var(--warning-light);
+            color: var(--warning);
+        }
+
+        .file-list-empty {
+            padding: 60px 20px;
+            text-align: center;
+            color: var(--text-secondary);
+        }
+
+        /* Actions Bar */
+        .actions-bar {
+            display: flex;
+            gap: 12px;
+            padding: 16px 20px;
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border);
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .smartshrink-hint {
+            padding: 8px 20px;
+            font-size: 0.75rem;
+            color: var(--text-tertiary);
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border);
+        }
+
+        .preset-select {
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 0.875rem;
+            font-family: var(--font-sans);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            cursor: pointer;
+            min-width: 200px;
+            transition: border-color var(--transition-fast);
+        }
+
+        .preset-select:hover {
+            border-color: var(--border-hover);
+        }
+
+        .preset-select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        /* Custom Preset Dropdown */
+        .preset-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .preset-dropdown-trigger {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 0.875rem;
+            font-family: var(--font-sans);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            cursor: pointer;
+            min-width: 230px;
+            transition: border-color var(--transition-fast);
+        }
+
+        .preset-dropdown-trigger:hover {
+            border-color: var(--border-hover);
+        }
+
+        .preset-dropdown-trigger:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .preset-dropdown-label {
+            flex: 1;
+            text-align: left;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .preset-dropdown-chevron {
+            width: 12px;
+            height: 12px;
+            opacity: 0.5;
+            transition: transform var(--transition-fast);
+        }
+
+        .preset-dropdown.open .preset-dropdown-chevron {
+            transform: rotate(180deg);
+        }
+
+        .preset-dropdown-menu {
+            position: fixed;
+            min-width: 200px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-4px);
+            transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+        }
+
+        .preset-dropdown.open-upward .preset-dropdown-menu {
+            transform: translateY(4px);
+        }
+
+        .preset-dropdown.open.open-upward .preset-dropdown-menu {
+            transform: translateY(0);
+        }
+
+        .preset-dropdown.open .preset-dropdown-menu {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
+        .preset-dropdown-section {
+            padding: 8px 0;
+        }
+
+        .preset-dropdown-section:not(:last-child) {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .preset-dropdown-section-label {
+            padding: 4px 12px 6px;
+            font-size: 0.625rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-tertiary);
+        }
+
+        .preset-dropdown-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: background 0.1s ease, color 0.1s ease;
+        }
+
+        .preset-dropdown-item:hover {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+
+        .preset-dropdown-item.selected {
+            color: var(--accent);
+            font-weight: 500;
+        }
+
+        .preset-dropdown-item .job-badge {
+            margin-left: 8px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 18px;
+            border-radius: var(--radius-sm);
+            font-size: 0.875rem;
+            font-weight: 500;
+            font-family: var(--font-sans);
+            cursor: pointer;
+            border: none;
+            transition: all var(--transition-fast);
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .btn-primary:disabled {
+            background: var(--border);
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: var(--bg-tertiary);
+            border-color: var(--border-hover);
+        }
+
+        .btn-secondary:disabled {
+            opacity: 0.4;
+            cursor: default;
+        }
+
+        .btn-danger {
+            background: var(--error);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #B91C1C;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 0.8125rem;
+        }
+
+        .selection-count {
+            margin-left: auto;
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+        }
+
+        .schedule-status {
+            font-size: 0.8125rem;
+            color: var(--text-tertiary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .schedule-status svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        /* Queue Controls */
+        .queue-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-left: auto;
+        }
+
+        .dropdown-menu {
+            position: relative;
+        }
+
+        .dropdown-menu-trigger {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 0.75rem;
+            font-family: var(--font-sans);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: border-color 0.15s ease;
+        }
+
+        .dropdown-menu-trigger:hover {
+            border-color: var(--border-hover);
+        }
+
+        .dropdown-menu-trigger svg {
+            width: 14px;
+            height: 14px;
+            opacity: 0.6;
+        }
+
+        .dropdown-menu-panel {
+            position: fixed;
+            min-width: 200px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-4px);
+            transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+        }
+
+        .dropdown-menu-panel.open {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
+        .dropdown-menu-panel.open-upward {
+            transform: translateY(4px);
+        }
+
+        .dropdown-menu-panel.open.open-upward {
+            transform: translateY(0);
+        }
+
+        .dropdown-menu-section {
+            padding: 8px 0;
+        }
+
+        .dropdown-menu-section:not(:last-child) {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .dropdown-menu-heading {
+            padding: 4px 12px 6px;
+            font-size: 0.625rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-tertiary);
+        }
+
+        .dropdown-menu-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 12px;
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: background 0.1s ease, color 0.1s ease;
+        }
+
+        .dropdown-menu-item:hover {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+
+        .dropdown-menu-item.active {
+            color: var(--accent);
+            font-weight: 500;
+        }
+
+        .dropdown-menu-item .sort-arrow {
+            font-size: 0.75rem;
+            opacity: 0.5;
+            transition: opacity 0.1s ease;
+        }
+
+        .dropdown-menu-item.active .sort-arrow {
+            opacity: 1;
+        }
+
+        /* Queue Panel */
+        .queue-panel {
+            width: 400px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            max-height: calc(100vh - 112px);
+            max-height: calc(100dvh - 112px);
+            min-height: 0;
+        }
+
+        .queue-panel-inner {
+            display: flex;
+            flex-direction: column;
+            max-height: 100%;
+            min-height: 0;
+        }
+
+        .queue-list {
+            overflow-y: auto;
+            flex: 1 1 auto;
+            min-height: 0;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .job-item {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .job-item:last-child {
+            border-bottom: none;
+        }
+
+        .job-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .job-name {
+            font-weight: 500;
+            font-size: 0.9375rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .job-badges {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .job-badge {
+            display: inline-flex;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.6875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+        }
+
+        .job-badge.pending {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+
+        .job-badge.running {
+            background: var(--accent-light);
+            color: var(--accent);
+        }
+
+        .job-badge.complete {
+            background: var(--success-light);
+            color: var(--success);
+        }
+
+        .job-badge.failed {
+            background: var(--error-light);
+            color: var(--error);
+        }
+
+        .job-badge.skipped {
+            background: var(--warning-light);
+            color: var(--warning);
+        }
+
+        .job-badge.initializing {
+            background: var(--purple-light);
+            color: var(--purple);
+        }
+
+        .job-badge.analyzing {
+            background: var(--warning-light);
+            color: var(--warning);
+        }
+
+        .job-badge.hardware {
+            background: var(--success-light);
+            color: var(--success);
+        }
+
+        .job-badge.software {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+
+        .job-badge.hdr {
+            background: var(--warning-light);
+            color: var(--warning);
+        }
+
+        .job-progress {
+            margin: 12px 0;
+        }
+
+        .progress-bar {
+            height: 6px;
+            background: var(--bg-tertiary);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 3px;
+            transition: width var(--transition-normal);
+        }
+
+        .progress-fill.initializing {
+            background: linear-gradient(90deg, #DDD6FE 0%, #A78BFA 50%, #DDD6FE 100%);
+            background-size: 200% 100%;
+            animation: shimmer 2s ease-in-out infinite;
+        }
+
+        .progress-fill.analyzing {
+            background: linear-gradient(90deg, #FEF3C7 0%, #F59E0B 50%, #FEF3C7 100%);
+            background-size: 200% 100%;
+            animation: shimmer 2s ease-in-out infinite;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        .job-details {
+            display: flex;
+            gap: 16px;
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            margin-top: 8px;
+        }
+
+        .job-detail {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .job-detail-value {
+            font-weight: 500;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .job-saved {
+            color: var(--success);
+        }
+
+        .job-error {
+            color: var(--error);
+            font-size: 0.8125rem;
+            margin-top: 8px;
+        }
+
+        .job-warning {
+            color: var(--warning);
+            font-size: 0.8125rem;
+            margin-top: 8px;
+        }
+
+        .job-details-toggle {
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 0.8125rem;
+            margin-top: 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            user-select: none;
+        }
+
+        .job-details-toggle:hover {
+            color: var(--text-primary);
+        }
+
+        .job-details-toggle .toggle-icon {
+            font-size: 0.625rem;
+            transition: transform var(--transition-fast);
+        }
+
+        .smartshrink-details {
+            margin-top: 8px;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            font-size: 0.8125rem;
+        }
+
+        .smartshrink-detail {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+        }
+
+        .smartshrink-label {
+            color: var(--text-secondary);
+        }
+
+        .smartshrink-value {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .job-actions {
+            margin-top: 12px;
+        }
+
+        .queue-empty {
+            padding: 24px 20px;
+            text-align: center;
+            color: var(--text-secondary);
+        }
+
+        .queue-empty-icon {
+            font-size: 2rem;
+            margin-bottom: 8px;
+            opacity: 0.5;
+        }
+
+        /* Processing Banner */
+        .processing-banner {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 20px;
+            background: var(--accent-light);
+            border-bottom: 1px solid var(--border);
+            color: var(--accent);
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+        .processing-banner.hidden { display: none; }
+        .processing-spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid var(--accent);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            flex-shrink: 0;
+        }
+
+        .queue-footer {
+            padding: 12px 20px;
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .queue-footer-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        .queue-error:empty {
+            display: none;
+        }
+
+        .queue-error {
+            color: var(--error);
+            font-size: 0.75rem;
+            text-align: center;
+        }
+
+        .notify-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .notify-label input {
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+
+        /* Settings Menu */
+        .settings-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.4);
+            z-index: 200;
+            opacity: 0;
+            visibility: hidden;
+            transition: all var(--transition-normal);
+        }
+
+        .settings-overlay.open {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .settings-panel {
+            position: fixed;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 400px;
+            max-width: 100%;
+            background: var(--bg-secondary);
+            z-index: 201;
+            transform: translateX(100%);
+            transition: transform var(--transition-normal);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .settings-overlay.open .settings-panel {
+            transform: translateX(0);
+        }
+
+        .settings-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .settings-title {
+            font-weight: 600;
+            font-size: 1.125rem;
+        }
+
+        .settings-close {
+            width: 36px;
+            height: 36px;
+            border: none;
+            background: transparent;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            transition: all var(--transition-fast);
+        }
+
+        .settings-close:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .settings-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+        }
+
+        .setting-group {
+            margin-bottom: 32px;
+        }
+
+        .setting-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .setting-group-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-tertiary);
+            margin-bottom: 16px;
+        }
+
+        .setting-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .setting-item:last-child {
+            border-bottom: none;
+        }
+
+        .setting-info {
+            flex: 1;
+        }
+
+        .setting-name {
+            font-weight: 500;
+            font-size: 0.9375rem;
+            margin-bottom: 2px;
+        }
+
+        .setting-desc {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+        }
+
+        .setting-control {
+            margin-left: 16px;
+        }
+
+        .setting-select {
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 0.875rem;
+            font-family: var(--font-sans);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            cursor: pointer;
+            min-width: 160px;
+        }
+
+        .setting-input {
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 0.875rem;
+            font-family: var(--font-sans);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            width: 200px;
+        }
+
+        .setting-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .setting-input::placeholder {
+            color: var(--text-tertiary);
+        }
+
+        .setting-warning {
+            font-size: 0.8125rem;
+            color: #b45309;
+            padding: 0 0 8px 0;
+        }
+
+        .setting-group-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            padding: 4px 0;
+        }
+
+        .setting-group-header:hover .setting-group-title {
+            color: var(--text-primary);
+        }
+
+        .setting-group-toggle {
+            width: 20px;
+            height: 20px;
+            color: var(--text-tertiary);
+            transition: transform 0.2s ease;
+        }
+
+        .setting-group.collapsed .setting-group-toggle {
+            transform: rotate(-90deg);
+        }
+
+        .setting-group-content {
+            overflow: hidden;
+            transition: max-height 0.2s ease;
+            max-height: 800px;
+        }
+
+        .setting-group.collapsed .setting-group-content {
+            max-height: 0;
+        }
+
+        .setting-item-stacked {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .setting-item-stacked .setting-control {
+            margin-left: 0;
+            margin-top: 12px;
+        }
+
+        .quality-slider-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            width: 100%;
+        }
+
+        .quality-label {
+            font-size: 0.75rem;
+            color: var(--text-tertiary);
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .quality-slider {
+            flex: 1;
+            min-width: 0;
+            height: 6px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: var(--border);
+            border-radius: 3px;
+            outline: none;
+        }
+
+        .quality-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: var(--accent);
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+
+        .quality-slider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: var(--accent);
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+
+        .quality-input {
+            width: 60px;
+            padding: 6px 8px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 0.875rem;
+            font-family: var(--font-sans);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            text-align: center;
+        }
+
+        .quality-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        /* Hide spinner buttons on number input */
+        .quality-input::-webkit-outer-spin-button,
+        .quality-input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        .quality-input[type=number] {
+            -moz-appearance: textfield;
+        }
+
+        .quality-recommended {
+            font-size: 0.75rem;
+            color: var(--text-tertiary);
+            margin-top: 4px;
+        }
+
+        .settings-status {
+            padding: 12px 24px;
+            font-size: 0.8125rem;
+            color: var(--success);
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+        }
+
+        .settings-status.error {
+            color: var(--error);
+        }
+
+        .settings-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--border);
+            font-size: 12px;
+            color: var(--text-tertiary);
+            text-align: center;
+        }
+
+        .settings-footer a {
+            color: var(--text-tertiary);
+            text-decoration: none;
+            transition: color 150ms ease;
+        }
+
+        .settings-footer a:hover {
+            color: var(--text-secondary);
+        }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .main {
+                flex-direction: column;
+                overflow-y: auto;
+                align-items: stretch;
+            }
+
+            .browser-panel {
+                flex: none;
+            }
+
+            .browser-panel > .panel {
+                max-height: none;
+            }
+
+            .file-list {
+                flex: none;
+                min-height: 0;
+                max-height: clamp(200px, 40vh, 400px);
+            }
+
+            .queue-panel {
+                width: 100%;
+                position: static;
+                align-self: stretch;
+                max-height: none;
+            }
+
+            .queue-panel-inner {
+                max-height: none;
+            }
+
+            .queue-list {
+                flex: none;
+                max-height: clamp(200px, 40vh, 400px);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .header {
+                padding: 12px 16px;
+                height: auto;
+                align-items: flex-start;
+            }
+
+            .header-left {
+                flex-wrap: wrap;
+                align-items: center;
+                max-width: calc(100% - 120px);
+            }
+
+
+            .stats-bar {
+                gap: 10px;
+                margin-left: 0;
+                flex-basis: 100%;
+                margin-top: 8px;
+            }
+
+            .stat-value {
+                font-size: 0.8125rem;
+            }
+
+            .stat-queue-dropdown {
+                left: 0;
+                transform: translateX(0) translateY(-4px);
+            }
+
+            .stat-queue-wrapper.open .stat-queue-dropdown {
+                transform: translateX(0) translateY(0);
+            }
+
+            .main {
+                padding: 16px;
+                gap: 16px;
+            }
+
+            .settings-panel {
+                width: 100%;
+            }
+
+            .actions-bar {
+                flex-wrap: wrap;
+            }
+
+            .preset-select {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .preset-dropdown {
+                width: 100%;
+            }
+
+            .preset-dropdown-trigger {
+                width: 100%;
+                min-width: 0;
+            }
+
+        }
+
+        /* Loading State */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 12px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Hidden utility */
+        .hidden {
+            display: none !important;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity var(--transition-normal), visibility var(--transition-normal);
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            max-width: 420px;
+            width: calc(100% - 32px);
+            padding: 24px;
+            transform: scale(0.95) translateY(10px);
+            transition: transform var(--transition-normal);
+        }
+
+        .modal-overlay.active .modal {
+            transform: scale(1) translateY(0);
+        }
+
+        .modal-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+        }
+
+        .modal-message {
+            font-size: 0.9375rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            margin-bottom: 24px;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        .modal-actions .btn {
+            min-width: 100px;
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <div class="logo-icon">
+                        <img src="/logo.png" alt="Shrinkray" width="32" height="32">
+                    </div>
+                    Shrinkray
+                </div>
+                <div class="stats-bar" id="stats-bar">
+                    <div class="stat-item stat-queue-wrapper" id="stat-queue-wrapper">
+                        <div class="stat-queue-toggle" onclick="toggleQueueDropdown(event)">
+                            <span class="stat-value" id="stat-queue">0</span>
+                            <span class="stat-label">in queue</span>
+                            <svg class="stat-queue-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="6 9 12 15 18 9"/>
+                            </svg>
+                        </div>
+                        <div class="stat-queue-dropdown">
+                            <div class="stat-queue-row">
+                                <span class="stat-queue-row-label">Running</span>
+                                <span class="stat-queue-row-value running" id="stat-running">0</span>
+                            </div>
+                            <div class="stat-queue-row">
+                                <span class="stat-queue-row-label">Pending</span>
+                                <span class="stat-queue-row-value" id="stat-pending">0</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="stat-item success">
+                        <span class="stat-value" id="stat-complete">0</span>
+                        <span class="stat-label">complete</span>
+                    </div>
+                    <div class="stat-item error" id="stat-failed-wrapper">
+                        <span class="stat-value" id="stat-failed">0</span>
+                        <span class="stat-label">failed</span>
+                    </div>
+                    <div class="stat-item success stat-saved-wrapper" id="stat-saved-wrapper">
+                        <div class="stat-saved-toggle" onclick="toggleSavedDropdown(event)">
+                            <span class="stat-value" id="stat-saved">0 MB</span>
+                            <span class="stat-label">saved</span>
+                            <svg class="stat-saved-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="6 9 12 15 18 9"/>
+                            </svg>
+                        </div>
+                        <div class="stat-saved-dropdown">
+                            <div class="stat-saved-row">
+                                <span class="stat-saved-row-label">Session</span>
+                                <span class="stat-saved-row-value" id="stat-session-saved">0 MB</span>
+                            </div>
+                            <div class="stat-saved-row">
+                                <span class="stat-saved-row-label">Lifetime</span>
+                                <span class="stat-saved-row-value lifetime" id="stat-lifetime-saved">0 MB</span>
+                            </div>
+                            <div class="stat-saved-row" style="border: none; padding-top: 8px;">
+                                <button class="stat-saved-reset" onclick="resetSession(event)">Reset Session</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="header-right">
+                <a href="https://github.com/gwlsn/shrinkray" target="_blank" rel="noopener noreferrer"
+                   class="menu-btn" title="View on GitHub">
+                    <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                    </svg>
+                </a>
+                <button class="menu-btn" onclick="toggleTheme()" title="Toggle dark mode" id="theme-toggle">
+                    <svg class="theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="5"/>
+                        <line x1="12" y1="1" x2="12" y2="3"/>
+                        <line x1="12" y1="21" x2="12" y2="23"/>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                        <line x1="1" y1="12" x2="3" y2="12"/>
+                        <line x1="21" y1="12" x2="23" y2="12"/>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                    </svg>
+                    <svg class="theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                    </svg>
+                </button>
+                <button class="menu-btn" onclick="openSettings()" title="Settings">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <main class="main">
+            <div class="browser-panel">
+                <div class="panel">
+                    <div class="breadcrumb-bar">
+                        <div class="breadcrumb" id="breadcrumb">
+                            <div class="loading">
+                                <div class="spinner"></div>
+                                Loading...
+                            </div>
+                        </div>
+                        <button class="breadcrumb-refresh" id="refresh-btn" onclick="refreshBrowser()" title="Refresh file list">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="23 4 23 10 17 10"></polyline>
+                                <polyline points="1 20 1 14 7 14"></polyline>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="file-list-header hidden" id="file-list-header">
+                        <label>
+                            <input type="checkbox" class="file-checkbox" id="select-all-checkbox" onchange="toggleSelectAll(this)">
+                            Select all
+                        </label>
+                        <span id="selection-count"></span>
+                        <div class="dropdown-menu" id="browse-menu" style="margin-left: auto">
+                            <button class="dropdown-menu-trigger" onclick="toggleDropdownMenu('browse-menu-panel', event)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="4" y1="6" x2="16" y2="6"/>
+                                    <line x1="4" y1="12" x2="12" y2="12"/>
+                                    <line x1="4" y1="18" x2="8" y2="18"/>
+                                    <polyline points="16 14 19 17 22 14"/>
+                                </svg>
+                                <span id="browse-menu-label">File Name</span>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="6 9 12 15 18 9"></polyline>
+                                </svg>
+                            </button>
+                            <div class="dropdown-menu-panel" id="browse-menu-panel">
+                                <div class="dropdown-menu-section">
+                                    <div class="dropdown-menu-heading">Sort</div>
+                                    <div class="dropdown-menu-item active" data-sort="name" onclick="selectBrowseSort('name')">File Name <span class="sort-arrow">↓</span></div>
+                                    <div class="dropdown-menu-item" data-sort="size" onclick="selectBrowseSort('size')">Size <span class="sort-arrow">↓</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <ul class="file-list" id="file-list">
+                        <li class="loading">
+                            <div class="spinner"></div>
+                            Loading files...
+                        </li>
+                    </ul>
+                    <div class="actions-bar">
+                        <div class="preset-dropdown" id="preset-dropdown">
+                            <button class="preset-dropdown-trigger" onclick="togglePresetDropdown(event)">
+                                <span class="preset-dropdown-label">Loading...</span>
+                                <svg class="preset-dropdown-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="6 9 12 15 18 9"></polyline>
+                                </svg>
+                            </button>
+                            <div class="preset-dropdown-menu" id="preset-dropdown-menu">
+                                <!-- Populated by JavaScript -->
+                            </div>
+                        </div>
+                        <div class="preset-dropdown" id="quality-dropdown" style="display: none;">
+                            <button class="preset-dropdown-trigger" onclick="toggleQualityDropdown(event)">
+                                <span class="preset-dropdown-label">Good</span>
+                                <svg class="preset-dropdown-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="6 9 12 15 18 9"></polyline>
+                                </svg>
+                            </button>
+                            <div class="preset-dropdown-menu" id="quality-dropdown-menu">
+                                <div class="preset-dropdown-item" data-quality="acceptable" onclick="selectQuality('acceptable')">Acceptable</div>
+                                <div class="preset-dropdown-item selected" data-quality="good" onclick="selectQuality('good')">Good</div>
+                                <div class="preset-dropdown-item" data-quality="excellent" onclick="selectQuality('excellent')">Excellent</div>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" onclick="startJobs()" id="start-btn" disabled>Start Transcode</button>
+                        <span class="selection-count" id="selection-summary"></span>
+                        <span class="schedule-status" id="schedule-status"></span>
+                    </div>
+                    <div class="smartshrink-hint" id="smartshrink-hint" style="display: none;">
+                        Finds optimal compression using VMAF quality analysis. Slower and more CPU intensive than standard presets. SDR content only.
+                    </div>
+                </div>
+            </div>
+
+            <div class="queue-panel">
+                <div class="panel queue-panel-inner">
+                    <div class="panel-header">
+                        <span class="panel-title">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="8" y1="6" x2="21" y2="6"/>
+                                <line x1="8" y1="12" x2="21" y2="12"/>
+                                <line x1="8" y1="18" x2="21" y2="18"/>
+                                <line x1="3" y1="6" x2="3.01" y2="6"/>
+                                <line x1="3" y1="12" x2="3.01" y2="12"/>
+                                <line x1="3" y1="18" x2="3.01" y2="18"/>
+                            </svg>
+                            Queue
+                        </span>
+                        <div class="queue-controls">
+                            <label class="notify-label" id="notify-container" style="display: none">
+                                <input type="checkbox" id="notify-checkbox" onchange="updateNotifySetting(this.checked)">
+                                <span>Notify when done</span>
+                            </label>
+                            <div class="dropdown-menu" id="queue-menu">
+                                <button class="dropdown-menu-trigger" onclick="toggleDropdownMenu('queue-menu-panel', event)">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <line x1="4" y1="6" x2="16" y2="6"/>
+                                        <line x1="4" y1="12" x2="12" y2="12"/>
+                                        <line x1="4" y1="18" x2="8" y2="18"/>
+                                        <polyline points="16 14 19 17 22 14"/>
+                                    </svg>
+                                    <span id="queue-menu-label">All</span>
+                                </button>
+                                <div class="dropdown-menu-panel" id="queue-menu-panel">
+                                    <div class="dropdown-menu-section">
+                                        <div class="dropdown-menu-heading">Filter</div>
+                                        <div class="dropdown-menu-item active" data-filter="all" onclick="selectFilter('all')">All</div>
+                                        <div class="dropdown-menu-item" data-filter="running" onclick="selectFilter('running')">Running</div>
+                                        <div class="dropdown-menu-item" data-filter="pending" onclick="selectFilter('pending')">Pending</div>
+                                        <div class="dropdown-menu-item" data-filter="failed" onclick="selectFilter('failed')">Failed</div>
+                                        <div class="dropdown-menu-item" data-filter="complete" onclick="selectFilter('complete')">Complete</div>
+                                        <div class="dropdown-menu-item" data-filter="skipped" onclick="selectFilter('skipped')">Skipped</div>
+                                        <div class="dropdown-menu-item" data-filter="cancelled" onclick="selectFilter('cancelled')">Cancelled</div>
+                                    </div>
+                                    <div class="dropdown-menu-section">
+                                        <div class="dropdown-menu-heading">Sort</div>
+                                        <div class="dropdown-menu-item active" data-sort="default" onclick="selectSort('default')">Default <span class="sort-arrow">↓</span></div>
+                                        <div class="dropdown-menu-item" data-sort="filename" onclick="selectSort('filename')">File Name <span class="sort-arrow">↓</span></div>
+                                        <div class="dropdown-menu-item" data-sort="input_size" onclick="selectSort('input_size')">Pre-Transcode Size <span class="sort-arrow">↓</span></div>
+                                        <div class="dropdown-menu-item" data-sort="output_size" onclick="selectSort('output_size')">Post-Transcode Size <span class="sort-arrow">↓</span></div>
+                                        <div class="dropdown-menu-item" data-sort="space_saved" onclick="selectSort('space_saved')">Space Saved <span class="sort-arrow">↓</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="processing-banner" class="processing-banner hidden">
+                        <div class="processing-spinner"></div>
+                        <span id="processing-text">Processing files...</span>
+                    </div>
+                    <div class="queue-list" id="queue-list">
+                        <div class="queue-empty">
+                            <div class="queue-empty-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.3">
+                                    <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                    <path d="M3 9h18"/>
+                                    <path d="M9 21V9"/>
+                                </svg>
+                            </div>
+                            <div>No jobs in queue</div>
+                            <div style="font-size: 0.8125rem; margin-top: 4px; color: var(--text-tertiary)">Select files and start transcoding</div>
+                        </div>
+                    </div>
+                    <div class="queue-footer">
+                        <div class="queue-footer-buttons">
+                            <button class="btn btn-secondary btn-sm" id="stop-resume-btn" onclick="toggleStopResume()" style="flex: 1">Stop All</button>
+                            <button class="btn btn-secondary btn-sm" id="clear-btn" onclick="clearQueue()" style="flex: 1">Clear</button>
+                        </div>
+                        <div id="queue-error" class="queue-error"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Settings Panel -->
+    <div class="settings-overlay" id="settings-overlay" onclick="closeSettings(event)">
+        <div class="settings-panel" onclick="event.stopPropagation()">
+            <div class="settings-header">
+                <span class="settings-title">Settings</span>
+                <button class="settings-close" onclick="closeSettings()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="settings-content">
+                <div class="setting-group">
+                    <div class="setting-group-title">Transcoding</div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Original files</div>
+                            <div class="setting-desc">What happens after transcoding</div>
+                        </div>
+                        <div class="setting-control">
+                            <select class="setting-select" id="setting-original-handling" onchange="updateSetting('original_handling', this.value)">
+                                <option value="replace">Delete original</option>
+                                <option value="keep">Keep as .old</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Concurrent jobs</div>
+                            <div class="setting-desc">Simultaneous transcode tasks</div>
+                        </div>
+                        <div class="setting-control">
+                            <select class="setting-select" id="setting-workers" onchange="updateSetting('workers', parseInt(this.value))">
+                                <option value="1">1</option>
+                                <option value="2">2 (recommended)</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Write to completed/ subfolder</div>
+                            <div class="setting-desc">Place transcoded files in a completed/ subdirectory next to the source</div>
+                        </div>
+                        <div class="setting-control">
+                            <label class="toggle">
+                                <input type="checkbox" id="setting-use-completed-dir"
+                                       onchange="updateSetting('use_completed_dir', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Allow same-codec re-encoding</div>
+                            <div class="setting-desc">For re-optimizing files encoded elsewhere</div>
+                        </div>
+                        <div class="setting-control">
+                            <label class="toggle">
+                                <input type="checkbox" id="setting-allow-same-codec"
+                                       onchange="updateSetting('allow_same_codec', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <div class="setting-group-title">Schedule</div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Enable scheduling</div>
+                            <div class="setting-desc">Only transcode during set hours</div>
+                        </div>
+                        <div class="setting-control">
+                            <input type="checkbox" id="setting-schedule-enabled" onchange="updateScheduleSetting()">
+                        </div>
+                    </div>
+                    <div class="setting-item" id="schedule-hours-row">
+                        <div class="setting-info">
+                            <div class="setting-name">Transcode window</div>
+                            <div class="setting-desc">Start and end time</div>
+                        </div>
+                        <div class="setting-control" style="display: flex; gap: 8px; align-items: center;">
+                            <select class="setting-select" id="setting-schedule-start" style="min-width: 100px" onchange="updateScheduleSetting()">
+                            </select>
+                            <span style="color: var(--text-secondary)">to</span>
+                            <select class="setting-select" id="setting-schedule-end" style="min-width: 100px" onchange="updateScheduleSetting()">
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <div class="setting-group-title">Notifications</div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Pushover User Key</div>
+                            <div class="setting-desc">Your Pushover user/group key</div>
+                        </div>
+                        <div class="setting-control">
+                            <input type="text" class="setting-input" id="setting-pushover-user"
+                                   placeholder="Enter user key" onchange="updateSetting('pushover_user_key', this.value)">
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Pushover App Token</div>
+                            <div class="setting-desc">Your Pushover application token</div>
+                        </div>
+                        <div class="setting-control">
+                            <input type="text" class="setting-input" id="setting-pushover-token"
+                                   placeholder="Enter app token" onchange="updateSetting('pushover_app_token', this.value)">
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Test Notification</div>
+                            <div class="setting-desc">Send a test to verify setup</div>
+                        </div>
+                        <div class="setting-control">
+                            <button class="btn btn-secondary btn-sm" id="test-pushover-btn" onclick="testPushover()">Test</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-group collapsed" id="advanced-settings">
+                    <div class="setting-group-header" onclick="toggleAdvancedSettings()">
+                        <div class="setting-group-title">Advanced</div>
+                        <svg class="setting-group-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </div>
+                    <div class="setting-group-content">
+                        <div class="setting-warning">
+                            These settings are for advanced users. Don't change them unless you know what you're doing.
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">Log Level</div>
+                                <div class="setting-desc">Use Debug when troubleshooting issues.</div>
+                            </div>
+                            <div class="setting-control">
+                                <select class="setting-select" id="setting-log-level" onchange="updateSetting('log_level', this.value)">
+                                    <option value="debug">Debug</option>
+                                    <option value="info">Info</option>
+                                    <option value="warn">Warn</option>
+                                    <option value="error">Error</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="setting-item setting-item-stacked">
+                            <div class="setting-info">
+                                <div class="setting-name">HEVC Quality (CRF)</div>
+                                <div class="setting-desc">Lower = higher quality, larger file</div>
+                            </div>
+                            <div class="setting-control">
+                                <div class="quality-slider-container">
+                                    <span class="quality-label">Higher quality</span>
+                                    <input type="range" class="quality-slider" id="setting-quality-hevc"
+                                           min="16" max="30" value="22"
+                                           oninput="syncQualityInput('hevc', this.value)"
+                                           onchange="updateSetting('quality_hevc', parseInt(this.value))">
+                                    <span class="quality-label">Smaller file</span>
+                                    <input type="number" class="quality-input" id="setting-quality-hevc-input"
+                                           min="16" max="30" value="22"
+                                           onchange="syncQualitySlider('hevc', this.value); updateSetting('quality_hevc', parseInt(document.getElementById('setting-quality-hevc').value))">
+                                </div>
+                                <div class="quality-recommended" id="quality-recommended-hevc"></div>
+                            </div>
+                        </div>
+                        <div class="setting-item setting-item-stacked">
+                            <div class="setting-info">
+                                <div class="setting-name">AV1 Quality (CRF)</div>
+                                <div class="setting-desc">Lower = higher quality, larger file</div>
+                            </div>
+                            <div class="setting-control">
+                                <div class="quality-slider-container">
+                                    <span class="quality-label">Higher quality</span>
+                                    <input type="range" class="quality-slider" id="setting-quality-av1"
+                                           min="18" max="35" value="25"
+                                           oninput="syncQualityInput('av1', this.value)"
+                                           onchange="updateSetting('quality_av1', parseInt(this.value))">
+                                    <span class="quality-label">Smaller file</span>
+                                    <input type="number" class="quality-input" id="setting-quality-av1-input"
+                                           min="18" max="35" value="25"
+                                           onchange="syncQualitySlider('av1', this.value); updateSetting('quality_av1', parseInt(document.getElementById('setting-quality-av1').value))">
+                                </div>
+                                <div class="quality-recommended" id="quality-recommended-av1"></div>
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">Output Container</div>
+                                <div class="setting-desc">MP4 converts audio to AAC stereo and strips subtitles</div>
+                            </div>
+                            <div class="setting-control">
+                                <select class="setting-select" id="setting-output-format"
+                                        onchange="updateSetting('output_format', this.value)">
+                                    <option value="mkv">MKV (preserves all streams)</option>
+                                    <option value="mp4">MP4 (web compatible)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">Tonemap HDR to SDR</div>
+                                <div class="setting-desc">Convert HDR content to SDR (slower, uses CPU). When disabled, HDR is preserved.</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle">
+                                    <input type="checkbox" id="setting-tonemap-hdr"
+                                           onchange="updateSetting('tonemap_hdr', this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-item setting-item-stacked">
+                            <div class="setting-info">
+                                <div class="setting-name">Simultaneous SmartShrink Analyses</div>
+                                <div class="setting-desc">VMAF quality analysis cannot be hardware accelerated. Higher values will increase CPU usage significantly. 1 is recommended for media servers.</div>
+                            </div>
+                            <div class="setting-control">
+                                <select class="setting-select" id="setting-max-analyses"
+                                        onchange="updateSetting('max_concurrent_analyses', parseInt(this.value))">
+                                    <option value="1">1 (Recommended)</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="settings-status" id="settings-status"></div>
+            <div class="settings-footer">Shrinkray v<span id="app-version"></span> · <a href="https://github.com/gwlsn/shrinkray" target="_blank" rel="noopener noreferrer">View on GitHub</a></div>
+        </div>
+    </div>
+
+    <!-- Confirm Modal -->
+    <div id="confirm-modal" class="modal-overlay" onclick="closeConfirmModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-title" id="confirm-modal-title">Confirm</div>
+            <div class="modal-message" id="confirm-modal-message"></div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeConfirmModal()">Cancel</button>
+                <button class="btn btn-primary" id="confirm-modal-action">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize theme immediately to prevent flash
+        (function initTheme() {
+            const saved = localStorage.getItem('theme');
+            if (saved === 'dark') {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+        })();
+
+        function toggleTheme() {
+            const html = document.documentElement;
+            const currentTheme = html.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            html.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+        }
+
+        let currentPath = '';
+        let mediaRoot = '';  // Will be set on first browse
+        let selectedPaths = new Set();
+        let selectedFileCounts = new Map();  // Track file count for each selected path (1 for files, N for folders)
+        let totalSelectableCount = 0;  // Track total selectable items to avoid DOM queries
+        let browseSortBy = 'name';
+        let browseSortAsc = false;
+        let lastBrowseEntries = [];
+        let eventSource = null;
+
+        // Preset dropdown state
+        let allPresets = [];
+        let selectedPresetId = null;
+        let selectedQuality = 'good';
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0';
+            if (bytes < 0) return '0';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function formatDuration(seconds) {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            if (h > 0) return `${h}h ${m}m`;
+            if (m > 0) return `${m}m ${s}s`;
+            return `${s}s`;
+        }
+
+        function getBrowseEntrySize(entry) {
+            if (entry.is_dir) {
+                return typeof entry.total_size === 'number' ? entry.total_size : 0;
+            }
+            return typeof entry.size === 'number' ? entry.size : 0;
+        }
+
+        function sortBrowseEntries(entries) {
+            const sorted = entries.slice();
+            sorted.sort((a, b) => {
+                if (a.is_dir !== b.is_dir) {
+                    return a.is_dir ? -1 : 1;
+                }
+
+                if (browseSortBy === 'size') {
+                    const aSize = getBrowseEntrySize(a);
+                    const bSize = getBrowseEntrySize(b);
+                    // ↓ = largest first, ↑ = smallest first (matches queue convention)
+                    if (aSize < bSize) return browseSortAsc ? -1 : 1;
+                    if (aSize > bSize) return browseSortAsc ? 1 : -1;
+                }
+
+                const aName = a.name || '';
+                const bName = b.name || '';
+                const nameResult = aName.localeCompare(bName, undefined, { numeric: true, sensitivity: 'base' });
+                if (browseSortBy === 'name') {
+                    // ↓ = A-Z, ↑ = Z-A (matches queue convention)
+                    return browseSortAsc ? -nameResult : nameResult;
+                }
+                return nameResult;
+            });
+            return sorted;
+        }
+
+        function renderBrowseEntries(entries) {
+            const list = document.getElementById('file-list');
+            const header = document.getElementById('file-list-header');
+            const selectAllCheckbox = document.getElementById('select-all-checkbox');
+            selectAllCheckbox.checked = false;
+            selectAllCheckbox.indeterminate = false;
+            if (!entries || entries.length === 0) {
+                list.innerHTML = '<li class="file-list-empty">This folder is empty</li>';
+                header.classList.add('hidden');
+                totalSelectableCount = 0;
+                updateButtons();
+                return;
+            }
+
+            // Count selectable items (videos or folders) to avoid DOM queries later
+            totalSelectableCount = entries.filter(e =>
+                (!e.is_dir && e.video_info) || e.is_dir
+            ).length;
+
+            if (totalSelectableCount > 0) {
+                header.classList.remove('hidden');
+            } else {
+                header.classList.add('hidden');
+            }
+
+            list.innerHTML = entries.map(entry => {
+                const isVideo = !entry.is_dir && entry.video_info;
+                const isFolder = entry.is_dir;
+                const isSelectable = isVideo || isFolder;
+                const iconClass = entry.is_dir ? 'folder' : (isVideo ? 'video' : 'other');
+                const icon = entry.is_dir
+                    ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>`
+                    : isVideo
+                        ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>`
+                        : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+
+                let metaHtml = '';
+                // For folders, file_count is the number of videos inside; for videos it's 1
+                const fileCount = entry.is_dir ? (entry.file_count || 0) : (isVideo ? 1 : 0);
+                if (entry.is_dir) {
+                    const count = entry.file_count || 0;
+                    if (count > 0) {
+                        const size = formatBytes(entry.total_size || 0);
+                        metaHtml = `<span>${count} video${count !== 1 ? 's' : ''}</span><span>${size}</span>`;
+                    }
+                } else if (isVideo) {
+                    const vi = entry.video_info;
+                    const codec = vi.video_codec?.toLowerCase() || '';
+                    let codecClass = 'h264';
+                    if (codec.includes('hevc') || codec.includes('h265')) {
+                        codecClass = 'hevc';
+                    } else if (codec.includes('av1')) {
+                        codecClass = 'av1';
+                    }
+                    const hdrBadge = vi.is_hdr ? '<span class="codec-badge hdr">HDR</span>' : '';
+                    metaHtml = `<span class="codec-badge ${codecClass}">${vi.video_codec}</span>${hdrBadge}<span>${vi.width}x${vi.height}</span>`;
+                }
+
+                const isSelected = selectedPaths.has(entry.path);
+                if (isSelected && !selectedFileCounts.has(entry.path)) {
+                    selectedFileCounts.set(entry.path, fileCount);
+                }
+
+                return `<li class="file-item${isSelected ? ' selected' : ''}" data-path="${entry.path}" data-is-dir="${entry.is_dir}" onclick="handleFileClick(this, event)">
+                    ${isSelectable ? `<input type="checkbox" class="file-checkbox" onclick="handleCheckbox(this, event)" data-path="${entry.path}" data-file-count="${fileCount}" ${isSelected ? 'checked' : ''}>` : '<div style="width: 18px"></div>'}
+                    <div class="file-icon ${iconClass}">${icon}</div>
+                    <div class="file-info">
+                        <div class="file-name">${entry.name}</div>
+                        <div class="file-meta">${metaHtml}</div>
+                    </div>
+                    ${entry.is_dir ? '' : `<div class="file-size">${formatBytes(entry.size)}</div>`}
+                </li>`;
+            }).join('');
+
+            updateButtons();
+        }
+
+        function toggleDropdownMenu(panelId, event) {
+            event.stopPropagation();
+            const trigger = event.currentTarget;
+            const panel = document.getElementById(panelId);
+            const isOpen = panel.classList.contains('open');
+
+            if (!isOpen) {
+                const rect = trigger.getBoundingClientRect();
+                const menuHeight = panel.scrollHeight || 200;
+                const spaceBelow = window.innerHeight - rect.bottom - 16;
+                const spaceAbove = rect.top - 16;
+                const openUpward = spaceBelow < menuHeight && spaceAbove > spaceBelow;
+
+                panel.classList.toggle('open-upward', openUpward);
+                panel.style.right = (window.innerWidth - rect.right) + 'px';
+
+                const availableSpace = openUpward ? spaceAbove : spaceBelow;
+                if (menuHeight > availableSpace) {
+                    panel.style.maxHeight = availableSpace + 'px';
+                    panel.style.overflowY = 'auto';
+                } else {
+                    panel.style.maxHeight = '';
+                    panel.style.overflowY = '';
+                }
+
+                if (openUpward) {
+                    panel.style.top = 'auto';
+                    panel.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+                } else {
+                    panel.style.top = (rect.bottom + 6) + 'px';
+                    panel.style.bottom = 'auto';
+                }
+            }
+
+            panel.classList.toggle('open');
+        }
+
+        function closeDropdownMenu(panelId) {
+            const panel = document.getElementById(panelId);
+            panel.classList.remove('open');
+            panel.classList.remove('open-upward');
+        }
+
+        function selectBrowseSort(sortBy) {
+            if (sortBy === browseSortBy) {
+                browseSortAsc = !browseSortAsc;
+            } else {
+                browseSortBy = sortBy;
+                browseSortAsc = false;
+            }
+            updateBrowseMenuDisplay();
+            if (lastBrowseEntries && lastBrowseEntries.length > 0) {
+                renderBrowseEntries(sortBrowseEntries(lastBrowseEntries));
+            }
+            closeDropdownMenu('browse-menu-panel');
+        }
+
+        function updateBrowseMenuDisplay() {
+            const label = document.getElementById('browse-menu-label');
+            const sortLabels = {
+                'name': 'File Name',
+                'size': 'Size'
+            };
+            if (label) {
+                label.textContent = sortLabels[browseSortBy] || 'File Name';
+            }
+            document.querySelectorAll('#browse-menu-panel .dropdown-menu-item[data-sort]').forEach(item => {
+                const isActive = item.dataset.sort === browseSortBy;
+                item.classList.toggle('active', isActive);
+                const arrowSpan = item.querySelector('.sort-arrow');
+                if (arrowSpan) {
+                    arrowSpan.textContent = isActive ? (browseSortAsc ? '↑' : '↓') : '↓';
+                }
+            });
+        }
+
+        function toggleJobDetails(jobId) {
+            const details = document.getElementById('smartshrink-details-' + jobId);
+            const toggle = document.querySelector(`.job-details-toggle[data-job-id="${jobId}"]`);
+            if (!details || !toggle) return;
+
+            const icon = toggle.querySelector('.toggle-icon');
+            if (expandedJobDetails.has(jobId)) {
+                expandedJobDetails.delete(jobId);
+                details.style.display = 'none';
+                if (icon) icon.textContent = '▶';
+            } else {
+                expandedJobDetails.add(jobId);
+                details.style.display = 'block';
+                if (icon) icon.textContent = '▼';
+            }
+        }
+
+        async function browse(path = '') {
+            try {
+                const url = path ? `/api/browse?path=${encodeURIComponent(path)}` : '/api/browse';
+                const resp = await fetch(url);
+                const data = await resp.json();
+
+                currentPath = data.path;
+                selectedPaths.clear();
+                selectedFileCounts.clear();
+                updateButtons();
+
+                // Update breadcrumb
+                const breadcrumb = document.getElementById('breadcrumb');
+
+                // Store media root on first browse (when at root, there's no parent)
+                if (!mediaRoot || !data.parent) {
+                    mediaRoot = data.path;
+                }
+
+                let crumbs = `<a href="#" onclick="browse(''); return false;">Home</a>`;
+
+                if (data.path !== mediaRoot) {
+                    // Get the relative path from media root
+                    const relativePath = data.path.substring(mediaRoot.length);
+                    const segments = relativePath.split('/').filter(s => s);
+                    const MAX_VISIBLE_SEGMENTS = 3;
+
+                    if (segments.length > MAX_VISIBLE_SEGMENTS) {
+                        // Collapse middle segments: Home / ... / last 3 segments
+                        crumbs += `<span class="breadcrumb-sep">/</span>`;
+                        crumbs += `<span class="breadcrumb-collapsed">...</span>`;
+
+                        const startIndex = segments.length - MAX_VISIBLE_SEGMENTS;
+                        let cumulativePath = mediaRoot + '/' + segments.slice(0, startIndex).join('/');
+
+                        for (let i = startIndex; i < segments.length; i++) {
+                            cumulativePath += '/' + segments[i];
+                            crumbs += `<span class="breadcrumb-sep">/</span>`;
+
+                            if (i === segments.length - 1) {
+                                crumbs += `<span class="breadcrumb-current">${segments[i]}</span>`;
+                            } else {
+                                crumbs += `<a href="#" onclick="browse('${cumulativePath}'); return false;">${segments[i]}</a>`;
+                            }
+                        }
+                    } else {
+                        // Show full path
+                        let cumulativePath = mediaRoot;
+                        segments.forEach((segment, index) => {
+                            cumulativePath += '/' + segment;
+                            crumbs += `<span class="breadcrumb-sep">/</span>`;
+
+                            if (index === segments.length - 1) {
+                                crumbs += `<span class="breadcrumb-current">${segment}</span>`;
+                            } else {
+                                crumbs += `<a href="#" onclick="browse('${cumulativePath}'); return false;">${segment}</a>`;
+                            }
+                        });
+                    }
+                }
+
+                breadcrumb.innerHTML = crumbs;
+
+                // Update file list
+                lastBrowseEntries = data.entries || [];
+                renderBrowseEntries(sortBrowseEntries(lastBrowseEntries));
+                updateBrowseMenuDisplay();
+
+            } catch (err) {
+                console.error('Browse error:', err);
+            }
+        }
+
+        // Refresh browser by clearing cache and re-browsing current path
+        async function refreshBrowser() {
+            const btn = document.getElementById('refresh-btn');
+            if (!btn || btn.classList.contains('refreshing')) return;
+
+            const minDuration = 250;
+            const start = performance.now();
+            btn.classList.add('refreshing');
+
+            try {
+                await fetch('/api/cache/clear', { method: 'POST' });
+                await browse(currentPath);
+            } catch (err) {
+                console.error('Refresh error:', err);
+            } finally {
+                const elapsed = performance.now() - start;
+                const remaining = Math.max(0, minDuration - elapsed);
+                setTimeout(() => btn.classList.remove('refreshing'), remaining);
+            }
+        }
+
+        function handleCheckbox(checkbox, event) {
+            event.stopPropagation();
+            const path = checkbox.dataset.path;
+            const fileCount = parseInt(checkbox.dataset.fileCount) || 1;
+            const row = checkbox.closest('.file-item');
+
+            if (checkbox.checked) {
+                selectedPaths.add(path);
+                selectedFileCounts.set(path, fileCount);
+                row.classList.add('selected');
+            } else {
+                selectedPaths.delete(path);
+                selectedFileCounts.delete(path);
+                row.classList.remove('selected');
+            }
+            updateButtons();
+        }
+
+        function handleFileClick(el, event) {
+            if (event.target.classList.contains('file-checkbox')) return;
+
+            const path = el.dataset.path;
+            const isDir = el.dataset.isDir === 'true';
+
+            if (isDir) {
+                browse(path);
+            } else {
+                const checkbox = el.querySelector('.file-checkbox');
+                if (checkbox) {
+                    const fileCount = parseInt(checkbox.dataset.fileCount) || 1;
+                    checkbox.checked = !checkbox.checked;
+                    if (checkbox.checked) {
+                        selectedPaths.add(path);
+                        selectedFileCounts.set(path, fileCount);
+                        el.classList.add('selected');
+                    } else {
+                        selectedPaths.delete(path);
+                        selectedFileCounts.delete(path);
+                        el.classList.remove('selected');
+                    }
+                    updateButtons();
+                }
+            }
+        }
+
+        function toggleSelectAll(checkbox) {
+            const isChecked = checkbox.checked;
+            const allCheckboxes = document.querySelectorAll('.file-item .file-checkbox');
+
+            // Batch DOM operations: collect all data first (reads), then do all updates (writes)
+            const items = [];
+            allCheckboxes.forEach(cb => {
+                items.push({
+                    cb,
+                    row: cb.closest('.file-item'),
+                    path: cb.dataset.path,
+                    fileCount: parseInt(cb.dataset.fileCount) || 1
+                });
+            });
+
+            // Clear or populate selectedPaths in one go
+            if (isChecked) {
+                items.forEach(({cb, row, path, fileCount}) => {
+                    cb.checked = true;
+                    row.classList.add('selected');
+                    selectedPaths.add(path);
+                    selectedFileCounts.set(path, fileCount);
+                });
+            } else {
+                selectedPaths.clear();
+                selectedFileCounts.clear();
+                items.forEach(({cb, row}) => {
+                    cb.checked = false;
+                    row.classList.remove('selected');
+                });
+            }
+            updateButtons();
+        }
+
+        function updateButtons() {
+            const hasSelection = selectedPaths.size > 0;
+            document.getElementById('start-btn').disabled = !hasSelection;
+
+            const summary = document.getElementById('selection-summary');
+            if (hasSelection) {
+                summary.textContent = `${selectedPaths.size} file${selectedPaths.size > 1 ? 's' : ''} selected`;
+            } else {
+                summary.textContent = '';
+            }
+
+            // Update select-all checkbox using cached count (avoids O(n) DOM query)
+            const selectAllCheckbox = document.getElementById('select-all-checkbox');
+            if (totalSelectableCount > 0) {
+                const allChecked = selectedPaths.size === totalSelectableCount;
+                const someChecked = selectedPaths.size > 0;
+                selectAllCheckbox.checked = allChecked;
+                selectAllCheckbox.indeterminate = someChecked && !allChecked;
+            }
+        }
+
+        async function startJobs() {
+            if (selectedPaths.size === 0) return;
+
+            const banner = document.getElementById('processing-banner');
+            try {
+                const preset = selectedPresetId;
+                const smartshrinkQuality = preset.startsWith('smartshrink-') ? selectedQuality : '';
+
+                // Sum up total files: for folders use their file_count, for files use 1
+                let totalFiles = 0;
+                for (const count of selectedFileCounts.values()) {
+                    totalFiles += count;
+                }
+
+                // Show processing indicator BEFORE fetch to avoid race condition
+                // (backend may send jobs_added SSE before fetch returns)
+                document.getElementById('processing-text').textContent =
+                    `Processing ${totalFiles} file${totalFiles !== 1 ? 's' : ''}...`;
+                banner.classList.remove('hidden');
+
+                const resp = await fetch('/api/jobs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        paths: Array.from(selectedPaths),
+                        preset_id: preset,
+                        smartshrink_quality: smartshrinkQuality
+                    })
+                });
+                const data = await resp.json();
+
+                // Check for validation errors (bad request)
+                if (data.error) {
+                    banner.classList.add('hidden');
+                    alert(data.error);
+                    return;
+                }
+
+                // Clear selections immediately - jobs will appear via SSE as they're processed
+                selectedPaths.clear();
+                selectedFileCounts.clear();
+                document.querySelectorAll('.file-item.selected').forEach(el => {
+                    el.classList.remove('selected');
+                    const cb = el.querySelector('.file-checkbox');
+                    if (cb) cb.checked = false;
+                });
+                updateButtons();
+
+                // Reset select-all checkbox
+                const selectAllCheckbox = document.getElementById('select-all-checkbox');
+                if (selectAllCheckbox) {
+                    selectAllCheckbox.checked = false;
+                    selectAllCheckbox.indeterminate = false;
+                }
+
+            } catch (err) {
+                banner.classList.add('hidden');
+                console.error('Start jobs error:', err);
+            }
+        }
+
+        async function cancelJob(id) {
+            try {
+                await fetch(`/api/jobs/${id}`, { method: 'DELETE' });
+            } catch (err) {
+                console.error('Cancel error:', err);
+            }
+        }
+
+        async function retryJob(id) {
+            try {
+                const resp = await fetch(`/api/jobs/${id}/retry`, { method: 'POST' });
+                if (!resp.ok) {
+                    const data = await resp.json();
+                    alert(data.error || 'Failed to retry job');
+                }
+                // Job removal handled via SSE 'removed' event
+            } catch (err) {
+                console.error('Retry error:', err);
+            }
+        }
+
+        function clearQueue() {
+            const message = queueFilter === 'all'
+                ? 'This will remove all non-active jobs from the queue (including pending jobs). Your active jobs will not be affected.'
+                : `This will remove all ${queueFilter} jobs from the queue.`;
+
+            showConfirmModal(
+                'Clear Jobs',
+                message,
+                async () => {
+                    try {
+                        const url = queueFilter === 'all'
+                            ? '/api/jobs/clear'
+                            : `/api/jobs/clear?status=${queueFilter}`;
+                        await fetch(url, { method: 'POST' });
+                        refreshJobs();
+                    } catch (err) {
+                        console.error('Clear error:', err);
+                    }
+                }
+            );
+        }
+
+        // Stop/Resume Queue
+        let queuePaused = false;
+
+        function updateStopResumeButton() {
+            const btn = document.getElementById('stop-resume-btn');
+            if (!btn) return;
+            btn.textContent = queuePaused ? 'Resume' : 'Stop All';
+        }
+
+        function toggleStopResume() {
+            if (queuePaused) {
+                resumeQueue();
+            } else {
+                pauseQueue();
+            }
+        }
+
+        function pauseQueue() {
+            // Check if there are running jobs first
+            const hasRunningJobs = allSortedJobs.some(j => j.status === 'running');
+
+            if (!hasRunningJobs) {
+                showQueueError('No active jobs to stop');
+                return;
+            }
+
+            showConfirmModal(
+                'Stop Queue',
+                'This will stop all running jobs. They will return to the queue but must restart from the beginning.',
+                async () => {
+                    try {
+                        await fetch('/api/queue/pause', { method: 'POST' });
+                        queuePaused = true;
+                        updateStopResumeButton();
+                        refreshJobs();
+                    } catch (err) {
+                        console.error('Pause error:', err);
+                    }
+                }
+            );
+        }
+
+        async function resumeQueue() {
+            try {
+                await fetch('/api/queue/resume', { method: 'POST' });
+                queuePaused = false;
+                updateStopResumeButton();
+                refreshJobs();
+            } catch (err) {
+                console.error('Resume error:', err);
+            }
+        }
+
+        function showQueueError(message) {
+            const el = document.getElementById('queue-error');
+            if (!el) return;
+            el.textContent = message;
+            setTimeout(() => {
+                el.textContent = '';
+            }, 3000);
+        }
+
+        // Confirm Modal
+        let confirmCallback = null;
+
+        function showConfirmModal(title, message, onConfirm) {
+            document.getElementById('confirm-modal-title').textContent = title;
+            document.getElementById('confirm-modal-message').textContent = message;
+            confirmCallback = onConfirm;
+            document.getElementById('confirm-modal').classList.add('active');
+        }
+
+        function closeConfirmModal(event) {
+            // If called from overlay click, only close if clicking the overlay itself
+            if (event && event.target !== event.currentTarget) return;
+            document.getElementById('confirm-modal').classList.remove('active');
+            confirmCallback = null;
+        }
+
+        document.getElementById('confirm-modal-action').addEventListener('click', () => {
+            if (confirmCallback) {
+                confirmCallback();
+            }
+            closeConfirmModal();
+        });
+
+        async function refreshJobs() {
+            try {
+                const resp = await fetch('/api/jobs');
+                const data = await resp.json();
+                updateJobs(data.jobs);
+                updateStats(data.stats);
+            } catch (err) {
+                console.error('Refresh error:', err);
+            }
+        }
+
+        // Helper to render a single job's HTML
+        function renderJobHTML(job) {
+            const filename = job.input_path.split('/').pop();
+            const isAnalyzing = job.status === 'running' && job.phase === 'analyzing';
+            const isInitializing = job.status === 'running' && !isAnalyzing && job.progress === 0 && job.speed === 0;
+            const statusClass = isAnalyzing ? 'analyzing' : (isInitializing ? 'initializing' : job.status);
+            const statusLabel = isAnalyzing ? 'Analyzing' : (isInitializing ? 'Initializing' : job.status.charAt(0).toUpperCase() + job.status.slice(1));
+
+            let detailsHtml = '';
+            if (job.status === 'running') {
+                if (isAnalyzing) {
+                    detailsHtml = '<span class="job-detail">Finding optimal quality...</span>';
+                } else if (isInitializing) {
+                    detailsHtml = '<span class="job-detail">Starting encoder...</span>';
+                } else {
+                    detailsHtml = `
+                        <span class="job-detail"><span class="job-detail-value">${job.progress.toFixed(1)}%</span></span>
+                        <span class="job-detail"><span class="job-detail-value">${job.speed.toFixed(2)}x</span></span>
+                        <span class="job-detail">ETA: <span class="job-detail-value">${job.eta || '...'}</span></span>
+                    `;
+                }
+            } else if (job.status === 'complete') {
+                detailsHtml = `
+                    <span class="job-detail job-saved">Saved <span class="job-detail-value">${formatBytes(job.space_saved)}</span></span>
+                    <span class="job-detail">${formatBytes(job.input_size)} → ${formatBytes(job.output_size)}</span>
+                    ${job.transcode_secs ? `<span class="job-detail">in <span class="job-detail-value">${formatDuration(job.transcode_secs)}</span></span>` : ''}
+                `;
+            } else if (job.status === 'pending' && job.input_size) {
+                detailsHtml = `<span class="job-detail">${formatBytes(job.input_size)}</span>`;
+            }
+
+            return `
+                <div class="job-item" data-job-id="${job.id}">
+                    <div class="job-header">
+                        <span class="job-name" title="${job.input_path}">${filename}</span>
+                        <div class="job-badges">
+                            ${job.is_hdr ? '<span class="job-badge hdr">HDR</span>' : ''}
+                            <span class="job-badge ${job.is_hardware ? 'hardware' : 'software'}">${job.is_hardware ? 'HW' : 'SW'}</span>
+                            <span class="job-badge ${statusClass}">${statusLabel}</span>
+                        </div>
+                    </div>
+                    ${job.status === 'running' ? `
+                        <div class="job-progress">
+                            <div class="progress-bar">
+                                <div class="progress-fill ${isAnalyzing ? 'analyzing' : (isInitializing ? 'initializing' : '')}" style="width: ${(isAnalyzing || isInitializing) ? 100 : job.progress}%"></div>
+                            </div>
+                        </div>
+                    ` : ''}
+                    <div class="job-details">${detailsHtml}</div>
+                    ${job.status === 'complete' && job.vmaf_score > 0 ? `
+                        <div class="job-details-toggle" data-job-id="${job.id}" onclick="toggleJobDetails('${job.id}')">
+                            <span class="toggle-icon">${expandedJobDetails.has(job.id) ? '▼' : '▶'}</span> SmartShrink Details
+                        </div>
+                        <div class="smartshrink-details" id="smartshrink-details-${job.id}" style="display: ${expandedJobDetails.has(job.id) ? 'block' : 'none'};">
+                            ${job.smartshrink_quality ? `<div class="smartshrink-detail"><span class="smartshrink-label">Quality Tier:</span> <span class="smartshrink-value">${job.smartshrink_quality}</span></div>` : ''}
+                            <div class="smartshrink-detail"><span class="smartshrink-label">VMAF Score:</span> <span class="smartshrink-value">${job.vmaf_score.toFixed(1)}</span></div>
+                            ${job.selected_crf > 0 ? `<div class="smartshrink-detail"><span class="smartshrink-label">CRF:</span> <span class="smartshrink-value">${job.selected_crf}</span></div>` : ''}
+                            ${job.quality_mod > 0 ? `<div class="smartshrink-detail"><span class="smartshrink-label">Bitrate:</span> <span class="smartshrink-value">${(job.quality_mod * 100).toFixed(0)}%</span></div>` : ''}
+                        </div>
+                    ` : ''}
+                    ${job.status === 'failed' ? `<div class="job-error">${job.error}</div>` : ''}
+                    ${job.status === 'skipped' ? `<div class="job-warning">${job.error}</div>` : ''}
+                    ${job.status === 'pending' || job.status === 'running' ? `
+                        <div class="job-actions">
+                            <button class="btn btn-secondary btn-sm" onclick="cancelJob('${job.id}')">Cancel</button>
+                        </div>
+                    ` : ''}
+                    ${job.status === 'failed' ? `
+                        <div class="job-actions">
+                            <button class="btn btn-secondary btn-sm" onclick="retryJob('${job.id}')">Retry</button>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        // Incremental DOM update functions (avoid full rebuilds)
+        function updateJobProgress(jobId, progress, speed, eta, phase) {
+            const el = document.querySelector(`.job-item[data-job-id="${jobId}"]`);
+            if (!el) return;
+
+            // Get current job state
+            const job = allSortedJobs.find(j => j.id === jobId);
+            const wasAnalyzing = job && job.phase === 'analyzing';
+            const isAnalyzing = phase === 'analyzing';
+
+            // If phase changed (entering or leaving analyzing), do a full re-render
+            if (wasAnalyzing !== isAnalyzing) {
+                if (job) {
+                    job.progress = progress;
+                    job.speed = speed;
+                    job.eta = eta;
+                    job.phase = phase;
+                }
+                const temp = document.createElement('div');
+                temp.innerHTML = renderJobHTML(job || { id: jobId, status: 'running', progress, speed, eta, phase });
+                el.replaceWith(temp.firstElementChild);
+                return;
+            }
+
+            // If analyzing, don't update progress further - keep the analyzing state
+            if (isAnalyzing) {
+                return;
+            }
+
+            // Update progress bar
+            const progressFill = el.querySelector('.progress-fill');
+            if (progressFill) {
+                progressFill.style.width = progress + '%';
+                progressFill.classList.remove('initializing');
+                progressFill.classList.remove('analyzing');
+            }
+
+            // Update status badge if transitioning from initializing to running
+            // (initializing = progress=0 && speed=0, running = progress>0 || speed>0)
+            const statusBadge = el.querySelector('.job-badge.initializing');
+            if (statusBadge && (progress > 0 || speed > 0)) {
+                statusBadge.classList.remove('initializing');
+                statusBadge.classList.add('running');
+                statusBadge.textContent = 'Running';
+            }
+
+            // Update text values - find the job-details container
+            const detailsEl = el.querySelector('.job-details');
+            if (detailsEl) {
+                detailsEl.innerHTML = `
+                    <span class="job-detail"><span class="job-detail-value">${progress.toFixed(1)}%</span></span>
+                    <span class="job-detail"><span class="job-detail-value">${speed.toFixed(2)}x</span></span>
+                    <span class="job-detail">ETA: <span class="job-detail-value">${eta || '...'}</span></span>
+                `;
+            }
+
+            // Update in allSortedJobs array for consistency
+            if (job) {
+                job.progress = progress;
+                job.speed = speed;
+                job.eta = eta;
+                job.phase = phase;
+            }
+        }
+
+        function updateJobStatus(updatedJob) {
+            const statusOrder = { running: 0, pending: 1, failed: 2, skipped: 3, complete: 4, cancelled: 5 };
+
+            // Find current index before update
+            const oldIdx = allSortedJobs.findIndex(j => j.id === updatedJob.id);
+
+            // Update or add job in array
+            if (oldIdx !== -1) {
+                allSortedJobs[oldIdx] = updatedJob;
+            } else {
+                allSortedJobs.push(updatedJob);
+            }
+
+            // Re-sort array
+            allSortedJobs.sort((a, b) => {
+                const orderA = statusOrder[a.status] ?? 5;
+                const orderB = statusOrder[b.status] ?? 5;
+                if (orderA !== orderB) return orderA - orderB;
+
+                // Secondary sort by timestamp
+                // Pending: oldest first (FIFO). Others: most recent first.
+                if (a.status === 'pending') {
+                    return (a.created_at || '').localeCompare(b.created_at || '');
+                }
+                // Running/Complete/Failed/Cancelled: most recent first
+                const timeA = a.completed_at || a.started_at || '';
+                const timeB = b.completed_at || b.started_at || '';
+                return timeB.localeCompare(timeA);
+            });
+
+            // Find new position after sort
+            const newIdx = allSortedJobs.findIndex(j => j.id === updatedJob.id);
+
+            // Find existing DOM element
+            const container = document.getElementById('queue-list');
+            const existingEl = container.querySelector(`.job-item[data-job-id="${updatedJob.id}"]`);
+
+            // Check if job matches current filter
+            const matchesFilter = queueFilter === 'all' || updatedJob.status === queueFilter;
+
+            // If element not in DOM
+            if (!existingEl) {
+                // If job now matches filter, add it to the view
+                if (matchesFilter) {
+                    // Remove empty state if present
+                    const emptyState = container.querySelector('.queue-empty');
+                    if (emptyState) emptyState.remove();
+
+                    // Find position in filtered list and add
+                    const filteredJobs = getFilteredJobs();
+                    const filteredIdx = filteredJobs.findIndex(j => j.id === updatedJob.id);
+
+                    if (filteredIdx !== -1 && filteredIdx < displayedJobCount + 1) {
+                        const temp = document.createElement('div');
+                        temp.innerHTML = renderJobHTML(updatedJob);
+                        const newEl = temp.firstElementChild;
+
+                        if (filteredIdx === 0) {
+                            const firstJob = container.querySelector('.job-item');
+                            if (firstJob) {
+                                firstJob.before(newEl);
+                            } else {
+                                container.appendChild(newEl);
+                            }
+                        } else {
+                            const prevJob = filteredJobs[filteredIdx - 1];
+                            const prevEl = container.querySelector(`.job-item[data-job-id="${prevJob.id}"]`);
+                            if (prevEl) {
+                                prevEl.after(newEl);
+                            } else {
+                                container.appendChild(newEl);
+                            }
+                        }
+                        displayedJobCount++;
+                    }
+                }
+                return;
+            }
+
+            // If job no longer matches current filter, just remove it
+            if (!matchesFilter) {
+                existingEl.remove();
+                displayedJobCount--;
+                // Show empty state if no more jobs visible
+                if (displayedJobCount === 0) {
+                    loadMoreJobs();
+                }
+                return;
+            }
+
+            // Create new element HTML
+            const temp = document.createElement('div');
+            temp.innerHTML = renderJobHTML(updatedJob);
+            const newEl = temp.firstElementChild;
+
+            // If position unchanged, just replace content
+            if (oldIdx === newIdx) {
+                existingEl.replaceWith(newEl);
+                return;
+            }
+
+            // Position changed - remove old element
+            existingEl.remove();
+
+            // Check if new position is within displayed range
+            if (newIdx >= displayedJobCount) {
+                // Job moved beyond visible range, don't re-insert
+                displayedJobCount--;
+                return;
+            }
+
+            // Insert at new position
+            if (newIdx === 0) {
+                // Insert at beginning (before first .job-item, after any banners)
+                const firstJob = container.querySelector('.job-item');
+                if (firstJob) {
+                    firstJob.before(newEl);
+                } else {
+                    container.appendChild(newEl);
+                }
+            } else {
+                // Insert after previous job
+                const prevJob = allSortedJobs[newIdx - 1];
+                const prevEl = container.querySelector(`.job-item[data-job-id="${prevJob.id}"]`);
+                if (prevEl) {
+                    prevEl.after(newEl);
+                } else {
+                    // Previous job not rendered, append (edge case)
+                    container.appendChild(newEl);
+                }
+            }
+        }
+
+        function addJobToList(job) {
+            // Check if job already exists
+            if (allSortedJobs.find(j => j.id === job.id)) return;
+
+            allSortedJobs.push(job);
+            // Re-sort
+            const statusOrder = { running: 0, pending: 1, failed: 2, skipped: 3, complete: 4, cancelled: 5 };
+            allSortedJobs.sort((a, b) => {
+                const orderA = statusOrder[a.status] ?? 5;
+                const orderB = statusOrder[b.status] ?? 5;
+                if (orderA !== orderB) return orderA - orderB;
+
+                // Secondary sort by timestamp
+                // Pending: oldest first (FIFO). Others: most recent first.
+                if (a.status === 'pending') {
+                    return (a.created_at || '').localeCompare(b.created_at || '');
+                }
+                // Running/Complete/Failed/Cancelled: most recent first
+                const timeA = a.completed_at || a.started_at || '';
+                const timeB = b.completed_at || b.started_at || '';
+                return timeB.localeCompare(timeA);
+            });
+
+            // Remove empty state if present
+            const container = document.getElementById('queue-list');
+            const emptyState = container.querySelector('.queue-empty');
+            if (emptyState) emptyState.remove();
+
+            // Find insertion point and insert
+            const newIdx = allSortedJobs.findIndex(j => j.id === job.id);
+            const temp = document.createElement('div');
+            temp.innerHTML = renderJobHTML(job);
+
+            if (newIdx === 0 || container.children.length === 0) {
+                container.prepend(temp.firstElementChild);
+            } else {
+                const prevJob = allSortedJobs[newIdx - 1];
+                const prevEl = container.querySelector(`.job-item[data-job-id="${prevJob.id}"]`);
+                if (prevEl) {
+                    prevEl.after(temp.firstElementChild);
+                } else {
+                    container.appendChild(temp.firstElementChild);
+                }
+            }
+            displayedJobCount++;
+        }
+
+        // Infinite scroll state
+        const JOBS_PER_PAGE = 50;
+        let allSortedJobs = [];
+        let displayedJobCount = 0;
+        let queueFilter = 'all'; // 'all', 'running', 'pending', 'failed', 'skipped', 'complete', 'cancelled'
+        const expandedJobDetails = new Set(); // Track which jobs have expanded details
+
+        // Sort state
+        let queueSortBy = 'default'; // 'default', 'filename', 'input_size', 'output_size', 'space_saved'
+        let queueSortAsc = false; // false = descending, true = ascending
+
+        // Queue menu functions
+        // toggleQueueMenu and closeQueueMenu replaced by shared
+        // toggleDropdownMenu() and closeDropdownMenu() in browse sort section
+
+        function selectFilter(filter) {
+            queueFilter = filter;
+            displayedJobCount = 0;
+            const container = document.getElementById('queue-list');
+            container.innerHTML = '';
+            loadMoreJobs();
+            // Disable Clear button for running filter (can't clear running jobs)
+            document.getElementById('clear-btn').disabled = filter === 'running';
+            updateQueueMenuDisplay();
+            closeDropdownMenu('queue-menu-panel');
+        }
+
+        function selectSort(sortBy) {
+            if (sortBy === queueSortBy) {
+                // Same sort selected - toggle direction
+                queueSortAsc = !queueSortAsc;
+            } else {
+                // New sort selected - default to descending
+                queueSortBy = sortBy;
+                queueSortAsc = false;
+            }
+            updateQueueMenuDisplay();
+            saveSortPreference();
+            applySortAndRender();
+            closeDropdownMenu('queue-menu-panel');
+        }
+
+        function loadSortPreference() {
+            const savedSortBy = localStorage.getItem('shrinkray_sort_by');
+            const savedSortAsc = localStorage.getItem('shrinkray_sort_asc');
+            if (savedSortBy) {
+                queueSortBy = savedSortBy;
+            }
+            if (savedSortAsc !== null) {
+                queueSortAsc = savedSortAsc === 'true';
+            }
+            updateQueueMenuDisplay();
+        }
+
+        function saveSortPreference() {
+            localStorage.setItem('shrinkray_sort_by', queueSortBy);
+            localStorage.setItem('shrinkray_sort_asc', queueSortAsc.toString());
+        }
+
+        function updateQueueMenuDisplay() {
+            const filterLabels = {
+                'all': 'All',
+                'running': 'Running',
+                'pending': 'Pending',
+                'failed': 'Failed',
+                'complete': 'Complete',
+                'skipped': 'Skipped',
+                'cancelled': 'Cancelled'
+            };
+
+            // Update trigger button label
+            const label = document.getElementById('queue-menu-label');
+            label.textContent = filterLabels[queueFilter] || 'All';
+
+            // Update filter items
+            document.querySelectorAll('#queue-menu-panel .dropdown-menu-item[data-filter]').forEach(item => {
+                item.classList.toggle('active', item.dataset.filter === queueFilter);
+            });
+
+            // Update sort items with arrows
+            const arrow = queueSortAsc ? '↑' : '↓';
+            const sortLabels = {
+                'default': 'Default',
+                'filename': 'File Name',
+                'input_size': 'Pre-Transcode Size',
+                'output_size': 'Post-Transcode Size',
+                'space_saved': 'Space Saved'
+            };
+
+            document.querySelectorAll('#queue-menu-panel .dropdown-menu-item[data-sort]').forEach(item => {
+                const sortKey = item.dataset.sort;
+                const isActive = sortKey === queueSortBy;
+                item.classList.toggle('active', isActive);
+                const arrowSpan = item.querySelector('.sort-arrow');
+                if (arrowSpan) {
+                    arrowSpan.textContent = isActive ? arrow : '↓';
+                }
+            });
+        }
+
+        // Close any open dropdown when clicking outside
+        document.addEventListener('click', (event) => {
+            ['queue-menu', 'browse-menu'].forEach(menuId => {
+                const menu = document.getElementById(menuId);
+                if (menu && !menu.contains(event.target)) {
+                    const panel = menu.querySelector('.dropdown-menu-panel');
+                    if (panel) {
+                        panel.classList.remove('open');
+                        panel.classList.remove('open-upward');
+                    }
+                }
+            });
+        });
+
+        function applySortAndRender() {
+            // Re-sort the jobs array
+            allSortedJobs = sortJobs([...allSortedJobs]);
+            // Re-render the list
+            displayedJobCount = 0;
+            const container = document.getElementById('queue-list');
+            container.innerHTML = '';
+            loadMoreJobs();
+        }
+
+        function sortJobs(jobs) {
+            const statusOrder = { running: 0, pending: 1, failed: 2, skipped: 3, complete: 4, cancelled: 5 };
+
+            return jobs.sort((a, b) => {
+                if (queueSortBy === 'default') {
+                    // Default: status-based sort, then timestamp
+                    const orderA = statusOrder[a.status] ?? 5;
+                    const orderB = statusOrder[b.status] ?? 5;
+                    let result;
+                    if (orderA !== orderB) {
+                        result = orderA - orderB;
+                    } else {
+                        // Secondary sort by timestamp
+                        if (a.status === 'pending') {
+                            result = (a.created_at || '').localeCompare(b.created_at || '');
+                        } else {
+                            const timeA = a.completed_at || a.started_at || '';
+                            const timeB = b.completed_at || b.started_at || '';
+                            result = timeB.localeCompare(timeA);
+                        }
+                    }
+                    // ↓ = natural order, ↑ = reverse
+                    return queueSortAsc ? -result : result;
+                }
+
+                if (queueSortBy === 'filename') {
+                    const nameA = (a.input_path || '').split('/').pop().toLowerCase();
+                    const nameB = (b.input_path || '').split('/').pop().toLowerCase();
+                    const result = nameA.localeCompare(nameB);
+                    // ↓ = A-Z, ↑ = Z-A
+                    return queueSortAsc ? -result : result;
+                }
+
+                if (queueSortBy === 'input_size') {
+                    const sizeA = a.input_size || 0;
+                    const sizeB = b.input_size || 0;
+                    const result = sizeA - sizeB;
+                    // ↓ = largest first, ↑ = smallest first
+                    return queueSortAsc ? result : -result;
+                }
+
+                if (queueSortBy === 'output_size') {
+                    // Jobs without output_size go to bottom
+                    const hasA = a.output_size > 0;
+                    const hasB = b.output_size > 0;
+                    if (hasA && !hasB) return -1;
+                    if (!hasA && hasB) return 1;
+                    if (!hasA && !hasB) return 0;
+                    const result = a.output_size - b.output_size;
+                    // ↓ = largest first, ↑ = smallest first
+                    return queueSortAsc ? result : -result;
+                }
+
+                if (queueSortBy === 'space_saved') {
+                    // Jobs without space_saved go to bottom
+                    const hasA = a.space_saved !== undefined && a.space_saved !== null;
+                    const hasB = b.space_saved !== undefined && b.space_saved !== null;
+                    if (hasA && !hasB) return -1;
+                    if (!hasA && hasB) return 1;
+                    if (!hasA && !hasB) return 0;
+                    const result = a.space_saved - b.space_saved;
+                    // ↓ = largest first, ↑ = smallest first
+                    return queueSortAsc ? result : -result;
+                }
+
+                return 0;
+            });
+        }
+
+        function getFilteredJobs() {
+            if (queueFilter === 'all') return allSortedJobs;
+            return allSortedJobs.filter(j => j.status === queueFilter);
+        }
+
+        function updateJobs(jobs) {
+            const container = document.getElementById('queue-list');
+
+            // Save scroll position before DOM rebuild
+            const savedScrollTop = container.scrollTop;
+
+            if (!jobs || jobs.length === 0) {
+                allSortedJobs = [];
+                displayedJobCount = 0;
+                container.innerHTML = `
+                    <div class="queue-empty">
+                        <div class="queue-empty-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.3">
+                                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                <path d="M3 9h18"/>
+                                <path d="M9 21V9"/>
+                            </svg>
+                        </div>
+                        <div>No jobs in queue</div>
+                        <div style="font-size: 0.8125rem; margin-top: 4px; color: var(--text-tertiary)">Select files and start transcoding</div>
+                    </div>
+                `;
+                // No jobs, so not paused
+                queuePaused = false;
+                updateStopResumeButton();
+                return;
+            }
+
+            // Sort jobs using the current sort preference
+            allSortedJobs = sortJobs([...jobs]);
+
+            // Render initial batch
+            displayedJobCount = 0;
+            container.innerHTML = '';
+            loadMoreJobs();
+
+            // Restore scroll position after DOM rebuild
+            requestAnimationFrame(() => {
+                container.scrollTop = Math.min(savedScrollTop, container.scrollHeight - container.clientHeight);
+            });
+
+            // Sync Stop/Resume button state
+            const hasRunningJobs = jobs.some(j => j.status === 'running');
+            const hasPendingJobs = jobs.some(j => j.status === 'pending');
+
+            // If jobs are running, we're not paused
+            if (hasRunningJobs) {
+                queuePaused = false;
+            }
+            // If paused but no pending jobs, clear pause (nothing to resume)
+            if (queuePaused && !hasPendingJobs) {
+                queuePaused = false;
+            }
+            updateStopResumeButton();
+        }
+
+        function loadMoreJobs() {
+            const filteredJobs = getFilteredJobs();
+            const container = document.getElementById('queue-list');
+
+            // Show empty state if no jobs match filter
+            if (filteredJobs.length === 0 && displayedJobCount === 0) {
+                if (queueFilter === 'all') {
+                    // Full empty state for "All" filter
+                    container.innerHTML = `
+                        <div class="queue-empty">
+                            <div class="queue-empty-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.3">
+                                    <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                    <path d="M3 9h18"/>
+                                    <path d="M9 21V9"/>
+                                </svg>
+                            </div>
+                            <div>No jobs in queue</div>
+                            <div style="font-size: 0.8125rem; margin-top: 4px; color: var(--text-tertiary)">Select files and start transcoding</div>
+                        </div>
+                    `;
+                } else {
+                    // Filtered empty state
+                    container.innerHTML = `
+                        <div class="queue-empty">
+                            <div class="queue-empty-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.3">
+                                    <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                    <path d="M3 9h18"/>
+                                    <path d="M9 21V9"/>
+                                </svg>
+                            </div>
+                            <div>No ${queueFilter} jobs</div>
+                        </div>
+                    `;
+                }
+                return;
+            }
+
+            if (displayedJobCount >= filteredJobs.length) return;
+
+            const fragment = document.createDocumentFragment();
+            const temp = document.createElement('div');
+
+            const endIndex = Math.min(displayedJobCount + JOBS_PER_PAGE, filteredJobs.length);
+            for (let i = displayedJobCount; i < endIndex; i++) {
+                temp.innerHTML = renderJobHTML(filteredJobs[i]);
+                fragment.appendChild(temp.firstElementChild);
+            }
+
+            // Remove existing "load more" indicator if present
+            const existingIndicator = container.querySelector('.load-more-indicator');
+            if (existingIndicator) existingIndicator.remove();
+
+            container.appendChild(fragment);
+            displayedJobCount = endIndex;
+
+            // Add "scroll for more" indicator if there are more jobs
+            if (displayedJobCount < filteredJobs.length) {
+                const remaining = filteredJobs.length - displayedJobCount;
+                const indicator = document.createElement('div');
+                indicator.className = 'load-more-indicator';
+                indicator.style.cssText = 'text-align: center; padding: 16px; color: var(--text-secondary); font-size: 0.875rem;';
+                indicator.textContent = `Scroll for ${remaining.toLocaleString()} more jobs...`;
+                container.appendChild(indicator);
+            }
+        }
+
+        // Set up infinite scroll listener
+        (function setupInfiniteScroll() {
+            const container = document.getElementById('queue-list');
+            container.addEventListener('scroll', () => {
+                // Load more when scrolled near bottom (within 100px)
+                const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+                if (nearBottom && displayedJobCount < getFilteredJobs().length) {
+                    loadMoreJobs();
+                }
+            });
+        })();
+
+        function updateStats(stats) {
+            // Queue dropdown values
+            document.getElementById('stat-pending').textContent = stats.pending;
+            document.getElementById('stat-running').textContent = stats.running;
+
+            // Queue total (running + pending)
+            const inQueue = stats.running + stats.pending;
+            document.getElementById('stat-queue').textContent = inQueue;
+
+            // Apply running class if any jobs are running
+            const queueWrapper = document.getElementById('stat-queue-wrapper');
+            if (stats.running > 0) {
+                queueWrapper.classList.add('running');
+            } else {
+                queueWrapper.classList.remove('running');
+            }
+
+            // Complete count
+            document.getElementById('stat-complete').textContent = stats.complete || 0;
+
+            // Failed count
+            document.getElementById('stat-failed').textContent = stats.failed || 0;
+
+            // Header shows session saved
+            const sessionSaved = Math.max(0, stats.session_saved || stats.total_saved || 0);
+            document.getElementById('stat-saved').textContent = formatBytes(sessionSaved);
+
+            // Dropdown values
+            const sessionEl = document.getElementById('stat-session-saved');
+            const lifetimeEl = document.getElementById('stat-lifetime-saved');
+            if (sessionEl) sessionEl.textContent = formatBytes(sessionSaved);
+            if (lifetimeEl) lifetimeEl.textContent = formatBytes(Math.max(0, stats.lifetime_saved || 0));
+        }
+
+        function toggleSavedDropdown(event) {
+            event.stopPropagation();
+            // Only toggle on click for non-hover devices (mobile/touch)
+            if (window.matchMedia('(hover: hover)').matches) return;
+            document.getElementById('stat-queue-wrapper').classList.remove('open');
+            document.getElementById('stat-saved-wrapper').classList.toggle('open');
+        }
+
+        function toggleQueueDropdown(event) {
+            event.stopPropagation();
+            // Only toggle on click for non-hover devices (mobile/touch)
+            if (window.matchMedia('(hover: hover)').matches) return;
+            document.getElementById('stat-saved-wrapper').classList.remove('open');
+            document.getElementById('stat-queue-wrapper').classList.toggle('open');
+        }
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', function(event) {
+            const savedWrapper = document.getElementById('stat-saved-wrapper');
+            const queueWrapper = document.getElementById('stat-queue-wrapper');
+            if (savedWrapper && !savedWrapper.contains(event.target)) {
+                savedWrapper.classList.remove('open');
+            }
+            if (queueWrapper && !queueWrapper.contains(event.target)) {
+                queueWrapper.classList.remove('open');
+            }
+        });
+
+        async function resetSession(event) {
+            event.stopPropagation();
+            try {
+                const response = await fetch('/api/stats/reset-session', { method: 'POST' });
+                if (!response.ok) throw new Error('Failed to reset');
+
+                // Refresh stats
+                const statsResp = await fetch('/api/stats');
+                const stats = await statsResp.json();
+                updateStats(stats);
+
+                // Close dropdown
+                document.getElementById('stat-saved-wrapper').classList.remove('open');
+            } catch (err) {
+                console.error('Reset session failed:', err);
+            }
+        }
+
+        // Debounced refresh to avoid UI thrashing when many jobs are added
+        let refreshTimeout = null;
+        let browseTimeout = null;
+        let statsTimeout = null;
+        function scheduleRefresh() {
+            if (!refreshTimeout) {
+                refreshTimeout = setTimeout(() => {
+                    refreshTimeout = null;
+                    refreshJobs();
+                }, 200);
+            }
+        }
+        function scheduleBrowseRefresh() {
+            if (!browseTimeout) {
+                browseTimeout = setTimeout(() => {
+                    browseTimeout = null;
+                    browse(currentPath);
+                }, 500);
+            }
+        }
+        function scheduleStatsRefresh() {
+            if (!statsTimeout) {
+                statsTimeout = setTimeout(async () => {
+                    statsTimeout = null;
+                    try {
+                        const resp = await fetch('/api/stats');
+                        const stats = await resp.json();
+                        updateStats(stats);
+                    } catch (err) {
+                        console.error('Stats refresh error:', err);
+                    }
+                }, 200);
+            }
+        }
+
+        function connectSSE() {
+            if (eventSource) eventSource.close();
+
+            eventSource = new EventSource('/api/jobs/stream');
+
+            eventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'init') {
+                    updateJobs(data.jobs);
+                    updateStats(data.stats);
+                } else if (data.type === 'progress') {
+                    // Incremental: update just progress bar (no DOM rebuild)
+                    updateJobProgress(data.job.id, data.job.progress, data.job.speed, data.job.eta, data.job.phase);
+                } else if (data.type === 'started' || data.type === 'complete' ||
+                           data.type === 'failed' || data.type === 'cancelled' ||
+                           data.type === 'requeued' || data.type === 'skipped') {
+                    // Status change: update that specific job element
+                    updateJobStatus(data.job);
+                    scheduleStatsRefresh();
+                    if (data.type === 'complete' || data.type === 'failed' || data.type === 'skipped') {
+                        scheduleBrowseRefresh();
+                    }
+                } else if (data.type === 'added') {
+                    // Single job added
+                    addJobToList(data.job);
+                    scheduleStatsRefresh();
+                } else if (data.type === 'jobs_added') {
+                    // Batch of jobs finished processing, hide banner and full refresh
+                    document.getElementById('processing-banner').classList.add('hidden');
+                    scheduleRefresh();
+                } else if (data.type === 'notify_sent') {
+                    // Notification was sent, uncheck the checkbox
+                    document.getElementById('notify-checkbox').checked = false;
+                } else if (data.type === 'discovery_progress') {
+                    // Update processing banner with progress
+                    const banner = document.getElementById('processing-banner');
+                    banner.classList.remove('hidden');
+                    document.getElementById('processing-text').textContent =
+                        `Processing file ${data.probed}/${data.total}...`;
+                } else if (data.type === 'removed') {
+                    // Job was removed (e.g., during retry)
+                    const idx = allSortedJobs.findIndex(j => j.id === data.job.id);
+                    if (idx !== -1) {
+                        allSortedJobs.splice(idx, 1);
+                    }
+                    const el = document.querySelector(`.job-item[data-job-id="${data.job.id}"]`);
+                    if (el) {
+                        el.remove();
+                        displayedJobCount--;
+                    }
+                    // Clean up expanded details state
+                    expandedJobDetails.delete(data.job.id);
+                    scheduleStatsRefresh();
+                }
+                // No catch-all scheduleRefresh() - only refresh when truly needed
+            };
+
+            eventSource.onerror = () => {
+                setTimeout(connectSSE, 2000);
+            };
+        }
+
+        // Settings
+        function openSettings() {
+            document.getElementById('settings-overlay').classList.add('open');
+        }
+
+        function closeSettings(event) {
+            if (event && event.target !== event.currentTarget) return;
+            document.getElementById('settings-overlay').classList.remove('open');
+        }
+
+        async function loadSettings() {
+            try {
+                const resp = await fetch('/api/config');
+                const config = await resp.json();
+
+                // Display version
+                if (config.version) {
+                    document.getElementById('app-version').textContent = config.version;
+                }
+
+                document.getElementById('setting-original-handling').value = config.original_handling || 'replace';
+                document.getElementById('setting-workers').value = config.workers || 1;
+
+                // Pushover settings
+                document.getElementById('setting-pushover-user').value = config.pushover_user_key || '';
+                document.getElementById('setting-pushover-token').value = config.pushover_app_token || '';
+
+                // Show/hide notify checkbox based on whether Pushover is configured
+                const notifyContainer = document.getElementById('notify-container');
+                const notifyCheckbox = document.getElementById('notify-checkbox');
+                if (config.pushover_configured) {
+                    notifyContainer.style.display = 'flex';
+                    notifyCheckbox.checked = config.notify_on_complete || false;
+                } else {
+                    notifyContainer.style.display = 'none';
+                }
+
+                // Quality settings - use encoder-specific defaults when config value is 0
+                const defaultHEVC = config.default_quality_hevc || 22;
+                const defaultAV1 = config.default_quality_av1 || 25;
+                const hevcQuality = config.quality_hevc || defaultHEVC;
+                const av1Quality = config.quality_av1 || defaultAV1;
+                document.getElementById('setting-quality-hevc').value = hevcQuality;
+                document.getElementById('setting-quality-hevc-input').value = hevcQuality;
+                document.getElementById('setting-quality-av1').value = av1Quality;
+                document.getElementById('setting-quality-av1-input').value = av1Quality;
+
+                // Show encoder name and recommended value
+                const encoderLabel = (enc) => enc === 'none' ? 'Software' : enc.toUpperCase();
+                document.getElementById('quality-recommended-hevc').textContent =
+                    `Recommended (${encoderLabel(config.hevc_encoder)}): ${defaultHEVC}`;
+                document.getElementById('quality-recommended-av1').textContent =
+                    `Recommended (${encoderLabel(config.av1_encoder)}): ${defaultAV1}`;
+
+                // Schedule settings
+                document.getElementById('setting-schedule-enabled').checked = config.schedule_enabled || false;
+                document.getElementById('setting-schedule-start').value = config.schedule_start_hour ?? 22;
+                document.getElementById('setting-schedule-end').value = config.schedule_end_hour ?? 6;
+                updateScheduleHoursVisibility();
+
+                // Output format
+                document.getElementById('setting-output-format').value = config.output_format || 'mkv';
+
+                // Log level
+                document.getElementById('setting-log-level').value = config.log_level || 'info';
+
+                // Tonemap HDR (default false - preserves HDR)
+                document.getElementById('setting-tonemap-hdr').checked = config.tonemap_hdr === true;
+
+                // Write to completed/ subfolder (default false - same directory as source)
+                document.getElementById('setting-use-completed-dir').checked = config.use_completed_dir === true;
+
+                // Allow same-codec re-encoding (default false - skip already-encoded files)
+                document.getElementById('setting-allow-same-codec').checked = config.allow_same_codec === true;
+
+                // Max concurrent analyses (default 1)
+                document.getElementById('setting-max-analyses').value = config.max_concurrent_analyses || 1;
+
+                updateScheduleStatusDisplay(config.schedule_enabled, config.schedule_start_hour ?? 22, config.schedule_end_hour ?? 6);
+            } catch (err) {
+                console.error('Load settings error:', err);
+            }
+        }
+
+        function syncQualityInput(codec, value) {
+            document.getElementById(`setting-quality-${codec}-input`).value = value;
+        }
+
+        function syncQualitySlider(codec, value) {
+            const slider = document.getElementById(`setting-quality-${codec}`);
+            const input = document.getElementById(`setting-quality-${codec}-input`);
+            // Clamp value to valid range
+            const min = parseInt(slider.min);
+            const max = parseInt(slider.max);
+            let val = parseInt(value) || min;
+            if (val < min) val = min;
+            if (val > max) val = max;
+            slider.value = val;
+            input.value = val;
+        }
+
+        function toggleAdvancedSettings() {
+            document.getElementById('advanced-settings').classList.toggle('collapsed');
+        }
+
+        // Schedule functions
+        function formatHour(hour) {
+            if (hour === 0) return '12 AM';
+            if (hour === 12) return '12 PM';
+            if (hour < 12) return hour + ' AM';
+            return (hour - 12) + ' PM';
+        }
+
+        function populateHourDropdowns() {
+            const startSelect = document.getElementById('setting-schedule-start');
+            const endSelect = document.getElementById('setting-schedule-end');
+            let options = '';
+            for (let h = 0; h < 24; h++) {
+                options += `<option value="${h}">${formatHour(h)}</option>`;
+            }
+            startSelect.innerHTML = options;
+            endSelect.innerHTML = options;
+        }
+
+        function updateScheduleHoursVisibility() {
+            const enabled = document.getElementById('setting-schedule-enabled').checked;
+            const hoursRow = document.getElementById('schedule-hours-row');
+            hoursRow.style.opacity = enabled ? '1' : '0.5';
+            hoursRow.style.pointerEvents = enabled ? 'auto' : 'none';
+        }
+
+        function updateScheduleStatusDisplay(enabled, startHour, endHour) {
+            const statusEl = document.getElementById('schedule-status');
+            if (!enabled) {
+                statusEl.innerHTML = '';
+                return;
+            }
+            const clockIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+            statusEl.innerHTML = `${clockIcon} ${formatHour(startHour)} – ${formatHour(endHour)}`;
+        }
+
+        async function updateScheduleSetting() {
+            const enabled = document.getElementById('setting-schedule-enabled').checked;
+            const startHour = parseInt(document.getElementById('setting-schedule-start').value);
+            const endHour = parseInt(document.getElementById('setting-schedule-end').value);
+
+            updateScheduleHoursVisibility();
+            updateScheduleStatusDisplay(enabled, startHour, endHour);
+
+            const statusEl = document.getElementById('settings-status');
+            try {
+                const resp = await fetch('/api/config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        schedule_enabled: enabled,
+                        schedule_start_hour: startHour,
+                        schedule_end_hour: endHour
+                    })
+                });
+
+                if (!resp.ok) {
+                    const data = await resp.json();
+                    throw new Error(data.error || 'Failed to update');
+                }
+
+                statusEl.textContent = 'Settings saved';
+                statusEl.className = 'settings-status';
+                setTimeout(() => { statusEl.textContent = ''; }, 2000);
+            } catch (err) {
+                statusEl.textContent = `Error: ${err.message}`;
+                statusEl.className = 'settings-status error';
+            }
+        }
+
+        async function updateSetting(key, value) {
+            const statusEl = document.getElementById('settings-status');
+            try {
+                const body = {};
+                body[key] = value;
+
+                const resp = await fetch('/api/config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                if (!resp.ok) {
+                    const data = await resp.json();
+                    throw new Error(data.error || 'Failed to update');
+                }
+
+                statusEl.textContent = 'Settings saved';
+                statusEl.className = 'settings-status';
+                setTimeout(() => { statusEl.textContent = ''; }, 2000);
+
+                // Reload settings to update notify checkbox visibility
+                if (key === 'pushover_user_key' || key === 'pushover_app_token') {
+                    loadSettings();
+                }
+            } catch (err) {
+                statusEl.textContent = `Error: ${err.message}`;
+                statusEl.className = 'settings-status error';
+            }
+        }
+
+        async function updateNotifySetting(checked) {
+            try {
+                await fetch('/api/config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ notify_on_complete: checked })
+                });
+            } catch (err) {
+                console.error('Update notify setting error:', err);
+            }
+        }
+
+        async function testPushover() {
+            const btn = document.getElementById('test-pushover-btn');
+            const statusEl = document.getElementById('settings-status');
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+
+            try {
+                const resp = await fetch('/api/pushover/test', { method: 'POST' });
+                const data = await resp.json();
+
+                if (!resp.ok) {
+                    throw new Error(data.error || 'Failed to send test');
+                }
+
+                statusEl.textContent = 'Test notification sent!';
+                statusEl.className = 'settings-status';
+                setTimeout(() => { statusEl.textContent = ''; }, 3000);
+            } catch (err) {
+                statusEl.textContent = `Error: ${err.message}`;
+                statusEl.className = 'settings-status error';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Test';
+            }
+        }
+
+        async function loadPresets() {
+            try {
+                allPresets = await fetch('/api/presets').then(r => r.json());
+                buildPresetDropdown();
+
+                // Restore saved preset or use first as default
+                const savedPreset = localStorage.getItem('shrinkray_preset');
+                const savedQuality = localStorage.getItem('shrinkray_quality');
+
+                if (allPresets.length > 0) {
+                    // Use saved preset if it exists in current presets, otherwise first
+                    const presetToSelect = savedPreset && allPresets.find(p => p.id === savedPreset)
+                        ? savedPreset
+                        : allPresets[0].id;
+                    selectPreset(presetToSelect);
+                }
+
+                // Restore saved quality
+                if (savedQuality && ['acceptable', 'good', 'excellent'].includes(savedQuality)) {
+                    selectQuality(savedQuality);
+                }
+            } catch (err) {
+                console.error('Load presets error:', err);
+            }
+        }
+
+        // Group presets by category
+        function groupPresets(presets) {
+            const groups = {
+                smartshrink: [],
+                compress: [],
+                downscale: []
+            };
+
+            for (const preset of presets) {
+                if (preset.id.startsWith('smartshrink-')) {
+                    groups.smartshrink.push(preset);
+                } else if (preset.id === '1080p' || preset.id === '720p') {
+                    groups.downscale.push(preset);
+                } else {
+                    groups.compress.push(preset);
+                }
+            }
+
+            return groups;
+        }
+
+        // Clean display name (remove [HW]/[SW] suffix and category prefix)
+        function getPresetDisplayName(preset) {
+            return preset.name
+                .replace(' [HW]', '')
+                .replace(' [SW]', '')
+                .replace('Compress (', '')
+                .replace('SmartShrink (', '')
+                .replace(')', '')
+                .replace('Downscale to ', '');
+        }
+
+        // Check if hardware encoder
+        function isHardwarePreset(preset) {
+            return preset.name.includes('[HW]');
+        }
+
+        // Get category name for preset (used in trigger display)
+        function getPresetCategory(preset) {
+            if (preset.id.startsWith('smartshrink-')) {
+                return 'SmartShrink';
+            } else if (preset.id === '1080p' || preset.id === '720p') {
+                return 'Downscale';
+            } else {
+                return 'Compress';
+            }
+        }
+
+        // Build preset dropdown HTML
+        function buildPresetDropdown() {
+            const groups = groupPresets(allPresets);
+            const menu = document.getElementById('preset-dropdown-menu');
+
+            let sectionsHtml = '';
+
+            // SmartShrink section first (if available)
+            if (groups.smartshrink.length > 0) {
+                sectionsHtml += buildPresetSection('SMARTSHRINK', groups.smartshrink);
+            }
+
+            // Compress section
+            if (groups.compress.length > 0) {
+                sectionsHtml += buildPresetSection('COMPRESS', groups.compress);
+            }
+
+            // Downscale section
+            if (groups.downscale.length > 0) {
+                sectionsHtml += buildPresetSection('DOWNSCALE', groups.downscale);
+            }
+
+            menu.innerHTML = sectionsHtml;
+        }
+
+        function buildPresetSection(label, presets) {
+            const items = presets.map(p => {
+                const displayName = getPresetDisplayName(p);
+                const isHW = isHardwarePreset(p);
+                const badgeClass = isHW ? 'hardware' : 'software';
+                const badgeText = isHW ? 'HW' : 'SW';
+                return `<div class="preset-dropdown-item" data-preset="${p.id}" onclick="selectPreset('${p.id}')">
+                    <span>${displayName}</span>
+                    <span class="job-badge ${badgeClass}">${badgeText}</span>
+                </div>`;
+            }).join('');
+
+            return `<div class="preset-dropdown-section">
+                <div class="preset-dropdown-section-label">${label}</div>
+                ${items}
+            </div>`;
+        }
+
+        // Toggle preset dropdown
+        function togglePresetDropdown(event) {
+            event.stopPropagation();
+            const trigger = event.currentTarget;
+            const dropdown = document.getElementById('preset-dropdown');
+            const menu = document.getElementById('preset-dropdown-menu');
+            const isOpen = dropdown.classList.contains('open');
+
+            // Close other dropdowns
+            closeQualityDropdown();
+
+            if (!isOpen) {
+                // Position the dropdown - check if we need to open upward
+                const rect = trigger.getBoundingClientRect();
+                // Set dimensions before measuring height so text reflow is accounted for
+                menu.style.left = rect.left + 'px';
+                menu.style.width = rect.width + 'px';
+
+                const menuHeight = menu.scrollHeight || 300; // Estimate if not yet rendered
+                const spaceBelow = window.innerHeight - rect.bottom - 16;
+                const spaceAbove = rect.top - 16;
+                const openUpward = spaceBelow < menuHeight && spaceAbove > spaceBelow;
+
+                dropdown.classList.toggle('open-upward', openUpward);
+
+                // Determine available space and apply max-height if needed
+                const availableSpace = openUpward ? spaceAbove : spaceBelow;
+                if (menuHeight > availableSpace) {
+                    menu.style.maxHeight = availableSpace + 'px';
+                    menu.style.overflowY = 'auto';
+                } else {
+                    menu.style.maxHeight = '';
+                    menu.style.overflowY = '';
+                }
+
+                if (openUpward) {
+                    menu.style.top = 'auto';
+                    menu.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+                } else {
+                    menu.style.top = (rect.bottom + 6) + 'px';
+                    menu.style.bottom = 'auto';
+                }
+            }
+
+            dropdown.classList.toggle('open');
+        }
+
+        // Close preset dropdown
+        function closePresetDropdown() {
+            const dropdown = document.getElementById('preset-dropdown');
+            dropdown.classList.remove('open');
+            dropdown.classList.remove('open-upward');
+        }
+
+        // Select a preset
+        function selectPreset(presetId) {
+            selectedPresetId = presetId;
+            localStorage.setItem('shrinkray_preset', presetId);
+            const preset = allPresets.find(p => p.id === presetId);
+            if (!preset) return;
+
+            // Update trigger display
+            const trigger = document.querySelector('#preset-dropdown .preset-dropdown-trigger');
+            const label = trigger.querySelector('.preset-dropdown-label');
+
+            // Get display name, category, and badge info
+            const displayName = getPresetDisplayName(preset);
+            const category = getPresetCategory(preset);
+            const isHW = isHardwarePreset(preset);
+
+            // Update label with category, name, and badge
+            label.innerHTML = `<span>${category} - ${displayName}</span> <span class="job-badge ${isHW ? 'hardware' : 'software'}">${isHW ? 'HW' : 'SW'}</span>`;
+
+            // Update selected state in menu
+            document.querySelectorAll('#preset-dropdown-menu .preset-dropdown-item').forEach(item => {
+                item.classList.toggle('selected', item.dataset.preset === presetId);
+            });
+
+            // Show/hide quality dropdown and hint for SmartShrink
+            const qualityDropdown = document.getElementById('quality-dropdown');
+            const hint = document.getElementById('smartshrink-hint');
+            const isSmartShrink = presetId.startsWith('smartshrink-');
+
+            qualityDropdown.style.display = isSmartShrink ? 'inline-block' : 'none';
+            hint.style.display = isSmartShrink ? 'block' : 'none';
+
+            // Close dropdown
+            closePresetDropdown();
+        }
+
+        // Toggle quality dropdown
+        function toggleQualityDropdown(event) {
+            event.stopPropagation();
+            const trigger = event.currentTarget;
+            const dropdown = document.getElementById('quality-dropdown');
+            const menu = document.getElementById('quality-dropdown-menu');
+            const isOpen = dropdown.classList.contains('open');
+
+            // Close other dropdowns
+            closePresetDropdown();
+
+            if (!isOpen) {
+                // Position the dropdown - check if we need to open upward
+                const rect = trigger.getBoundingClientRect();
+                // Set dimensions before measuring height so text reflow is accounted for
+                menu.style.left = rect.left + 'px';
+                menu.style.width = rect.width + 'px';
+
+                const menuHeight = menu.scrollHeight || 200;
+                const spaceBelow = window.innerHeight - rect.bottom - 16;
+                const spaceAbove = rect.top - 16;
+                const openUpward = spaceBelow < menuHeight && spaceAbove > spaceBelow;
+
+                dropdown.classList.toggle('open-upward', openUpward);
+
+                // Determine available space and apply max-height if needed
+                const availableSpace = openUpward ? spaceAbove : spaceBelow;
+                if (menuHeight > availableSpace) {
+                    menu.style.maxHeight = availableSpace + 'px';
+                    menu.style.overflowY = 'auto';
+                } else {
+                    menu.style.maxHeight = '';
+                    menu.style.overflowY = '';
+                }
+
+                if (openUpward) {
+                    menu.style.top = 'auto';
+                    menu.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+                } else {
+                    menu.style.top = (rect.bottom + 6) + 'px';
+                    menu.style.bottom = 'auto';
+                }
+            }
+
+            dropdown.classList.toggle('open');
+        }
+
+        // Close quality dropdown
+        function closeQualityDropdown() {
+            const dropdown = document.getElementById('quality-dropdown');
+            dropdown.classList.remove('open');
+            dropdown.classList.remove('open-upward');
+        }
+
+        // Select quality
+        function selectQuality(quality) {
+            selectedQuality = quality;
+            localStorage.setItem('shrinkray_quality', quality);
+
+            // Update trigger display
+            const label = document.querySelector('#quality-dropdown .preset-dropdown-label');
+            const displayNames = { acceptable: 'Acceptable', good: 'Good', excellent: 'Excellent' };
+            label.textContent = displayNames[quality] || quality;
+
+            // Update selected state in menu
+            document.querySelectorAll('#quality-dropdown-menu .preset-dropdown-item').forEach(item => {
+                item.classList.toggle('selected', item.dataset.quality === quality);
+            });
+
+            // Close dropdown
+            closeQualityDropdown();
+        }
+
+        // Close dropdowns on outside click
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#preset-dropdown')) {
+                closePresetDropdown();
+            }
+            if (!e.target.closest('#quality-dropdown')) {
+                closeQualityDropdown();
+            }
+        });
+
+        // Keyboard shortcut for settings
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeSettings();
+            }
+        });
+
+        // Initialize
+        populateHourDropdowns();
+        browse();
+        loadSortPreference();
+        connectSSE();
+        loadSettings();
+        loadPresets();
+    </script>
+</body>
+</html>

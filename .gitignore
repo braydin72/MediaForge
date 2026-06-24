@@ -1,0 +1,49 @@
+# Binaries
+/shrinkray
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config and state (generated at runtime)
+queue.json
+config/shrinkray.yaml
+config/*.db*
+
+# Test data
+testdata/
+
+# Integration tests (requires Docker environment)
+test/integration/
+
+# Logs
+*.log
+
+# Worktrees
+.worktrees/
+
+# Housekeeping
+ghcr.sh
+CLAUDE.md
+HANDOFF.md
+**/plans/
