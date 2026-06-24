@@ -25,7 +25,7 @@ import (
 
 func main() {
 	// Parse command line flags
-	configPath := flag.String("config", "", "Path to config file (default: ./config/shrinkray.yaml)")
+	configPath := flag.String("config", "", "Path to config file (default: ./config/mediaforge.yaml)")
 	port := flag.Int("port", 8080, "Port to listen on")
 	mediaPath := flag.String("media", "", "Override media path from config")
 	flag.Parse()
@@ -37,8 +37,8 @@ func main() {
 		if envPath := os.Getenv("CONFIG_PATH"); envPath != "" {
 			cfgPath = envPath
 		} else {
-			// Default to ./config/shrinkray.yaml
-			cfgPath = "config/shrinkray.yaml"
+			// Default to ./config/mediaforge.yaml
+			cfgPath = "config/mediaforge.yaml"
 		}
 	}
 
@@ -100,8 +100,8 @@ func main() {
 	defer jobStore.Close()
 
 	fmt.Println("╔═══════════════════════════════════════════════════════════╗")
-	fmt.Println("║                         SHRINKRAY                         ║")
-	fmt.Println("║          Simple, user-friendly video transcoding          ║")
+	fmt.Println("║                        MEDIAFORGE                         ║")
+	fmt.Println("║             Ingest, Transcode, Organize                   ║")
 	versionLine := fmt.Sprintf("v%s", shrinkray.Version)
 	padding := 59 - len(versionLine)
 	fmt.Printf("║%*s%s%*s║\n", padding/2, "", versionLine, (padding+1)/2, "")
@@ -184,7 +184,7 @@ func main() {
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Printf("  Logging started (level: %s)\n", cfg.LogLevel)
 	fmt.Println("─────────────────────────────────────────────────────────────")
-	logger.Info("Shrinkray started", "version", shrinkray.Version, "encoder", best.Name, "workers", cfg.Workers, "port", *port)
+	logger.Info("MediaForge started", "version", shrinkray.Version, "encoder", best.Name, "workers", cfg.Workers, "port", *port)
 	go browser.WarmCountCache(context.Background())
 	if vmaf.IsAvailable() {
 		logger.Info("VMAF support detected", "models", vmaf.GetModels())

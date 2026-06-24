@@ -348,6 +348,31 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		"max_concurrent_analyses": h.cfg.MaxConcurrentAnalyses,
 		"log_level":               h.cfg.LogLevel,
 		"allow_same_codec":        h.cfg.AllowSameCodec,
+		// Intake pipeline
+		"intake_enabled":             h.cfg.Intake.Enabled,
+		"intake_watch_folder":        h.cfg.Intake.WatchFolder,
+		"intake_staging_folder":      h.cfg.Intake.StagingFolder,
+		"intake_library_movies":      h.cfg.Intake.Library.Movies,
+		"intake_library_tv_shows":    h.cfg.Intake.Library.TVShows,
+		"intake_stability_interval":  h.cfg.Intake.StabilityCheck.IntervalSeconds,
+		"intake_stability_passes":    h.cfg.Intake.StabilityCheck.PassesRequired,
+		"intake_confidence_threshold": h.cfg.Intake.ConfidenceThreshold,
+		"intake_review_threshold":    h.cfg.Intake.ReviewThreshold,
+		"intake_naming_movie_folder": h.cfg.Intake.Naming.MovieFolder,
+		"intake_naming_movie_file":   h.cfg.Intake.Naming.MovieFile,
+		"intake_naming_show_folder":  h.cfg.Intake.Naming.ShowFolder,
+		"intake_naming_episode_file": h.cfg.Intake.Naming.EpisodeFile,
+		// Metadata API keys
+		"apis_tmdb_key": h.cfg.APIs.TMDBKey,
+		"apis_tvdb_key": h.cfg.APIs.TVDBKey,
+		"apis_omdb_key": h.cfg.APIs.OMDbKey,
+		// LLM verification
+		"llm_backend":     h.cfg.LLM.Backend,
+		"llm_model":       h.cfg.LLM.Model,
+		"llm_ollama_host": h.cfg.LLM.OllamaHost,
+		// Poster cache
+		"poster_cache_enabled": h.cfg.PosterCache.Enabled,
+		"poster_cache_path":    h.cfg.PosterCache.Path,
 	})
 }
 
@@ -370,6 +395,32 @@ type UpdateConfigRequest struct {
 	MaxConcurrentAnalyses *int    `json:"max_concurrent_analyses,omitempty"`
 	LogLevel              *string `json:"log_level,omitempty"`
 	AllowSameCodec        *bool   `json:"allow_same_codec,omitempty"`
+	// Intake pipeline
+	IntakeEnabled            *bool    `json:"intake_enabled,omitempty"`
+	IntakeWatchFolder        *string  `json:"intake_watch_folder,omitempty"`
+	IntakeStagingFolder      *string  `json:"intake_staging_folder,omitempty"`
+	IntakeLibraryMovies      *string  `json:"intake_library_movies,omitempty"`
+	IntakeLibraryTVShows     *string  `json:"intake_library_tv_shows,omitempty"`
+	IntakeStabilityInterval  *int     `json:"intake_stability_interval,omitempty"`
+	IntakeStabilityPasses    *int     `json:"intake_stability_passes,omitempty"`
+	IntakeConfidenceThreshold *float64 `json:"intake_confidence_threshold,omitempty"`
+	IntakeReviewThreshold    *float64 `json:"intake_review_threshold,omitempty"`
+	IntakeNamingMovieFolder  *string  `json:"intake_naming_movie_folder,omitempty"`
+	IntakeNamingMovieFile    *string  `json:"intake_naming_movie_file,omitempty"`
+	IntakeNamingShowFolder   *string  `json:"intake_naming_show_folder,omitempty"`
+	IntakeNamingEpisodeFile  *string  `json:"intake_naming_episode_file,omitempty"`
+	// Metadata API keys
+	APIsTMDBKey *string `json:"apis_tmdb_key,omitempty"`
+	APIsTVDBKey *string `json:"apis_tvdb_key,omitempty"`
+	APIsOMDbKey *string `json:"apis_omdb_key,omitempty"`
+	// LLM verification
+	LLMBackend    *string `json:"llm_backend,omitempty"`
+	LLMAPIKey     *string `json:"llm_api_key,omitempty"`
+	LLMModel      *string `json:"llm_model,omitempty"`
+	LLMOllamaHost *string `json:"llm_ollama_host,omitempty"`
+	// Poster cache
+	PosterCacheEnabled *bool   `json:"poster_cache_enabled,omitempty"`
+	PosterCachePath    *string `json:"poster_cache_path,omitempty"`
 }
 
 // UpdateConfig handles PUT /api/config
@@ -495,6 +546,103 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		h.cfg.LogLevel = val
 		logger.SetLevel(val)
+	}
+
+	// Handle intake settings
+	if req.IntakeEnabled != nil {
+		h.cfg.Intake.Enabled = *req.IntakeEnabled
+	}
+	if req.IntakeWatchFolder != nil {
+		h.cfg.Intake.WatchFolder = *req.IntakeWatchFolder
+	}
+	if req.IntakeStagingFolder != nil {
+		h.cfg.Intake.StagingFolder = *req.IntakeStagingFolder
+	}
+	if req.IntakeLibraryMovies != nil {
+		h.cfg.Intake.Library.Movies = *req.IntakeLibraryMovies
+	}
+	if req.IntakeLibraryTVShows != nil {
+		h.cfg.Intake.Library.TVShows = *req.IntakeLibraryTVShows
+	}
+	if req.IntakeStabilityInterval != nil {
+		val := *req.IntakeStabilityInterval
+		if val < 1 {
+			val = 1
+		}
+		h.cfg.Intake.StabilityCheck.IntervalSeconds = val
+	}
+	if req.IntakeStabilityPasses != nil {
+		val := *req.IntakeStabilityPasses
+		if val < 1 {
+			val = 1
+		}
+		h.cfg.Intake.StabilityCheck.PassesRequired = val
+	}
+	if req.IntakeConfidenceThreshold != nil {
+		val := *req.IntakeConfidenceThreshold
+		if val < 0 || val > 1 {
+			writeError(w, http.StatusBadRequest, "intake_confidence_threshold must be between 0 and 1")
+			return
+		}
+		h.cfg.Intake.ConfidenceThreshold = val
+	}
+	if req.IntakeReviewThreshold != nil {
+		val := *req.IntakeReviewThreshold
+		if val < 0 || val > 1 {
+			writeError(w, http.StatusBadRequest, "intake_review_threshold must be between 0 and 1")
+			return
+		}
+		h.cfg.Intake.ReviewThreshold = val
+	}
+	if req.IntakeNamingMovieFolder != nil {
+		h.cfg.Intake.Naming.MovieFolder = *req.IntakeNamingMovieFolder
+	}
+	if req.IntakeNamingMovieFile != nil {
+		h.cfg.Intake.Naming.MovieFile = *req.IntakeNamingMovieFile
+	}
+	if req.IntakeNamingShowFolder != nil {
+		h.cfg.Intake.Naming.ShowFolder = *req.IntakeNamingShowFolder
+	}
+	if req.IntakeNamingEpisodeFile != nil {
+		h.cfg.Intake.Naming.EpisodeFile = *req.IntakeNamingEpisodeFile
+	}
+
+	// Handle API keys
+	if req.APIsTMDBKey != nil {
+		h.cfg.APIs.TMDBKey = *req.APIsTMDBKey
+	}
+	if req.APIsTVDBKey != nil {
+		h.cfg.APIs.TVDBKey = *req.APIsTVDBKey
+	}
+	if req.APIsOMDbKey != nil {
+		h.cfg.APIs.OMDbKey = *req.APIsOMDbKey
+	}
+
+	// Handle LLM settings
+	if req.LLMBackend != nil {
+		val := *req.LLMBackend
+		if val != "" && val != "anthropic" && val != "openai" && val != "ollama" {
+			writeError(w, http.StatusBadRequest, "llm_backend must be 'anthropic', 'openai', 'ollama', or empty")
+			return
+		}
+		h.cfg.LLM.Backend = val
+	}
+	if req.LLMAPIKey != nil {
+		h.cfg.LLM.APIKey = *req.LLMAPIKey
+	}
+	if req.LLMModel != nil {
+		h.cfg.LLM.Model = *req.LLMModel
+	}
+	if req.LLMOllamaHost != nil {
+		h.cfg.LLM.OllamaHost = *req.LLMOllamaHost
+	}
+
+	// Handle poster cache settings
+	if req.PosterCacheEnabled != nil {
+		h.cfg.PosterCache.Enabled = *req.PosterCacheEnabled
+	}
+	if req.PosterCachePath != nil {
+		h.cfg.PosterCache.Path = *req.PosterCachePath
 	}
 
 	// Persist config to disk

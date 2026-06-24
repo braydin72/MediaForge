@@ -8,7 +8,65 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type IntakeLibraryConfig struct {
+	Movies  string `yaml:"movies"`
+	TVShows string `yaml:"tv_shows"`
+}
+
+type IntakeStabilityConfig struct {
+	IntervalSeconds int `yaml:"interval_seconds"`
+	PassesRequired  int `yaml:"passes_required"`
+}
+
+type IntakeNamingConfig struct {
+	MovieFolder string `yaml:"movie_folder"`
+	MovieFile   string `yaml:"movie_file"`
+	ShowFolder  string `yaml:"show_folder"`
+	EpisodeFile string `yaml:"episode_file"`
+}
+
+type IntakeConfig struct {
+	Enabled             bool                  `yaml:"enabled"`
+	WatchFolder         string                `yaml:"watch_folder"`
+	StagingFolder       string                `yaml:"staging_folder"`
+	Library             IntakeLibraryConfig   `yaml:"library"`
+	StabilityCheck      IntakeStabilityConfig `yaml:"stability_check"`
+	ConfidenceThreshold float64               `yaml:"confidence_threshold"`
+	ReviewThreshold     float64               `yaml:"review_threshold"`
+	Naming              IntakeNamingConfig    `yaml:"naming"`
+}
+
+type APIsConfig struct {
+	TMDBKey string `yaml:"tmdb_key"`
+	TVDBKey string `yaml:"tvdb_key"`
+	OMDbKey string `yaml:"omdb_key"`
+}
+
+type LLMConfig struct {
+	Backend    string `yaml:"backend"`
+	APIKey     string `yaml:"api_key"`
+	Model      string `yaml:"model"`
+	OllamaHost string `yaml:"ollama_host"`
+}
+
+type PosterCacheConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Path    string `yaml:"path"`
+}
+
 type Config struct {
+	// Intake is the ingest pipeline configuration
+	Intake IntakeConfig `yaml:"intake"`
+
+	// APIs holds metadata lookup service keys
+	APIs APIsConfig `yaml:"apis"`
+
+	// LLM is the optional AI verification backend config
+	LLM LLMConfig `yaml:"llm"`
+
+	// PosterCache controls artwork thumbnail caching
+	PosterCache PosterCacheConfig `yaml:"poster_cache"`
+
 	// MediaPath is the root directory to browse for media files
 	MediaPath string `yaml:"media_path"`
 
@@ -91,6 +149,34 @@ type Config struct {
 // DefaultConfig returns a config with sensible defaults
 func DefaultConfig() *Config {
 	return &Config{
+		Intake: IntakeConfig{
+			Enabled:       false,
+			WatchFolder:   "/incoming",
+			StagingFolder: "/staging",
+			Library: IntakeLibraryConfig{
+				Movies:  "/media/Movies",
+				TVShows: "/media/TV Shows",
+			},
+			StabilityCheck: IntakeStabilityConfig{
+				IntervalSeconds: 5,
+				PassesRequired:  3,
+			},
+			ConfidenceThreshold: 0.85,
+			ReviewThreshold:     0.60,
+			Naming: IntakeNamingConfig{
+				MovieFolder: "{title} ({year})",
+				MovieFile:   "{title} ({year})",
+				ShowFolder:  "{show} ({year})",
+				EpisodeFile: "{show} - S{season:02d}E{episode:02d} - {episode_title}",
+			},
+		},
+		LLM: LLMConfig{
+			OllamaHost: "http://localhost:11434",
+		},
+		PosterCache: PosterCacheConfig{
+			Enabled: true,
+			Path:    "/config/poster_cache",
+		},
 		MediaPath:         "/media",
 		TempPath:          "", // defaults to os.TempDir()
 		OriginalHandling:  "replace",
@@ -104,9 +190,9 @@ func DefaultConfig() *Config {
 		ScheduleEndHour:   6,  // 6 AM
 		LogLevel:          "info",
 		OutputFormat:      "mkv",
-		TonemapHDR:            false,   // HDR passthrough by default; enable for SDR conversion (uses CPU)
-		TonemapAlgorithm:      "hable", // Filmic tonemapping, good for movies
-		MaxConcurrentAnalyses: 1,       // Conservative default for media servers
+		TonemapHDR:            false,
+		TonemapAlgorithm:      "hable",
+		MaxConcurrentAnalyses: 1,
 	}
 }
 
@@ -160,6 +246,35 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.MaxConcurrentAnalyses > 3 {
 		cfg.MaxConcurrentAnalyses = 3
+	}
+
+	// Intake defaults
+	if cfg.Intake.StabilityCheck.IntervalSeconds < 1 {
+		cfg.Intake.StabilityCheck.IntervalSeconds = 5
+	}
+	if cfg.Intake.StabilityCheck.PassesRequired < 1 {
+		cfg.Intake.StabilityCheck.PassesRequired = 3
+	}
+	if cfg.Intake.ConfidenceThreshold == 0 {
+		cfg.Intake.ConfidenceThreshold = 0.85
+	}
+	if cfg.Intake.ReviewThreshold == 0 {
+		cfg.Intake.ReviewThreshold = 0.60
+	}
+	if cfg.Intake.Naming.MovieFolder == "" {
+		cfg.Intake.Naming.MovieFolder = "{title} ({year})"
+	}
+	if cfg.Intake.Naming.MovieFile == "" {
+		cfg.Intake.Naming.MovieFile = "{title} ({year})"
+	}
+	if cfg.Intake.Naming.ShowFolder == "" {
+		cfg.Intake.Naming.ShowFolder = "{show} ({year})"
+	}
+	if cfg.Intake.Naming.EpisodeFile == "" {
+		cfg.Intake.Naming.EpisodeFile = "{show} - S{season:02d}E{episode:02d} - {episode_title}"
+	}
+	if cfg.LLM.OllamaHost == "" {
+		cfg.LLM.OllamaHost = "http://localhost:11434"
 	}
 
 	return cfg, nil

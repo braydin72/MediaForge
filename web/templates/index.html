@@ -1532,8 +1532,8 @@
 
         .setting-group-content {
             overflow: hidden;
-            transition: max-height 0.2s ease;
-            max-height: 800px;
+            transition: max-height 0.3s ease;
+            max-height: 2400px;
         }
 
         .setting-group.collapsed .setting-group-content {
@@ -1849,6 +1849,74 @@
         .modal-actions .btn {
             min-width: 100px;
         }
+
+        /* Toggle switch */
+        .toggle {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+            flex-shrink: 0;
+        }
+
+        .toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+            position: absolute;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background: var(--border);
+            border-radius: 12px;
+            transition: background var(--transition-fast);
+        }
+
+        .toggle-slider:before {
+            content: "";
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            left: 3px;
+            top: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: transform var(--transition-fast);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+
+        .toggle input:checked + .toggle-slider {
+            background: var(--accent);
+        }
+
+        .toggle input:checked + .toggle-slider:before {
+            transform: translateX(20px);
+        }
+
+        /* Wide setting input for paths */
+        .setting-input-wide {
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 0.875rem;
+            font-family: var(--font-mono);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            width: 100%;
+        }
+
+        .setting-input-wide:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .setting-input-wide::placeholder {
+            color: var(--text-tertiary);
+            font-family: var(--font-sans);
+        }
     </style>
 </head>
 <body>
@@ -1857,9 +1925,9 @@
             <div class="header-left">
                 <div class="logo">
                     <div class="logo-icon">
-                        <img src="/logo.png" alt="Shrinkray" width="32" height="32">
+                        <img src="/logo.png" alt="MediaForge" width="32" height="32">
                     </div>
-                    Shrinkray
+                    MediaForge
                 </div>
                 <div class="stats-bar" id="stats-bar">
                     <div class="stat-item stat-queue-wrapper" id="stat-queue-wrapper">
@@ -2127,6 +2195,262 @@
             </div>
             <div class="settings-content">
                 <div class="setting-group">
+                    <div class="setting-group-header" onclick="toggleSettingGroup('intake-settings')">
+                        <div class="setting-group-title">Intake</div>
+                        <svg class="setting-group-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </div>
+                    <div class="setting-group-content" id="intake-settings-content">
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">Enable intake pipeline</div>
+                                <div class="setting-desc">Watch folder, identify, route, and organize incoming files</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle">
+                                    <input type="checkbox" id="setting-intake-enabled"
+                                           onchange="updateSetting('intake_enabled', this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-item setting-item-stacked">
+                            <div class="setting-info">
+                                <div class="setting-name">Watch folder</div>
+                                <div class="setting-desc">Incoming files are detected here</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="text" class="setting-input-wide" id="setting-intake-watch-folder"
+                                       placeholder="/incoming"
+                                       onchange="updateSetting('intake_watch_folder', this.value)">
+                            </div>
+                        </div>
+                        <div class="setting-item setting-item-stacked">
+                            <div class="setting-info">
+                                <div class="setting-name">Staging folder</div>
+                                <div class="setting-desc">AVC files are held here before and during encoding (use fast storage)</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="text" class="setting-input-wide" id="setting-intake-staging-folder"
+                                       placeholder="/staging"
+                                       onchange="updateSetting('intake_staging_folder', this.value)">
+                            </div>
+                        </div>
+                        <div class="setting-item setting-item-stacked">
+                            <div class="setting-info">
+                                <div class="setting-name">Movies library</div>
+                                <div class="setting-desc">Destination for identified movies</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="text" class="setting-input-wide" id="setting-intake-library-movies"
+                                       placeholder="/media/Movies"
+                                       onchange="updateSetting('intake_library_movies', this.value)">
+                            </div>
+                        </div>
+                        <div class="setting-item setting-item-stacked">
+                            <div class="setting-info">
+                                <div class="setting-name">TV Shows library</div>
+                                <div class="setting-desc">Destination for identified TV episodes</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="text" class="setting-input-wide" id="setting-intake-library-tv"
+                                       placeholder="/media/TV Shows"
+                                       onchange="updateSetting('intake_library_tv_shows', this.value)">
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">Stability check interval</div>
+                                <div class="setting-desc">Seconds between file size checks (ensures write is complete)</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="number" class="setting-input" id="setting-intake-stability-interval"
+                                       min="1" max="60" style="width: 80px"
+                                       onchange="updateSetting('intake_stability_interval', parseInt(this.value))">
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">Stability passes required</div>
+                                <div class="setting-desc">Consecutive stable reads before file is considered ready</div>
+                            </div>
+                            <div class="setting-control">
+                                <select class="setting-select" id="setting-intake-stability-passes"
+                                        onchange="updateSetting('intake_stability_passes', parseInt(this.value))">
+                                    <option value="2">2</option>
+                                    <option value="3">3 (default)</option>
+                                    <option value="4">4</option>
+                                    <option value="5">5</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">Confidence threshold</div>
+                                <div class="setting-desc">Matches above this proceed automatically (0.00&ndash;1.00)</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="number" class="setting-input" id="setting-intake-confidence"
+                                       min="0" max="1" step="0.05" style="width: 80px"
+                                       onchange="updateSetting('intake_confidence_threshold', parseFloat(this.value))">
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">Review threshold</div>
+                                <div class="setting-desc">Matches below this go to Review Queue; between thresholds uses LLM (0.00&ndash;1.00)</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="number" class="setting-input" id="setting-intake-review"
+                                       min="0" max="1" step="0.05" style="width: 80px"
+                                       onchange="updateSetting('intake_review_threshold', parseFloat(this.value))">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <div class="setting-group-header" onclick="toggleSettingGroup('identification-settings')">
+                        <div class="setting-group-title">Identification</div>
+                        <svg class="setting-group-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </div>
+                    <div class="setting-group-content" id="identification-settings-content">
+                        <div class="setting-item setting-item-stacked">
+                            <div class="setting-info">
+                                <div class="setting-name">TMDB API Key</div>
+                                <div class="setting-desc">Required for movies (primary) and TV fallback. Free at tmdb.org.</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="password" class="setting-input-wide" id="setting-apis-tmdb"
+                                       placeholder="Enter TMDB API key"
+                                       onchange="updateSetting('apis_tmdb_key', this.value)">
+                            </div>
+                        </div>
+                        <div class="setting-item setting-item-stacked">
+                            <div class="setting-info">
+                                <div class="setting-name">TVDB API Key</div>
+                                <div class="setting-desc">Required for TV shows (primary). Free account at thetvdb.com.</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="password" class="setting-input-wide" id="setting-apis-tvdb"
+                                       placeholder="Enter TVDB API key"
+                                       onchange="updateSetting('apis_tvdb_key', this.value)">
+                            </div>
+                        </div>
+                        <div class="setting-item setting-item-stacked">
+                            <div class="setting-info">
+                                <div class="setting-name">OMDb API Key</div>
+                                <div class="setting-desc">Optional last-resort fallback. Free tier at omdbapi.com.</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="password" class="setting-input-wide" id="setting-apis-omdb"
+                                       placeholder="Enter OMDb API key (optional)"
+                                       onchange="updateSetting('apis_omdb_key', this.value)">
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">LLM backend</div>
+                                <div class="setting-desc">Used to verify low-confidence matches. Leave empty to disable.</div>
+                            </div>
+                            <div class="setting-control">
+                                <select class="setting-select" id="setting-llm-backend"
+                                        onchange="updateSetting('llm_backend', this.value); updateLLMFieldVisibility()">
+                                    <option value="">Disabled</option>
+                                    <option value="anthropic">Anthropic (Claude)</option>
+                                    <option value="openai">OpenAI</option>
+                                    <option value="ollama">Ollama (local)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="setting-item setting-item-stacked" id="llm-apikey-row">
+                            <div class="setting-info">
+                                <div class="setting-name">LLM API key</div>
+                                <div class="setting-desc">API key for the selected cloud LLM provider</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="password" class="setting-input-wide" id="setting-llm-apikey"
+                                       placeholder="Enter API key"
+                                       onchange="updateSetting('llm_api_key', this.value)">
+                            </div>
+                        </div>
+                        <div class="setting-item setting-item-stacked" id="llm-model-row">
+                            <div class="setting-info">
+                                <div class="setting-name">LLM model</div>
+                                <div class="setting-desc">Model name (e.g. claude-sonnet-4-6, gpt-4o, llama3)</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="text" class="setting-input-wide" id="setting-llm-model"
+                                       placeholder="e.g. claude-sonnet-4-6"
+                                       onchange="updateSetting('llm_model', this.value)">
+                            </div>
+                        </div>
+                        <div class="setting-item setting-item-stacked" id="llm-ollama-row">
+                            <div class="setting-info">
+                                <div class="setting-name">Ollama host</div>
+                                <div class="setting-desc">URL of your local Ollama instance</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="text" class="setting-input-wide" id="setting-llm-ollama"
+                                       placeholder="http://localhost:11434"
+                                       onchange="updateSetting('llm_ollama_host', this.value)">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <div class="setting-group-header" onclick="toggleSettingGroup('naming-settings')">
+                        <div class="setting-group-title">Naming</div>
+                        <svg class="setting-group-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </div>
+                    <div class="setting-group-content" id="naming-settings-content">
+                        <div class="setting-item setting-item-stacked">
+                            <div class="setting-info">
+                                <div class="setting-name">Movie folder template</div>
+                                <div class="setting-desc">Tokens: {title} {year}</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="text" class="setting-input-wide" id="setting-naming-movie-folder"
+                                       onchange="updateSetting('intake_naming_movie_folder', this.value)">
+                            </div>
+                        </div>
+                        <div class="setting-item setting-item-stacked">
+                            <div class="setting-info">
+                                <div class="setting-name">Movie file template</div>
+                                <div class="setting-desc">Tokens: {title} {year}</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="text" class="setting-input-wide" id="setting-naming-movie-file"
+                                       onchange="updateSetting('intake_naming_movie_file', this.value)">
+                            </div>
+                        </div>
+                        <div class="setting-item setting-item-stacked">
+                            <div class="setting-info">
+                                <div class="setting-name">Show folder template</div>
+                                <div class="setting-desc">Tokens: {show} {year}</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="text" class="setting-input-wide" id="setting-naming-show-folder"
+                                       onchange="updateSetting('intake_naming_show_folder', this.value)">
+                            </div>
+                        </div>
+                        <div class="setting-item setting-item-stacked">
+                            <div class="setting-info">
+                                <div class="setting-name">Episode file template</div>
+                                <div class="setting-desc">Tokens: {show} {year} {season:02d} {episode:02d} {episode_title}</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="text" class="setting-input-wide" id="setting-naming-episode-file"
+                                       onchange="updateSetting('intake_naming_episode_file', this.value)">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-group">
                     <div class="setting-group-title">Transcoding</div>
                     <div class="setting-item">
                         <div class="setting-info">
@@ -2349,7 +2673,7 @@
                 </div>
             </div>
             <div class="settings-status" id="settings-status"></div>
-            <div class="settings-footer">Shrinkray v<span id="app-version"></span> · <a href="https://github.com/gwlsn/shrinkray" target="_blank" rel="noopener noreferrer">View on GitHub</a></div>
+            <div class="settings-footer">MediaForge v<span id="app-version"></span> · <a href="https://github.com/BRAYDIN72/MediaForge" target="_blank" rel="noopener noreferrer">View on GitHub</a></div>
         </div>
     </div>
 
@@ -3925,9 +4249,54 @@
                 document.getElementById('setting-max-analyses').value = config.max_concurrent_analyses || 1;
 
                 updateScheduleStatusDisplay(config.schedule_enabled, config.schedule_start_hour ?? 22, config.schedule_end_hour ?? 6);
+
+                // Intake settings
+                document.getElementById('setting-intake-enabled').checked = config.intake_enabled === true;
+                document.getElementById('setting-intake-watch-folder').value = config.intake_watch_folder || '/incoming';
+                document.getElementById('setting-intake-staging-folder').value = config.intake_staging_folder || '/staging';
+                document.getElementById('setting-intake-library-movies').value = config.intake_library_movies || '/media/Movies';
+                document.getElementById('setting-intake-library-tv').value = config.intake_library_tv_shows || '/media/TV Shows';
+                document.getElementById('setting-intake-stability-interval').value = config.intake_stability_interval || 5;
+                document.getElementById('setting-intake-stability-passes').value = config.intake_stability_passes || 3;
+                document.getElementById('setting-intake-confidence').value = config.intake_confidence_threshold ?? 0.85;
+                document.getElementById('setting-intake-review').value = config.intake_review_threshold ?? 0.60;
+
+                // Identification settings
+                document.getElementById('setting-apis-tmdb').value = config.apis_tmdb_key || '';
+                document.getElementById('setting-apis-tvdb').value = config.apis_tvdb_key || '';
+                document.getElementById('setting-apis-omdb').value = config.apis_omdb_key || '';
+                document.getElementById('setting-llm-backend').value = config.llm_backend || '';
+                document.getElementById('setting-llm-apikey').value = '';
+                document.getElementById('setting-llm-model').value = config.llm_model || '';
+                document.getElementById('setting-llm-ollama').value = config.llm_ollama_host || 'http://localhost:11434';
+                updateLLMFieldVisibility();
+
+                // Naming templates
+                document.getElementById('setting-naming-movie-folder').value = config.intake_naming_movie_folder || '{title} ({year})';
+                document.getElementById('setting-naming-movie-file').value = config.intake_naming_movie_file || '{title} ({year})';
+                document.getElementById('setting-naming-show-folder').value = config.intake_naming_show_folder || '{show} ({year})';
+                document.getElementById('setting-naming-episode-file').value = config.intake_naming_episode_file || '{show} - S{season:02d}E{episode:02d} - {episode_title}';
             } catch (err) {
                 console.error('Load settings error:', err);
             }
+        }
+
+        function toggleSettingGroup(id) {
+            const content = document.getElementById(id + '-content');
+            const group = content.closest('.setting-group');
+            group.classList.toggle('collapsed');
+        }
+
+        function updateLLMFieldVisibility() {
+            const backend = document.getElementById('setting-llm-backend').value;
+            const apikeyRow = document.getElementById('llm-apikey-row');
+            const modelRow = document.getElementById('llm-model-row');
+            const ollamaRow = document.getElementById('llm-ollama-row');
+            const isCloud = backend === 'anthropic' || backend === 'openai';
+            const isOllama = backend === 'ollama';
+            apikeyRow.style.display = isCloud ? '' : 'none';
+            modelRow.style.display = backend !== '' ? '' : 'none';
+            ollamaRow.style.display = isOllama ? '' : 'none';
         }
 
         function syncQualityInput(codec, value) {
