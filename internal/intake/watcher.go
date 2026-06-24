@@ -17,8 +17,8 @@ import (
 	"github.com/gwlsn/shrinkray/internal/store"
 )
 
-// scanInterval controls how often the watch folder is polled for new files.
-const scanInterval = 30 * time.Second
+// defaultScanInterval is how often the watch folder is polled in production.
+const defaultScanInterval = 30 * time.Second
 
 // probeTimeout is the maximum time allowed for a single ffprobe call.
 const probeTimeout = 2 * time.Minute
@@ -26,16 +26,17 @@ const probeTimeout = 2 * time.Minute
 // Watcher polls a watch folder for new video files and drives the intake pipeline.
 //
 // Lifecycle:
-//  1. Scan watch folder every scanInterval for new video files.
+//  1. Scan watch folder every ScanInterval for new video files.
 //  2. For each new file, run a stability check (repeated os.Stat until size is
 //     stable for StabilityCheck.PassesRequired consecutive reads).
 //  3. Run ffprobe to detect the video codec.
 //  4. Route: HEVC → log "ready for library move", H264 → log "ready for staging",
 //     unknown → Review Queue with specific reason.
 type Watcher struct {
-	cfg    config.IntakeConfig
-	prober *ffmpeg.Prober
-	st     *store.SQLiteStore
+	cfg          config.IntakeConfig
+	prober       *ffmpeg.Prober
+	st           *store.SQLiteStore
+	ScanInterval time.Duration // overridable for tests; defaults to defaultScanInterval
 
 	// known tracks files we have seen and are currently processing or have processed
 	// in this session. Files removed from the watch folder by later pipeline phases
@@ -49,11 +50,12 @@ type Watcher struct {
 // NewWatcher creates a Watcher. Call Start in a goroutine to begin polling.
 func NewWatcher(cfg config.IntakeConfig, ffprobePath string, st *store.SQLiteStore) *Watcher {
 	return &Watcher{
-		cfg:    cfg,
-		prober: ffmpeg.NewProber(ffprobePath),
-		st:     st,
-		known:  make(map[string]struct{}),
-		stopCh: make(chan struct{}),
+		cfg:          cfg,
+		prober:       ffmpeg.NewProber(ffprobePath),
+		st:           st,
+		ScanInterval: defaultScanInterval,
+		known:        make(map[string]struct{}),
+		stopCh:       make(chan struct{}),
 	}
 }
 
@@ -64,7 +66,7 @@ func (w *Watcher) Start(ctx context.Context) {
 		"stability_passes", w.cfg.StabilityCheck.PassesRequired,
 	)
 
-	ticker := time.NewTicker(scanInterval)
+	ticker := time.NewTicker(w.ScanInterval)
 	defer ticker.Stop()
 
 	// Scan immediately on start rather than waiting the full interval.
