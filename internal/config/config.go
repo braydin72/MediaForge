@@ -154,6 +154,10 @@ type Config struct {
 	// TargetReductionPct is the target file-size reduction for fixed_reduction mode (1-99).
 	// 40 means output should be ~60% of the original size.
 	TargetReductionPct int `yaml:"target_reduction_pct"`
+
+	// DefaultPreset is the encode preset used for AVC files from the intake pipeline.
+	// Defaults to "compress-hevc".
+	DefaultPreset string `yaml:"default_preset"`
 }
 
 // DefaultConfig returns a config with sensible defaults
@@ -206,6 +210,7 @@ func DefaultConfig() *Config {
 		EncoderSpeed:          "medium",
 		TranscodeMode:         "smartshrink",
 		TargetReductionPct:    40,
+		DefaultPreset:         "compress-hevc",
 	}
 }
 
@@ -269,6 +274,10 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.MaxConcurrentAnalyses > 3 {
 		cfg.MaxConcurrentAnalyses = 3
+	}
+
+	if cfg.DefaultPreset == "" {
+		cfg.DefaultPreset = "compress-hevc"
 	}
 
 	// Intake defaults
