@@ -390,6 +390,7 @@ Each phase is a focused Claude Code session. Begin each session by reading this 
 | Phase | Scope |
 |---|---|
 | 0 | **Repo rename** — Shrinkray → MediaForge (see rename instructions below) |
+|  0b  | Internal rename — update go.mod module path from github.com/gwlsn/shrinkray to github.com/braydin72/mediaforge, update all internal import paths throughout the codebase. Run go build and all tests to confirm clean. Do before any public release. |
 | 1 | Config schema — `mediaforge.yaml` structure, Settings UI fields for all sections |
 | 2 | Stats DB schema — SQLite per-file records and aggregate counters, reset logic |
 | 3 | File watcher + ffprobe — stability check, codec detect, basic route, Review Queue skeleton |
