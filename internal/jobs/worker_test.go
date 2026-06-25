@@ -35,7 +35,7 @@ func TestWorkerPoolIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read test file: %v", err)
 	}
-	if err := os.WriteFile(testCopy, input, 0644); err != nil {
+	if err := os.WriteFile(testCopy, input, 0644); err != nil { //nolint:gosec // test helper writing to temp path
 		t.Fatalf("failed to copy test file: %v", err)
 	}
 

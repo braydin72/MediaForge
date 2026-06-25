@@ -23,7 +23,6 @@ linters:
       excludes:
         - G204
         - G306
-        - G703
   exclusions:
     generated: lax
     presets:

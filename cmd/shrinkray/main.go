@@ -76,7 +76,7 @@ func main() {
 	}
 
 	// Validate media path exists
-	if _, err := os.Stat(cfg.MediaPath); os.IsNotExist(err) {
+	if _, err := os.Stat(cfg.MediaPath); os.IsNotExist(err) { //nolint:gosec // path comes from config file, not user input
 		logger.Error("Media path does not exist", "path", cfg.MediaPath)
 		os.Exit(1)
 	}
@@ -88,7 +88,7 @@ func main() {
 	}
 
 	// Ensure config directory exists
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0755); err != nil { //nolint:gosec // path derived from config file path
 		logger.Warn("Could not create config directory", "error", err)
 	}
 
