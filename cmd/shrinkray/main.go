@@ -170,7 +170,8 @@ func main() {
 
 	// Create API handler
 	handler := api.NewHandler(browser, queue, workerPool, cfg, cfgPath)
-	handler.SetStore(jobStore) // Enable session/lifetime stats
+	handler.SetStore(jobStore)       // Enable session/lifetime stats
+	handler.SetReviewStore(jobStore) // Enable Review Queue API
 	router := api.NewRouter(handler, shrinkray.WebFS)
 
 	// Start worker pool

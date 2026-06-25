@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,9 +16,11 @@ import (
 	"github.com/gwlsn/shrinkray/internal/config"
 	"github.com/gwlsn/shrinkray/internal/ffmpeg"
 	"github.com/gwlsn/shrinkray/internal/ffmpeg/vmaf"
+	"github.com/gwlsn/shrinkray/internal/intake"
 	"github.com/gwlsn/shrinkray/internal/jobs"
 	"github.com/gwlsn/shrinkray/internal/logger"
 	"github.com/gwlsn/shrinkray/internal/pushover"
+	"github.com/gwlsn/shrinkray/internal/store"
 )
 
 // StatsStore defines the interface for stats-related store operations.
@@ -25,16 +28,25 @@ type StatsStore interface {
 	ResetSession() error
 }
 
+// ReviewQueueStore defines the interface for Review Queue read/write operations.
+type ReviewQueueStore interface {
+	GetReviewQueue() ([]store.ReviewEntry, error)
+	GetReviewEntry(id string) (*store.ReviewEntry, error)
+	GetReviewQueueCount() (int, error)
+	UpdateReviewQueueStatus(id, status string) error
+}
+
 // Handler provides HTTP API handlers
 type Handler struct {
-	browser    *browse.Browser
-	queue      *jobs.Queue
-	workerPool *jobs.WorkerPool
-	cfg        *config.Config
-	cfgPath    string
-	pushover   *pushover.Client
-	notifyMu   sync.Mutex // Protects notification sending to prevent duplicates
-	store      StatsStore // For stats operations (may be nil)
+	browser      *browse.Browser
+	queue        *jobs.Queue
+	workerPool   *jobs.WorkerPool
+	cfg          *config.Config
+	cfgPath      string
+	pushover     *pushover.Client
+	notifyMu     sync.Mutex    // Protects notification sending to prevent duplicates
+	store        StatsStore    // For stats operations (may be nil)
+	reviewStore  ReviewQueueStore // For Review Queue operations (may be nil)
 }
 
 // NewHandler creates a new API handler
@@ -52,6 +64,11 @@ func NewHandler(browser *browse.Browser, queue *jobs.Queue, workerPool *jobs.Wor
 // SetStore sets the stats store for session/lifetime stats operations.
 func (h *Handler) SetStore(store StatsStore) {
 	h.store = store
+}
+
+// SetReviewStore sets the Review Queue store.
+func (h *Handler) SetReviewStore(s ReviewQueueStore) {
+	h.reviewStore = s
 }
 
 // response helpers
@@ -696,6 +713,285 @@ func (h *Handler) TestPushover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "Test notification sent"})
+}
+
+// --- Review Queue handlers ---
+
+// reviewEntryResponse is the API shape for a single Review Queue entry.
+type reviewEntryResponse struct {
+	store.ReviewEntry
+	Candidates []interface{} `json:"candidates"`
+	LLMGuess   interface{}   `json:"llm_guess"`
+}
+
+func toReviewResponse(e *store.ReviewEntry) reviewEntryResponse {
+	return reviewEntryResponse{
+		ReviewEntry: *e,
+		Candidates:  []interface{}{},
+		LLMGuess:    nil,
+	}
+}
+
+// ListReviewQueue handles GET /api/review
+func (h *Handler) ListReviewQueue(w http.ResponseWriter, r *http.Request) {
+	if h.reviewStore == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"entries": []interface{}{}, "total": 0})
+		return
+	}
+
+	statusFilter := r.URL.Query().Get("status")
+	if statusFilter == "" {
+		statusFilter = "pending"
+	}
+
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+
+	all, err := h.reviewStore.GetReviewQueue()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Filter by status.
+	filtered := all[:0]
+	for _, e := range all {
+		if e.Status == statusFilter {
+			filtered = append(filtered, e)
+		}
+	}
+	total := len(filtered)
+
+	// Paginate.
+	start := (page - 1) * limit
+	end := start + limit
+	if start > total {
+		start = total
+	}
+	if end > total {
+		end = total
+	}
+	page_count := (total + limit - 1) / limit
+	if page_count == 0 {
+		page_count = 1
+	}
+
+	entries := make([]reviewEntryResponse, 0, end-start)
+	for i := range filtered[start:end] {
+		entries = append(entries, toReviewResponse(&filtered[start+i]))
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"entries": entries,
+		"total":   total,
+		"page":    page,
+		"pages":   page_count,
+	})
+}
+
+// GetReviewQueueCount handles GET /api/review/count
+func (h *Handler) GetReviewQueueCount(w http.ResponseWriter, r *http.Request) {
+	if h.reviewStore == nil {
+		writeJSON(w, http.StatusOK, map[string]int{"count": 0})
+		return
+	}
+	count, err := h.reviewStore.GetReviewQueueCount()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"count": count})
+}
+
+// ResolveReviewEntry handles PUT /api/review/{id}/resolve
+func (h *Handler) ResolveReviewEntry(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "entry ID required")
+		return
+	}
+	if h.reviewStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "review store not configured")
+		return
+	}
+	if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "resolved"})
+}
+
+// RetryReviewEntry handles PUT /api/review/{id}/retry
+func (h *Handler) RetryReviewEntry(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "entry ID required")
+		return
+	}
+	if h.reviewStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "review store not configured")
+		return
+	}
+	// Mark resolved; full pipeline re-run wired in a future phase.
+	if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "retried"})
+}
+
+// DiscardReviewEntry handles PUT /api/review/{id}/discard
+func (h *Handler) DiscardReviewEntry(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "entry ID required")
+		return
+	}
+	if h.reviewStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "review store not configured")
+		return
+	}
+	if err := h.reviewStore.UpdateReviewQueueStatus(id, "discarded"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "discarded"})
+}
+
+// ResubmitReviewEntry handles PUT /api/review/{id}/resubmit
+// Body: {"preset_id":"compress-hevc","original_path":"/incoming/file.mkv"}
+func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "entry ID required")
+		return
+	}
+	if h.reviewStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "review store not configured")
+		return
+	}
+
+	var req struct {
+		PresetID     string `json:"preset_id"`
+		OriginalPath string `json:"original_path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.OriginalPath == "" {
+		writeError(w, http.StatusBadRequest, "original_path required")
+		return
+	}
+	if req.PresetID == "" {
+		req.PresetID = "compress-hevc"
+	}
+
+	preset := ffmpeg.GetPreset(req.PresetID)
+	if preset == nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown preset: %s", req.PresetID))
+		return
+	}
+
+	// Mark resolved and enqueue the file.
+	if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.workerPool.Unpause()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		probes, err := h.browser.GetVideoFilesWithProgress(ctx, []string{req.OriginalPath}, nil)
+		if err != nil || len(probes) == 0 {
+			logger.Warn("Review resubmit: probe failed", "path", req.OriginalPath, "error", err)
+			return
+		}
+		_, _ = h.queue.AddMultiple(probes, req.PresetID, "")
+	}()
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "resubmitted"})
+}
+
+// SearchReviewEntry handles GET /api/review/{id}/search
+// Query params: q (title), year, type (movie|tv), season, episode
+func (h *Handler) SearchReviewEntry(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		writeError(w, http.StatusBadRequest, "q parameter required")
+		return
+	}
+
+	year, _ := strconv.Atoi(r.URL.Query().Get("year"))
+	season, _ := strconv.Atoi(r.URL.Query().Get("season"))
+	episode, _ := strconv.Atoi(r.URL.Query().Get("episode"))
+	mediaType := r.URL.Query().Get("type")
+
+	parsed := &intake.ParsedFilename{
+		Title:   q,
+		Year:    year,
+		Season:  season,
+		Episode: episode,
+	}
+	if mediaType == "tv" || (mediaType == "" && (season > 0 || episode > 0)) {
+		parsed.IsTV = true
+		parsed.MediaType = "tv"
+	} else {
+		parsed.MediaType = "movie"
+	}
+
+	tvdb := intake.NewTVDBClient(h.cfg.APIs.TVDBKey, nil)
+	tmdb := intake.NewTMDBClient(h.cfg.APIs.TMDBKey, nil)
+	omdb := intake.NewOMDbClient(h.cfg.APIs.OMDbKey, nil)
+	orch := intake.NewOrchestrator(tvdb, tmdb, omdb)
+
+	var result *intake.LookupResult
+	var lookupErr error
+	if parsed.IsTV {
+		result, lookupErr = orch.LookupTV(r.Context(), parsed, 0.0)
+	} else {
+		result, lookupErr = orch.LookupMovie(r.Context(), parsed, 0, 0.0)
+	}
+
+	candidates := []interface{}{}
+	if lookupErr == nil && result != nil {
+		posterURL := ""
+		if result.PosterPath != "" {
+			posterURL = "https://image.tmdb.org/t/p/w154" + result.PosterPath
+		}
+		candidates = append(candidates, map[string]interface{}{
+			"source":           result.Source,
+			"media_type":       result.MediaType,
+			"title":            result.Title,
+			"year":             result.Year,
+			"runtime_minutes":  result.RuntimeMinutes,
+			"episode_title":    result.EpisodeTitle,
+			"episode_air_date": result.EpisodeAirDate,
+			"poster_path":      result.PosterPath,
+			"poster_url":       posterURL,
+			"imdb_id":          result.ImdbID,
+			"tmdb_id":          result.TMDBId,
+			"tvdb_series_id":   result.TVDBSeriesID,
+			"confidence":       result.Confidence,
+		})
+	}
+
+	errMsg := ""
+	if lookupErr != nil {
+		errMsg = lookupErr.Error()
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"candidates": candidates,
+		"error":      errMsg,
+	})
 }
 
 // RetryJob handles POST /api/jobs/:id/retry

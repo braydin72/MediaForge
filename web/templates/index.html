@@ -1364,6 +1364,314 @@
             visibility: visible;
         }
 
+        /* ── View navigation tabs ── */
+        .view-nav {
+            display: flex;
+            gap: 2px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            padding: 3px;
+            border-radius: var(--radius-sm);
+        }
+
+        .view-tab {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 14px;
+            font-size: 0.875rem;
+            font-family: var(--font-sans);
+            font-weight: 500;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            white-space: nowrap;
+        }
+
+        .view-tab.active {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .view-tab:hover:not(.active) { color: var(--text-primary); }
+
+        .review-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 5px;
+            font-size: 0.6875rem;
+            font-weight: 700;
+            background: var(--error);
+            color: #fff;
+            border-radius: 9px;
+            line-height: 1;
+        }
+
+        /* ── Review Queue view ── */
+        .review-view {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            max-width: 1600px;
+            margin: 0 auto;
+            width: 100%;
+            padding: 24px;
+            gap: 12px;
+            min-height: 0;
+            overflow: hidden;
+            height: 100%;
+        }
+
+        .review-bulk-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            flex-shrink: 0;
+            font-size: 0.875rem;
+        }
+
+        .review-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-height: 0;
+            padding-right: 2px;
+        }
+
+        .review-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            transition: border-color var(--transition-fast);
+        }
+
+        .review-card:hover { border-color: var(--border-hover); }
+
+        .review-card-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 13px 16px 8px;
+        }
+
+        .review-card-check {
+            margin-top: 2px;
+            flex-shrink: 0;
+            width: 15px;
+            height: 15px;
+            cursor: pointer;
+            accent-color: var(--accent);
+        }
+
+        .review-card-filename {
+            flex: 1;
+            font-weight: 600;
+            font-size: 0.9375rem;
+            font-family: var(--font-mono);
+            color: var(--text-primary);
+            word-break: break-all;
+            min-width: 0;
+        }
+
+        .review-card-time {
+            font-size: 0.8125rem;
+            color: var(--text-tertiary);
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .review-card-body {
+            padding: 0 16px 13px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .review-reason {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: var(--error-light);
+            color: var(--error);
+            border-radius: var(--radius-sm);
+            font-size: 0.8125rem;
+            font-weight: 500;
+            align-self: flex-start;
+            max-width: 100%;
+            word-break: break-word;
+        }
+
+        .review-probe {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .review-probe-sep { color: var(--text-tertiary); }
+
+        .review-candidates {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .review-candidate {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 2px solid var(--border);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            background: var(--bg-primary);
+            flex: 1;
+            min-width: 200px;
+            max-width: 340px;
+        }
+
+        .review-candidate.selected {
+            border-color: var(--accent);
+            background: var(--accent-light);
+        }
+
+        .review-candidate:hover:not(.selected) { border-color: var(--border-hover); }
+
+        .review-candidate-poster {
+            width: 40px;
+            height: 58px;
+            object-fit: cover;
+            border-radius: 4px;
+            background: var(--bg-tertiary);
+            flex-shrink: 0;
+        }
+
+        .review-candidate-title {
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: var(--text-primary);
+        }
+
+        .review-candidate-meta {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        .review-candidate-footer {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            margin-top: 5px;
+        }
+
+        .review-candidate-source {
+            font-size: 0.6875rem;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .review-candidate-pct {
+            font-size: 0.6875rem;
+            font-weight: 600;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: var(--success-light);
+            color: var(--success);
+        }
+
+        .review-llm {
+            display: flex;
+            gap: 8px;
+            padding: 9px 12px;
+            background: var(--purple-light);
+            border: 1px solid var(--purple);
+            border-radius: var(--radius-sm);
+            font-size: 0.8125rem;
+            align-items: flex-start;
+        }
+
+        .review-llm-label {
+            font-weight: 600;
+            color: var(--purple);
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .review-llm-text { color: var(--text-secondary); }
+
+        .review-search-form {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-sm);
+        }
+
+        .review-search-input,
+        .review-search-year,
+        .review-search-type {
+            height: 34px;
+            padding: 0 10px;
+            font-size: 0.875rem;
+            font-family: var(--font-sans);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            outline: none;
+            transition: border-color var(--transition-fast);
+        }
+
+        .review-search-input { flex: 1; min-width: 160px; }
+        .review-search-year { width: 80px; }
+        .review-search-type { cursor: pointer; }
+
+        .review-search-input:focus,
+        .review-search-year:focus { border-color: var(--accent); }
+
+        .review-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            padding-top: 8px;
+            border-top: 1px solid var(--border);
+        }
+
+        .review-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            padding: 80px 24px;
+            color: var(--text-secondary);
+            text-align: center;
+        }
+
+        .review-empty-icon { opacity: 0.25; }
+
         .settings-panel {
             position: fixed;
             top: 0;
@@ -1981,6 +2289,24 @@
                     </div>
                 </div>
             </div>
+            <nav class="view-nav">
+                <button class="view-tab active" data-view="queue" onclick="switchView('queue')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+                        <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+                    </svg>
+                    Queue
+                </button>
+                <button class="view-tab" data-view="review" onclick="switchView('review')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    Review
+                    <span class="review-badge" id="review-badge" style="display:none">0</span>
+                </button>
+            </nav>
+
             <div class="header-right">
                 <a href="https://github.com/gwlsn/shrinkray" target="_blank" rel="noopener noreferrer"
                    class="menu-btn" title="View on GitHub">
@@ -2013,7 +2339,7 @@
             </div>
         </header>
 
-        <main class="main">
+        <main class="main" id="main-view">
             <div class="browser-panel">
                 <div class="panel">
                     <div class="breadcrumb-bar">
@@ -2179,6 +2505,30 @@
                 </div>
             </div>
         </main>
+    </div>
+
+    <!-- Review Queue View -->
+    <div class="review-view" id="review-view" style="display:none">
+        <div class="review-bulk-bar">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                <input type="checkbox" id="review-select-all" onchange="reviewSelectAll(this)">
+                <span>Select all</span>
+            </label>
+            <div style="flex:1"></div>
+            <button class="btn btn-secondary btn-sm" onclick="reviewRetryAll()">Retry All</button>
+            <button class="btn btn-secondary btn-sm" onclick="reviewDiscardSelected()">Discard Selected</button>
+        </div>
+        <div class="review-list" id="review-list">
+            <div class="review-empty">
+                <div class="review-empty-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                </div>
+                <div style="font-size:1rem;font-weight:500">No items in Review Queue</div>
+                <div style="font-size:0.875rem;color:var(--text-tertiary)">Files that need attention will appear here</div>
+            </div>
+        </div>
     </div>
 
     <!-- Settings Panel -->
@@ -4755,6 +5105,289 @@
                 closeSettings();
             }
         });
+
+        // ── Review Queue ──────────────────────────────────────────────
+
+        let _reviewEntries = [];
+        let _reviewSelected = {}; // entryId → candidateIndex
+
+        function switchView(view) {
+            document.querySelectorAll('.view-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+            const mainView = document.getElementById('main-view');
+            const reviewView = document.getElementById('review-view');
+            if (view === 'review') {
+                mainView.style.display = 'none';
+                reviewView.style.display = '';
+                loadReviewQueue();
+            } else {
+                mainView.style.display = '';
+                reviewView.style.display = 'none';
+            }
+        }
+
+        async function loadReviewQueue() {
+            try {
+                const res = await fetch('/api/review?status=pending&limit=100');
+                const data = await res.json();
+                _reviewEntries = data.entries || [];
+                renderReviewList();
+            } catch (e) { console.error('loadReviewQueue:', e); }
+        }
+
+        function renderReviewList() {
+            const list = document.getElementById('review-list');
+            if (_reviewEntries.length === 0) {
+                list.innerHTML = `
+                    <div class="review-empty">
+                        <div class="review-empty-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                        </div>
+                        <div style="font-size:1rem;font-weight:500">No items in Review Queue</div>
+                        <div style="font-size:0.875rem;color:var(--text-tertiary)">Files that need attention will appear here</div>
+                    </div>`;
+                return;
+            }
+            list.innerHTML = _reviewEntries.map(e => reviewCardHTML(e)).join('');
+        }
+
+        function reviewCardHTML(e) {
+            const probe = reviewParseProbe(e.ffprobe_info);
+            const probeStr = reviewProbeString(probe);
+            const timeAgo = reviewTimeAgo(e.created_at);
+            const cands = (e.candidates || []);
+            const llm = e.llm_guess || null;
+            const candHTML = cands.length
+                ? cands.map((c, i) => reviewCandHTML(e.id, c, i)).join('')
+                : '';
+            const llmHTML = llm ? `
+                <div class="review-llm">
+                    <span class="review-llm-label">AI guess:</span>
+                    <span class="review-llm-text">${escReview(llm.title||'')}${llm.year?' ('+llm.year+')':''} — ${escReview(llm.reasoning||'')}</span>
+                </div>` : '';
+            return `
+            <div class="review-card" id="rcard-${e.id}">
+              <div class="review-card-header">
+                <input type="checkbox" class="review-card-check" id="rcheck-${e.id}" onchange="reviewUpdateBulk()">
+                <div class="review-card-filename">${escReview(e.filename)}</div>
+                <div class="review-card-time">${timeAgo}</div>
+              </div>
+              <div class="review-card-body">
+                <div class="review-reason">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  ${escReview(e.reason)}
+                </div>
+                ${probeStr ? `<div class="review-probe">${probeStr}</div>` : ''}
+                <div class="review-candidates" id="rcands-${e.id}">${candHTML}</div>
+                ${llmHTML}
+                <div id="rsearch-${e.id}" style="display:none" class="review-search-form">
+                  <input class="review-search-input" placeholder="Title..." id="rsq-${e.id}"
+                         onkeydown="if(event.key==='Enter')reviewDoSearch('${e.id}')">
+                  <input class="review-search-year" type="number" placeholder="Year" id="rsyear-${e.id}"
+                         onkeydown="if(event.key==='Enter')reviewDoSearch('${e.id}')">
+                  <select class="review-search-type" id="rstype-${e.id}">
+                    <option value="">Auto</option>
+                    <option value="movie">Movie</option>
+                    <option value="tv">TV Show</option>
+                  </select>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewDoSearch('${e.id}')">Search</button>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewCloseSearch('${e.id}')">Cancel</button>
+                </div>
+                <div class="review-actions">
+                  <button class="btn btn-primary btn-sm" onclick="reviewPick('${e.id}')">Pick Selected</button>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewToggleSearch('${e.id}')">Search Manually</button>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewRetry('${e.id}')">Retry</button>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewDiscard('${e.id}')">Discard</button>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewResubmit('${e.id}','${e.original_path.replace(/'/g,'\\x27')}')">Re-add</button>
+                </div>
+              </div>
+            </div>`;
+        }
+
+        function reviewCandHTML(entryId, c, idx) {
+            const sel = (_reviewSelected[entryId] === idx);
+            const poster = c.poster_url || (c.poster_path ? 'https://image.tmdb.org/t/p/w92'+c.poster_path : '');
+            const pct = Math.round((c.confidence||0)*100);
+            return `
+            <div class="review-candidate${sel?' selected':''}" onclick="reviewSelectCand('${entryId}',${idx})" id="rcand-${entryId}-${idx}">
+              ${poster ? `<img class="review-candidate-poster" src="${escReview(poster)}" alt="" loading="lazy" onerror="this.style.display='none'">` : ''}
+              <div style="flex:1;min-width:0">
+                <div class="review-candidate-title">${escReview(c.title||'')}</div>
+                <div class="review-candidate-meta">${c.year||''}${c.episode_title?' · '+escReview(c.episode_title):''}</div>
+                <div class="review-candidate-footer">
+                  <span class="review-candidate-source">${c.source||''}</span>
+                  <span class="review-candidate-pct">${pct}%</span>
+                </div>
+              </div>
+            </div>`;
+        }
+
+        function reviewSelectCand(entryId, idx) {
+            _reviewSelected[entryId] = idx;
+            const box = document.getElementById('rcands-'+entryId);
+            if (!box) return;
+            box.querySelectorAll('.review-candidate').forEach((el, i) => el.classList.toggle('selected', i === idx));
+        }
+
+        function reviewToggleSearch(id) {
+            const f = document.getElementById('rsearch-'+id);
+            if (f.style.display === 'none') { f.style.display = ''; document.getElementById('rsq-'+id).focus(); }
+            else f.style.display = 'none';
+        }
+
+        function reviewCloseSearch(id) { document.getElementById('rsearch-'+id).style.display = 'none'; }
+
+        async function reviewDoSearch(id) {
+            const q = (document.getElementById('rsq-'+id).value||'').trim();
+            if (!q) return;
+            const year = document.getElementById('rsyear-'+id).value||'';
+            const type = document.getElementById('rstype-'+id).value||'';
+            const params = new URLSearchParams({q});
+            if (year) params.append('year', year);
+            if (type) params.append('type', type);
+            const box = document.getElementById('rcands-'+id);
+            box.innerHTML = '<div style="font-size:0.8125rem;color:var(--text-tertiary)">Searching...</div>';
+            try {
+                const res = await fetch(`/api/review/${id}/search?${params}`);
+                const data = await res.json();
+                const cands = data.candidates || [];
+                delete _reviewSelected[id];
+                box.innerHTML = cands.length
+                    ? cands.map((c, i) => reviewCandHTML(id, c, i)).join('')
+                    : '<div style="font-size:0.8125rem;color:var(--text-tertiary)">No results. Try a different query.</div>';
+                reviewCloseSearch(id);
+            } catch (e) {
+                box.innerHTML = '<div style="font-size:0.8125rem;color:var(--error)">Search failed.</div>';
+            }
+        }
+
+        async function reviewPick(id) {
+            const idx = _reviewSelected[id];
+            if (idx === undefined) { alert('Select a candidate first.'); return; }
+            const entry = _reviewEntries.find(e => e.id === id);
+            const cands = (entry && entry.candidates) || [];
+            const cand = cands[idx] || {index: idx};
+            const res = await fetch(`/api/review/${id}/resolve`, {
+                method: 'PUT', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({candidate: cand})
+            });
+            if (res.ok) { reviewRemoveCard(id); reviewUpdateBadge(); }
+        }
+
+        async function reviewRetry(id) {
+            const res = await fetch(`/api/review/${id}/retry`, {method:'PUT'});
+            if (res.ok) { reviewRemoveCard(id); reviewUpdateBadge(); }
+        }
+
+        async function reviewDiscard(id) {
+            if (!confirm('Discard this file from the Review Queue?')) return;
+            const res = await fetch(`/api/review/${id}/discard`, {method:'PUT'});
+            if (res.ok) { reviewRemoveCard(id); reviewUpdateBadge(); }
+        }
+
+        async function reviewResubmit(id, originalPath) {
+            const presetId = selectedPreset || 'compress-hevc';
+            const res = await fetch(`/api/review/${id}/resubmit`, {
+                method: 'PUT', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({preset_id: presetId, original_path: originalPath})
+            });
+            if (res.ok) {
+                reviewRemoveCard(id);
+                reviewUpdateBadge();
+                switchView('queue');
+            }
+        }
+
+        function reviewRemoveCard(id) {
+            _reviewEntries = _reviewEntries.filter(e => e.id !== id);
+            delete _reviewSelected[id];
+            const card = document.getElementById('rcard-'+id);
+            if (card) card.remove();
+            if (_reviewEntries.length === 0) renderReviewList();
+        }
+
+        async function reviewRetryAll() {
+            if (!_reviewEntries.length) return;
+            if (!confirm(`Retry all ${_reviewEntries.length} item${_reviewEntries.length===1?'':'s'}?`)) return;
+            for (const e of [..._reviewEntries]) await fetch(`/api/review/${e.id}/retry`, {method:'PUT'});
+            _reviewEntries = [];
+            renderReviewList();
+            reviewUpdateBadge();
+        }
+
+        function reviewGetSelected() {
+            return _reviewEntries.filter(e => { const cb = document.getElementById('rcheck-'+e.id); return cb && cb.checked; });
+        }
+
+        async function reviewDiscardSelected() {
+            const sel = reviewGetSelected();
+            if (!sel.length) return;
+            if (!confirm(`Discard ${sel.length} selected item${sel.length===1?'':'s'}?`)) return;
+            for (const e of sel) {
+                await fetch(`/api/review/${e.id}/discard`, {method:'PUT'});
+                reviewRemoveCard(e.id);
+            }
+            reviewUpdateBadge();
+        }
+
+        function reviewSelectAll(cb) {
+            document.querySelectorAll('.review-card-check').forEach(c => c.checked = cb.checked);
+        }
+
+        function reviewUpdateBulk() {
+            const allCb = document.getElementById('review-select-all');
+            if (!allCb) return;
+            const sel = reviewGetSelected();
+            allCb.indeterminate = sel.length > 0 && sel.length < _reviewEntries.length;
+            allCb.checked = sel.length === _reviewEntries.length && _reviewEntries.length > 0;
+        }
+
+        async function reviewUpdateBadge() {
+            try {
+                const res = await fetch('/api/review/count');
+                const data = await res.json();
+                const n = data.count || 0;
+                const badge = document.getElementById('review-badge');
+                if (badge) { badge.textContent = n > 99 ? '99+' : n; badge.style.display = n > 0 ? '' : 'none'; }
+            } catch (_) {}
+        }
+
+        function reviewParseProbe(json) {
+            if (!json) return null;
+            try { return JSON.parse(json); } catch { return null; }
+        }
+
+        function reviewProbeString(p) {
+            if (!p) return '';
+            const parts = [];
+            if (p.video_codec) parts.push(`<span>${p.video_codec.toUpperCase()}</span>`);
+            if (p.width && p.height) parts.push(`<span class="review-probe-sep">·</span><span>${p.width}×${p.height}</span>`);
+            if (p.duration) {
+                const secs = Math.round(p.duration / 1e9);
+                const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60), s = secs%60;
+                const dur = h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`;
+                parts.push(`<span class="review-probe-sep">·</span><span>${dur}</span>`);
+            }
+            if (p.format) parts.push(`<span class="review-probe-sep">·</span><span>${escReview(p.format.split(',')[0])}</span>`);
+            return parts.join('');
+        }
+
+        function reviewTimeAgo(iso) {
+            const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+            if (diff < 60) return 'just now';
+            if (diff < 3600) return Math.floor(diff/60)+'m ago';
+            if (diff < 86400) return Math.floor(diff/3600)+'h ago';
+            return Math.floor(diff/86400)+'d ago';
+        }
+
+        function escReview(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        // Start badge polling on page load
+        reviewUpdateBadge();
+        setInterval(reviewUpdateBadge, 30000);
 
         // Initialize
         populateHourDropdowns();

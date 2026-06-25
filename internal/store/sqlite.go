@@ -714,6 +714,27 @@ func (s *SQLiteStore) AddToReviewQueue(e *ReviewEntry) error {
 	return err
 }
 
+// GetReviewEntry returns a single review queue entry by ID, or nil if not found.
+func (s *SQLiteStore) GetReviewEntry(id string) (*ReviewEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var e ReviewEntry
+	var createdAt string
+	err := s.db.QueryRow(
+		`SELECT id, original_path, filename, reason, COALESCE(ffprobe_info,''), status, created_at
+		 FROM review_queue WHERE id = ?`, id,
+	).Scan(&e.ID, &e.OriginalPath, &e.Filename, &e.Reason, &e.FFProbeInfo, &e.Status, &createdAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	e.CreatedAt = parseTime(createdAt)
+	return &e, nil
+}
+
 // GetReviewQueue returns all review queue entries, newest first.
 func (s *SQLiteStore) GetReviewQueue() ([]ReviewEntry, error) {
 	s.mu.RLock()
