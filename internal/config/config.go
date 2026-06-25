@@ -144,6 +144,16 @@ type Config struct {
 	// Default is 1 to avoid high CPU usage on media servers.
 	// Range: 1-3
 	MaxConcurrentAnalyses int `yaml:"max_concurrent_analyses"`
+
+	// EncoderSpeed is the transcoding speed preset: "slowest", "slower", "slow", "medium", "fast"
+	EncoderSpeed string `yaml:"encoder_speed"`
+
+	// TranscodeMode selects encoding strategy: "smartshrink" (default) or "fixed_reduction"
+	TranscodeMode string `yaml:"transcode_mode"`
+
+	// TargetReductionPct is the target file-size reduction for fixed_reduction mode (1-99).
+	// 40 means output should be ~60% of the original size.
+	TargetReductionPct int `yaml:"target_reduction_pct"`
 }
 
 // DefaultConfig returns a config with sensible defaults
@@ -193,6 +203,9 @@ func DefaultConfig() *Config {
 		TonemapHDR:            false,
 		TonemapAlgorithm:      "hable",
 		MaxConcurrentAnalyses: 1,
+		EncoderSpeed:          "medium",
+		TranscodeMode:         "smartshrink",
+		TargetReductionPct:    40,
 	}
 }
 
@@ -235,6 +248,16 @@ func Load(path string) (*Config, error) {
 
 	if cfg.OutputFormat == "" {
 		cfg.OutputFormat = "mkv"
+	}
+
+	if cfg.EncoderSpeed == "" {
+		cfg.EncoderSpeed = "medium"
+	}
+	if cfg.TranscodeMode == "" {
+		cfg.TranscodeMode = "smartshrink"
+	}
+	if cfg.TargetReductionPct == 0 {
+		cfg.TargetReductionPct = 40
 	}
 
 	// Validate tonemapping algorithm (use shared validation)

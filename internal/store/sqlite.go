@@ -675,6 +675,21 @@ func (s *SQLiteStore) SessionLifetimeStats() (sessionSaved, lifetimeSaved int64,
 	return s.getSavedStats()
 }
 
+// WriteReviewEntry implements jobs.ReviewQueueWriter. It persists a review queue
+// entry using raw string fields so the jobs package can call it without importing store types.
+func (s *SQLiteStore) WriteReviewEntry(id, originalPath, filename, reason, ffprobeJSON string) error {
+	entry := &ReviewEntry{
+		ID:           id,
+		OriginalPath: originalPath,
+		Filename:     filename,
+		Reason:       reason,
+		FFProbeInfo:  ffprobeJSON,
+		Status:       ReviewStatusPending,
+		CreatedAt:    time.Now().UTC(),
+	}
+	return s.AddToReviewQueue(entry)
+}
+
 // AddToReviewQueue inserts a new review queue entry.
 // Returns without error if an entry with the same original_path already exists and is pending.
 func (s *SQLiteStore) AddToReviewQueue(e *ReviewEntry) error {

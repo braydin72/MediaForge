@@ -338,6 +338,11 @@ func BuildTempPath(inputPath, tempDir, format string) string {
 	if format == "mp4" {
 		outExt = "mp4"
 	}
+	if format == "preserve" {
+		if ext := strings.ToLower(filepath.Ext(inputPath)); ext == ".mp4" || ext == ".m4v" {
+			outExt = "mp4"
+		}
+	}
 	tempName := fmt.Sprintf("%s.%016x.shrinkray.tmp.%s", name, rand.Uint64(), outExt) //nolint:gosec // temp filename uniqueness, not security
 	return filepath.Join(tempDir, tempName)
 }
@@ -364,6 +369,11 @@ func FinalizeTranscode(inputPath, tempPath, format string, replace bool, useComp
 	outExt := ".mkv"
 	if format == "mp4" {
 		outExt = ".mp4"
+	}
+	if format == "preserve" {
+		if srcExt := strings.ToLower(filepath.Ext(inputPath)); srcExt == ".mp4" || srcExt == ".m4v" {
+			outExt = ".mp4"
+		}
 	}
 	finalPath = filepath.Join(dir, name+outExt)
 
@@ -408,4 +418,16 @@ func FinalizeTranscode(inputPath, tempPath, format string, replace bool, useComp
 
 	os.Remove(tempPath)
 	return finalPath, nil
+}
+
+// ResolveOutputFormat converts "preserve" to the actual container format by inspecting
+// the source file extension. Returns "mkv" or "mp4". Pass-through for "mkv" and "mp4".
+func ResolveOutputFormat(inputPath, configFormat string) string {
+	if configFormat != "preserve" {
+		return configFormat
+	}
+	if ext := strings.ToLower(filepath.Ext(inputPath)); ext == ".mp4" || ext == ".m4v" {
+		return "mp4"
+	}
+	return "mkv"
 }

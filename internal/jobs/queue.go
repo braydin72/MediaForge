@@ -34,6 +34,12 @@ type StoreWithStats interface {
 	SessionLifetimeStats() (sessionSaved, lifetimeSaved int64, err error)
 }
 
+// ReviewQueueWriter is optionally implemented by stores that support a review queue.
+// Workers use this to route failed encodes for human review.
+type ReviewQueueWriter interface {
+	WriteReviewEntry(id, originalPath, filename, reason, ffprobeJSON string) error
+}
+
 // Queue manages the job queue with persistence
 type Queue struct {
 	mu    sync.RWMutex
@@ -751,6 +757,21 @@ func checkSkipReason(probe *ffmpeg.ProbeResult, meta *ffmpeg.BasePresetMeta, all
 	}
 
 	return "" // Proceed with transcode
+}
+
+// SendToReviewQueue persists a review queue entry if the backing store supports it.
+func (q *Queue) SendToReviewQueue(jobID, originalPath, filename, reason, ffprobeJSON string) {
+	q.mu.RLock()
+	s := q.store
+	q.mu.RUnlock()
+	if s == nil {
+		return
+	}
+	if rqw, ok := s.(ReviewQueueWriter); ok {
+		if err := rqw.WriteReviewEntry(jobID, originalPath, filename, reason, ffprobeJSON); err != nil {
+			logger.Warn("Failed to write review queue entry", "job_id", jobID, "error", err)
+		}
+	}
 }
 
 // getPresetMeta returns metadata for skip checks, preferring the full preset if available,

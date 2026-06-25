@@ -12,10 +12,11 @@ type Preset struct {
 	ID            string  `json:"id"`
 	Name          string  `json:"name"`
 	Description   string  `json:"description"`
-	Encoder       HWAccel `json:"encoder"`         // Which encoder to use
-	Codec         Codec   `json:"codec"`           // Target codec (HEVC or AV1)
-	MaxHeight     int     `json:"max_height"`      // 0 = no scaling, 1080, 720, etc.
-	IsSmartShrink bool    `json:"is_smart_shrink"` // True for VMAF-based presets
+	Encoder       HWAccel `json:"encoder"`          // Which encoder to use
+	Codec         Codec   `json:"codec"`            // Target codec (HEVC or AV1)
+	MaxHeight     int     `json:"max_height"`       // 0 = no scaling, 1080, 720, etc.
+	IsSmartShrink bool    `json:"is_smart_shrink"`  // True for VMAF-based presets
+	SpeedPreset   string  `json:"speed_preset,omitempty"` // "slowest"|"slower"|"slow"|"medium"|"fast"
 }
 
 // WithEncoder returns a copy of the preset with a different encoder.
@@ -24,6 +25,90 @@ func (p *Preset) WithEncoder(encoder HWAccel) *Preset {
 	copy := *p
 	copy.Encoder = encoder
 	return &copy
+}
+
+// WithSpeedPreset returns a copy of the preset with the given speed preset applied.
+func (p *Preset) WithSpeedPreset(speed string) *Preset {
+	copy := *p
+	copy.SpeedPreset = speed
+	return &copy
+}
+
+// speedPresetFlag maps a human speed name to the encoder-specific preset string.
+// Returns "" if the encoder does not support a speed preset.
+func speedPresetFlag(encoder HWAccel, codec Codec, speed string) string {
+	switch encoder {
+	case HWAccelNone: // libx265 or libsvtav1
+		if codec == CodecAV1 {
+			switch speed {
+			case "slowest":
+				return "0"
+			case "slower":
+				return "2"
+			case "slow":
+				return "4"
+			case "fast":
+				return "9"
+			default:
+				return "6"
+			}
+		}
+		// libx265
+		switch speed {
+		case "slowest":
+			return "veryslow"
+		case "slower":
+			return "slower"
+		case "slow":
+			return "slow"
+		case "fast":
+			return "fast"
+		default:
+			return "medium"
+		}
+	case HWAccelNVENC: // p1=slowest ... p7=fastest, p4=medium
+		switch speed {
+		case "slowest":
+			return "p1"
+		case "slower":
+			return "p2"
+		case "slow":
+			return "p3"
+		case "fast":
+			return "p6"
+		default:
+			return "p4"
+		}
+	case HWAccelQSV: // veryslow/slow/medium/fast/veryfast
+		switch speed {
+		case "slowest":
+			return "veryslow"
+		case "slower":
+			return "slow"
+		case "slow":
+			return "slow"
+		case "fast":
+			return "fast"
+		default:
+			return "medium"
+		}
+	default: // VideoToolbox, VAAPI — no preset support
+		return ""
+	}
+}
+
+// applySpeedToExtraArgs returns a copy of args with the -preset value replaced by newPreset.
+// If -preset is not found, returns args unchanged.
+func applySpeedToExtraArgs(args []string, newPreset string) []string {
+	result := make([]string, len(args))
+	copy(result, args)
+	for i := 0; i < len(result)-1; i++ {
+		if result[i] == "-preset" {
+			result[i+1] = newPreset
+			return result
+		}
+	}
+	return result
 }
 
 // encoderSettings defines FFmpeg settings for each encoder
@@ -572,8 +657,14 @@ func BuildPresetArgs(preset *Preset, sourceBitrate int64, sourceWidth, sourceHei
 
 	outputArgs = append(outputArgs, config.qualityFlag, qualityStr)
 
-	// Add encoder-specific extra args
-	outputArgs = append(outputArgs, config.extraArgs...)
+	// Add encoder-specific extra args, applying speed preset override if set
+	extraArgs := config.extraArgs
+	if preset.SpeedPreset != "" {
+		if flag := speedPresetFlag(preset.Encoder, preset.Codec, preset.SpeedPreset); flag != "" {
+			extraArgs = applySpeedToExtraArgs(extraArgs, flag)
+		}
+	}
+	outputArgs = append(outputArgs, extraArgs...)
 
 	// Add HDR preservation flags when preserving HDR content
 	// Per FFmpeg docs and Jellyfin implementation:

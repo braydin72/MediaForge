@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -447,6 +448,7 @@ func (w *Worker) tryEncoderFallbacks(
 	tonemapParams *ffmpeg.TonemapParams,
 	priorError error,
 	subtitleIndices []int,
+	outputFmt string,
 ) (*ffmpeg.TranscodeResult, error) {
 	currentEncoder := preset.Encoder
 	lastError := priorError
@@ -479,7 +481,7 @@ func (w *Worker) tryEncoderFallbacks(
 		// Try with HW decode first (unless this encoder requires SW decode)
 		if !fallbackNeedsSWDecode {
 			result, err := w.attemptTranscode(jobCtx, job, fallbackPreset, tempPath,
-				duration, qualityHEVC, qualityAV1, qualityMod, totalFrames, tonemapParams, false, subtitleIndices)
+				duration, qualityHEVC, qualityAV1, qualityMod, totalFrames, tonemapParams, false, subtitleIndices, outputFmt)
 
 			if err == nil {
 				logger.Info("Fallback encoder succeeded", "job_id", job.ID, "encoder", fallback.Accel)
@@ -496,7 +498,7 @@ func (w *Worker) tryEncoderFallbacks(
 		// Try SW decode with fallback encoder (unless it's software encoder - no point)
 		if shouldRetryWithSoftwareDecode(fallback.Accel) {
 			result, err := w.attemptTranscode(jobCtx, job, fallbackPreset, tempPath,
-				duration, qualityHEVC, qualityAV1, qualityMod, totalFrames, tonemapParams, true, subtitleIndices)
+				duration, qualityHEVC, qualityAV1, qualityMod, totalFrames, tonemapParams, true, subtitleIndices, outputFmt)
 
 			if err == nil {
 				logger.Info("Fallback encoder succeeded with SW decode", "job_id", job.ID, "encoder", fallback.Accel)
@@ -529,6 +531,7 @@ func (w *Worker) attemptTranscode(
 	tonemapParams *ffmpeg.TonemapParams,
 	softwareDecode bool,
 	subtitleIndices []int,
+	outputFmt string,
 ) (*ffmpeg.TranscodeResult, error) {
 	// Create fresh progress channel (Transcode closes it when done)
 	progressCh := make(chan ffmpeg.Progress, 10)
@@ -542,7 +545,7 @@ func (w *Worker) attemptTranscode(
 	return w.transcoder.Transcode(jobCtx, job.InputPath, tempPath,
 		preset, duration, job.Bitrate, job.Width, job.Height,
 		qualityHEVC, qualityAV1, qualityMod, totalFrames, progressCh,
-		softwareDecode, w.cfg.OutputFormat, tonemapParams, subtitleIndices)
+		softwareDecode, outputFmt, tonemapParams, subtitleIndices)
 }
 
 // processJob handles a single transcoding job
@@ -578,9 +581,17 @@ func (w *Worker) processJob(job *Job) {
 		return
 	}
 
+	// Apply speed preset from config
+	if w.cfg.EncoderSpeed != "" {
+		preset = preset.WithSpeedPreset(w.cfg.EncoderSpeed)
+	}
+
+	// Resolve "preserve" to the actual container format for this source file
+	outputFmt := ffmpeg.ResolveOutputFormat(job.InputPath, w.cfg.OutputFormat)
+
 	// Build temp output path
 	tempDir := w.cfg.GetTempDir()
-	tempPath := ffmpeg.BuildTempPath(job.InputPath, tempDir, w.cfg.OutputFormat)
+	tempPath := ffmpeg.BuildTempPath(job.InputPath, tempDir, outputFmt)
 
 	// Mark job as started (first worker to call this wins)
 	if err := w.queue.StartJob(job.ID, tempPath); err != nil {
@@ -653,6 +664,37 @@ func (w *Worker) processJob(job *Job) {
 		)
 	}
 
+	// Fixed Reduction mode: find the CRF that achieves the target size reduction
+	if !preset.IsSmartShrink && w.cfg.TranscodeMode == "fixed_reduction" {
+		var shouldSkip bool
+		var skipReason string
+		var foundCRF int
+		var frErr error
+		shouldSkip, skipReason, foundCRF, frErr = w.pool.runFixedReductionAnalysis(jobCtx, job, preset, w.cfg.TargetReductionPct)
+		if frErr != nil {
+			if jobCtx.Err() != nil {
+				if w.ctx.Err() == nil {
+					_ = w.queue.CancelJob(job.ID)
+				}
+				return
+			}
+			logger.Error("Fixed reduction analysis failed", "job_id", job.ID, "error", frErr)
+			_ = w.queue.FailJob(job.ID, frErr.Error())
+			return
+		}
+		if shouldSkip {
+			logger.Info("Fixed reduction: target unreachable", "job_id", job.ID, "reason", skipReason)
+			_ = w.queue.FailJob(job.ID, skipReason)
+			w.queue.SendToReviewQueue(job.ID, job.InputPath, filepath.Base(job.InputPath), skipReason, "")
+			return
+		}
+		if foundCRF > 0 {
+			qualityHEVC = foundCRF
+			qualityAV1 = foundCRF
+		}
+		_ = w.queue.UpdateJobPhase(job.ID, PhaseEncoding)
+	}
+
 	// Create progress channel
 	progressCh := make(chan ffmpeg.Progress, 10)
 
@@ -700,7 +742,6 @@ func (w *Worker) processJob(job *Job) {
 	// Image-based subs (PGS, VOBSUB, DVB) are dropped for MP4 since ffmpeg cannot
 	// convert them to mov_text and will error if asked to.
 	var subtitleIndices []int // nil = map all (default)
-	outputFmt := w.cfg.OutputFormat
 	if outputFmt == "mkv" || outputFmt == "mp4" {
 		probeCtx, probeCancel := context.WithTimeout(jobCtx, 10*time.Second)
 		subtitleStreams, err := w.prober.ProbeSubtitles(probeCtx, job.InputPath)
@@ -730,7 +771,7 @@ func (w *Worker) processJob(job *Job) {
 		}
 	}
 
-	result, err := w.transcoder.Transcode(jobCtx, job.InputPath, tempPath, preset, duration, job.Bitrate, job.Width, job.Height, qualityHEVC, qualityAV1, qualityMod, totalFrames, progressCh, useSoftwareDecode, w.cfg.OutputFormat, tonemapParams, subtitleIndices)
+	result, err := w.transcoder.Transcode(jobCtx, job.InputPath, tempPath, preset, duration, job.Bitrate, job.Width, job.Height, qualityHEVC, qualityAV1, qualityMod, totalFrames, progressCh, useSoftwareDecode, outputFmt, tonemapParams, subtitleIndices)
 
 	// Recovery strategies for hardware encoder failures
 	if err != nil && jobCtx.Err() != context.Canceled && preset.Encoder != ffmpeg.HWAccelNone {
@@ -740,7 +781,7 @@ func (w *Worker) processJob(job *Job) {
 				"job_id", job.ID, "error", err.Error())
 
 			result, err = w.attemptTranscode(jobCtx, job, preset, tempPath,
-				duration, qualityHEVC, qualityAV1, qualityMod, totalFrames, tonemapParams, true, subtitleIndices)
+				duration, qualityHEVC, qualityAV1, qualityMod, totalFrames, tonemapParams, true, subtitleIndices, outputFmt)
 
 			if err == nil {
 				logger.Info("Software decode fallback succeeded", "job_id", job.ID)
@@ -753,7 +794,7 @@ func (w *Worker) processJob(job *Job) {
 				"job_id", job.ID, "encoder", preset.Encoder, "error", err.Error())
 
 			result, err = w.tryEncoderFallbacks(jobCtx, job, preset, tempPath,
-				duration, qualityHEVC, qualityAV1, qualityMod, totalFrames, tonemapParams, err, subtitleIndices)
+				duration, qualityHEVC, qualityAV1, qualityMod, totalFrames, tonemapParams, err, subtitleIndices, outputFmt)
 		}
 	}
 
@@ -777,6 +818,72 @@ func (w *Worker) processJob(job *Job) {
 		return
 	}
 
+	// SmartShrink retry loop: attempt to achieve 40% file-size reduction target
+	if result != nil && preset.IsSmartShrink {
+		const sizeTarget = 0.60 // output must be <= 60% of source (40% reduction)
+		inputSize := result.InputSize
+
+		if float64(result.OutputSize) > float64(inputSize)*sizeTarget {
+			qRange := ffmpeg.GetQualityRange(preset.Encoder, preset.Codec)
+			threshold := getSmartShrinkThreshold(job.SmartShrinkQuality)
+			bestResult := result
+			currentCRF := qualityHEVC
+			if qualityAV1 > 0 && currentCRF == 0 {
+				currentCRF = qualityAV1
+			}
+
+			for jobCtx.Err() == nil {
+				currentCRF += 2
+				if currentCRF > qRange.Max {
+					break
+				}
+
+				// Quick sample VMAF check at new CRF
+				sampleScore, checkErr := w.quickSampleVMAF(jobCtx, job, preset, currentCRF)
+				if checkErr != nil {
+					logger.Warn("SmartShrink retry VMAF check failed", "job_id", job.ID, "error", checkErr)
+					break
+				}
+				if sampleScore < threshold {
+					logger.Info("SmartShrink retry: VMAF would fall below threshold",
+						"job_id", job.ID, "crf", currentCRF, "vmaf", sampleScore, "threshold", threshold)
+					break
+				}
+
+				logger.Info("SmartShrink retry: re-encoding at higher CRF", "job_id", job.ID, "crf", currentCRF)
+				_ = w.queue.UpdateJobPhase(job.ID, PhaseEncoding)
+				os.Remove(tempPath)
+
+				retryResult, retryErr := w.attemptTranscode(jobCtx, job, preset, tempPath,
+					duration, currentCRF, currentCRF, qualityMod, totalFrames, tonemapParams, useSoftwareDecode, subtitleIndices, outputFmt)
+				if retryErr != nil {
+					logger.Warn("SmartShrink retry encode failed", "job_id", job.ID, "error", retryErr)
+					break
+				}
+
+				if retryResult.OutputSize < bestResult.OutputSize {
+					bestResult = retryResult
+				}
+				if float64(retryResult.OutputSize) <= float64(inputSize)*sizeTarget {
+					break // achieved 40% reduction target
+				}
+			}
+			result = bestResult
+
+			// If best result is still >= source: no viable encode, route to Review Queue
+			if float64(result.OutputSize) >= float64(inputSize) {
+				os.Remove(tempPath)
+				reason := fmt.Sprintf(
+					"no viable encode found within quality constraints: best attempt was %.0f%% of original size",
+					float64(result.OutputSize)/float64(inputSize)*100)
+				logger.Warn("SmartShrink: no viable encode", "job_id", job.ID)
+				_ = w.queue.FailJob(job.ID, reason)
+				w.queue.SendToReviewQueue(job.ID, job.InputPath, filepath.Base(job.InputPath), reason, "")
+				return
+			}
+		}
+	}
+
 	// Check if transcoded file is larger than original
 	if result.OutputSize >= job.InputSize && !w.cfg.KeepLargerFiles {
 		// Delete the temp file and skip the job (not fail - this is expected behavior)
@@ -791,7 +898,7 @@ func (w *Worker) processJob(job *Job) {
 
 	// Finalize the transcode (handle original file)
 	replace := w.cfg.OriginalHandling == "replace"
-	finalPath, err := ffmpeg.FinalizeTranscode(job.InputPath, tempPath, w.cfg.OutputFormat, replace, w.cfg.UseCompletedDir)
+	finalPath, err := ffmpeg.FinalizeTranscode(job.InputPath, tempPath, outputFmt, replace, w.cfg.UseCompletedDir)
 	if err != nil {
 		// Try to clean up
 		os.Remove(tempPath)
@@ -948,4 +1055,144 @@ func (wp *WorkerPool) runSmartShrinkAnalysis(ctx context.Context, job *Job, pres
 	}
 
 	return false, "", result.OptimalCRF, result.QualityMod, result.VMafScore, nil
+}
+
+// quickSampleVMAF encodes one video sample at the given CRF and returns its VMAF score.
+// Used by the SmartShrink retry loop to verify quality before committing to a full re-encode.
+func (w *Worker) quickSampleVMAF(ctx context.Context, job *Job, preset *ffmpeg.Preset, crf int) (float64, error) {
+	duration := time.Duration(job.Duration) * time.Millisecond
+	positions := vmaf.SamplePositions(duration)
+	if len(positions) == 0 {
+		return 0, fmt.Errorf("no sample positions available")
+	}
+	singlePos := []float64{positions[len(positions)/2]}
+
+	analysisDir, err := os.MkdirTemp(w.cfg.GetTempDir(), "smartshrink_retry_")
+	if err != nil {
+		return 0, fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(analysisDir)
+
+	refSamples, err := vmaf.ExtractSamples(ctx, w.cfg.FFmpegPath, job.InputPath, analysisDir, duration, singlePos)
+	if err != nil {
+		return 0, fmt.Errorf("extract sample: %w", err)
+	}
+	defer vmaf.CleanupSamples(refSamples)
+
+	inputArgs, outputArgs := ffmpeg.BuildSampleEncodeArgs(preset, job.Width, job.Height, crf, 0, true)
+	encodedPath := refSamples[0].Path + ".encoded.mkv"
+
+	numThreads := vmaf.GetEncodingThreads()
+	args := make([]string, 0, len(inputArgs)+len(outputArgs)+6)
+	args = append(args, "-threads", fmt.Sprintf("%d", numThreads), "-filter_threads", fmt.Sprintf("%d", numThreads))
+	args = append(args, inputArgs...)
+	args = append(args, "-i", refSamples[0].Path)
+	args = append(args, outputArgs...)
+	args = append(args, "-y", encodedPath)
+
+	cmd := exec.CommandContext(ctx, w.cfg.FFmpegPath, args...)
+	if err := cmd.Run(); err != nil {
+		return 0, fmt.Errorf("encode sample at CRF %d: %w", crf, err)
+	}
+	distSamples := []*vmaf.Sample{{Path: encodedPath}}
+	defer vmaf.CleanupSamples(distSamples)
+
+	return vmaf.ScoreSamples(ctx, w.cfg.FFmpegPath, refSamples, distSamples, job.Height)
+}
+
+// runFixedReductionAnalysis finds the CRF that achieves targetReductionPct% file-size
+// reduction using sample encoding, without considering VMAF quality.
+// Returns (shouldSkip, skipReason, selectedCRF, error).
+func (wp *WorkerPool) runFixedReductionAnalysis(ctx context.Context, job *Job, preset *ffmpeg.Preset, targetReductionPct int) (bool, string, int, error) {
+	if targetReductionPct <= 0 || targetReductionPct >= 100 {
+		return true, fmt.Sprintf("invalid target_reduction_pct %d (must be 1-99)", targetReductionPct), 0, nil
+	}
+
+	duration := time.Duration(job.Duration) * time.Millisecond
+	if duration < 5*time.Second {
+		return true, "video too short for fixed reduction analysis", 0, nil
+	}
+
+	qRange := ffmpeg.GetQualityRange(preset.Encoder, preset.Codec)
+	targetRatio := 1.0 - float64(targetReductionPct)/100.0
+
+	tempDir := wp.cfg.GetTempDir()
+	analysisDir, err := os.MkdirTemp(tempDir, "fixedred_")
+	if err != nil {
+		return false, "", 0, fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(analysisDir)
+
+	positions := vmaf.SamplePositions(duration)
+	refSamples, err := vmaf.ExtractSamples(ctx, wp.cfg.FFmpegPath, job.InputPath, analysisDir, duration, positions)
+	if err != nil {
+		return false, "", 0, fmt.Errorf("extract samples: %w", err)
+	}
+	defer vmaf.CleanupSamples(refSamples)
+
+	var refTotalSize int64
+	for _, s := range refSamples {
+		if info, statErr := os.Stat(s.Path); statErr == nil {
+			refTotalSize += info.Size()
+		}
+	}
+	if refTotalSize == 0 {
+		return true, "could not measure reference sample sizes", 0, nil
+	}
+
+	encodeAndMeasure := func(crf int) (float64, error) {
+		inputArgs, outputArgs := ffmpeg.BuildSampleEncodeArgs(preset, job.Width, job.Height, crf, 0, true)
+		var distSize int64
+		for i, ref := range refSamples {
+			encodedPath := fmt.Sprintf("%s/enc_%d_%d.mkv", analysisDir, crf, i)
+			numThreads := vmaf.GetEncodingThreads()
+			args := []string{"-threads", fmt.Sprintf("%d", numThreads), "-filter_threads", fmt.Sprintf("%d", numThreads)}
+			args = append(args, inputArgs...)
+			args = append(args, "-i", ref.Path)
+			args = append(args, outputArgs...)
+			args = append(args, "-y", encodedPath)
+			cmd := exec.CommandContext(ctx, wp.cfg.FFmpegPath, args...)
+			if err := cmd.Run(); err != nil {
+				return 0, fmt.Errorf("encode sample at CRF %d: %w", crf, err)
+			}
+			if info, statErr := os.Stat(encodedPath); statErr == nil {
+				distSize += info.Size()
+			}
+			os.Remove(encodedPath)
+		}
+		return float64(distSize) / float64(refTotalSize), nil
+	}
+
+	// Binary search: find highest-quality (lowest) CRF where ratio <= targetRatio
+	lo, hi := qRange.Min, qRange.Max
+	bestCRF := 0
+	found := false
+
+	for lo <= hi {
+		if ctx.Err() != nil {
+			return false, "", 0, ctx.Err()
+		}
+		mid := (lo + hi) / 2
+		ratio, measureErr := encodeAndMeasure(mid)
+		if measureErr != nil {
+			return false, "", 0, measureErr
+		}
+		logger.Info("Fixed reduction search", "job_id", job.ID, "crf", mid,
+			"ratio", fmt.Sprintf("%.3f", ratio), "target", fmt.Sprintf("%.3f", targetRatio))
+		if ratio <= targetRatio {
+			bestCRF = mid
+			found = true
+			hi = mid - 1 // try less compression (lower CRF = better quality)
+		} else {
+			lo = mid + 1 // try more compression
+		}
+	}
+
+	if !found {
+		reason := fmt.Sprintf("fixed reduction target of %d%% is not achievable with this encoder and content", targetReductionPct)
+		return true, reason, 0, nil
+	}
+
+	logger.Info("Fixed reduction analysis complete", "job_id", job.ID, "crf", bestCRF, "target_pct", targetReductionPct)
+	return false, "", bestCRF, nil
 }
