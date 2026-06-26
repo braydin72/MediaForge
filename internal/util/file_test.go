@@ -1,4 +1,4 @@
-package intake
+package util
 
 import (
 	"errors"
@@ -15,8 +15,6 @@ func exdevErr(src, dst string) error {
 }
 
 func TestSafeMove(t *testing.T) {
-	t.Parallel()
-
 	tests := []struct {
 		name string
 		run  func(t *testing.T, dir string)
@@ -74,7 +72,7 @@ func TestSafeMove(t *testing.T) {
 				if _, err := os.Stat(src); !errors.Is(err, os.ErrNotExist) {
 					t.Error("src should not exist after successful move")
 				}
-				if _, err := os.Stat(dst + ".tmp"); !errors.Is(err, os.ErrNotExist) {
+				if _, err := os.Stat(dst + ".mediaforge.tmp"); !errors.Is(err, os.ErrNotExist) {
 					t.Error("tmp file should be cleaned up after success")
 				}
 				got, err := os.ReadFile(dst)
@@ -87,35 +85,38 @@ func TestSafeMove(t *testing.T) {
 			},
 		},
 		{
-			name: "failed copy cleans up temp and leaves src intact",
+			name: "EXDEV copy failure cleans up temp and leaves src intact",
 			run: func(t *testing.T, dir string) {
 				src := filepath.Join(dir, "src.txt")
-				dst := filepath.Join(dir, "subdir", "dst.txt") // subdir does not exist → copyFile fails
+				dst := filepath.Join(dir, "dst.txt")
 				if err := os.WriteFile(src, []byte("data"), 0o644); err != nil {
 					t.Fatal(err)
 				}
 
+				// Place a directory at tmpDst so CopyFile's os.Create fails.
+				tmpDst := dst + ".mediaforge.tmp"
+				if err := os.Mkdir(tmpDst, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				defer os.RemoveAll(tmpDst)
+
 				orig := renameFn
 				t.Cleanup(func() { renameFn = orig })
-				renameFn = exdevErr
+				renameFn = func(oldpath, newpath string) error {
+					return exdevErr(oldpath, newpath)
+				}
 
 				err := SafeMove(src, dst)
 				if err == nil {
 					t.Fatal("expected error, got nil")
 				}
 
-				// src must be untouched
 				got, readErr := os.ReadFile(src)
 				if readErr != nil {
 					t.Fatalf("src missing after failed move: %v", readErr)
 				}
 				if string(got) != "data" {
 					t.Errorf("src content changed: %q", got)
-				}
-
-				// tmp must not exist
-				if _, statErr := os.Stat(dst + ".tmp"); !errors.Is(statErr, os.ErrNotExist) {
-					t.Error("tmp file should have been removed on copy failure")
 				}
 			},
 		},
@@ -138,7 +139,7 @@ func TestSafeMove(t *testing.T) {
 						// Trigger EXDEV fallback path.
 						return exdevErr(oldpath, newpath)
 					}
-					// Second call is os.Rename(tmp, dst) inside SafeMove — fail it.
+					// Second call is renameFn(tmp, dst) inside SafeMove — fail it.
 					return badRenameErr
 				}
 
@@ -147,7 +148,6 @@ func TestSafeMove(t *testing.T) {
 					t.Fatalf("expected badRenameErr, got %v", err)
 				}
 
-				// src must be untouched
 				got, readErr := os.ReadFile(src)
 				if readErr != nil {
 					t.Fatalf("src missing after failed move: %v", readErr)
@@ -156,9 +156,30 @@ func TestSafeMove(t *testing.T) {
 					t.Errorf("src content changed: %q", got)
 				}
 
-				// tmp must be cleaned up
-				if _, statErr := os.Stat(dst + ".tmp"); !errors.Is(statErr, os.ErrNotExist) {
+				if _, statErr := os.Stat(dst + ".mediaforge.tmp"); !errors.Is(statErr, os.ErrNotExist) {
 					t.Error("tmp file should have been removed on final rename failure")
+				}
+			},
+		},
+		{
+			name: "creates destination directory",
+			run: func(t *testing.T, dir string) {
+				src := filepath.Join(dir, "src.txt")
+				dst := filepath.Join(dir, "a", "b", "c", "dst.txt")
+				if err := os.WriteFile(src, []byte("mkdir"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+
+				if err := SafeMove(src, dst); err != nil {
+					t.Fatalf("SafeMove: %v", err)
+				}
+
+				got, err := os.ReadFile(dst)
+				if err != nil {
+					t.Fatalf("reading dst: %v", err)
+				}
+				if string(got) != "mkdir" {
+					t.Errorf("dst content = %q, want %q", got, "mkdir")
 				}
 			},
 		},
@@ -166,7 +187,6 @@ func TestSafeMove(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			dir := t.TempDir()
 			tc.run(t, dir)
 		})

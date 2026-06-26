@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 8
+const schemaVersion = 9
 
 const schema = `
 CREATE TABLE IF NOT EXISTS jobs (
@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 	quality_mod REAL DEFAULT 0,
 	skip_reason TEXT DEFAULT '',
 	smartshrink_quality TEXT DEFAULT '',
+	library_path TEXT DEFAULT '',
 	created_at TEXT NOT NULL,
 	started_at TEXT,
 	completed_at TEXT
@@ -140,17 +141,17 @@ const jobColumns = `id, input_path, output_path, temp_path, preset_id, encoder, 
 	status, progress, speed, eta, error, input_size, output_size, space_saved,
 	duration_ms, bitrate, width, height, frame_rate, video_codec, profile, bit_depth,
 	is_hdr, color_transfer, transcode_secs, phase, vmaf_score, selected_crf, quality_mod, skip_reason,
-	smartshrink_quality, created_at, started_at, completed_at`
+	smartshrink_quality, library_path, created_at, started_at, completed_at`
 
 // jobColumnsAliased lists all job table columns with "j." prefix for JOIN queries.
 const jobColumnsAliased = `j.id, j.input_path, j.output_path, j.temp_path, j.preset_id, j.encoder, j.is_hardware,
 	j.status, j.progress, j.speed, j.eta, j.error, j.input_size, j.output_size, j.space_saved,
 	j.duration_ms, j.bitrate, j.width, j.height, j.frame_rate, j.video_codec, j.profile, j.bit_depth,
 	j.is_hdr, j.color_transfer, j.transcode_secs, j.phase, j.vmaf_score, j.selected_crf, j.quality_mod, j.skip_reason,
-	j.smartshrink_quality, j.created_at, j.started_at, j.completed_at`
+	j.smartshrink_quality, j.library_path, j.created_at, j.started_at, j.completed_at`
 
 // jobPlaceholders provides the VALUES placeholder string for INSERT statements.
-const jobPlaceholders = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`
+const jobPlaceholders = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`
 
 // jobExecArgs returns the ordered arguments for inserting/updating a job row.
 func jobExecArgs(job *jobs.Job) []interface{} {
@@ -163,7 +164,8 @@ func jobExecArgs(job *jobs.Job) []interface{} {
 		nullFloat64(job.FrameRate), nullString(job.VideoCodec), nullString(job.Profile), nullInt(job.BitDepth),
 		boolToInt(job.IsHDR), nullString(job.ColorTransfer), nullInt64(job.TranscodeTime),
 		string(job.Phase), nullFloat64(job.VMafScore), nullInt(job.SelectedCRF), nullFloat64(job.QualityMod), nullString(job.SkipReason),
-		nullString(job.SmartShrinkQuality), formatTime(job.CreatedAt), formatTimePtr(job.StartedAt), formatTimePtr(job.CompletedAt),
+		nullString(job.SmartShrinkQuality), nullString(job.LibraryPath),
+		formatTime(job.CreatedAt), formatTimePtr(job.StartedAt), formatTimePtr(job.CompletedAt),
 	}
 }
 
@@ -366,6 +368,14 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 					db.Close()
 					return nil, fmt.Errorf("migration v7->v8 failed: %w", err)
 				}
+			}
+		}
+		if version < 9 {
+			// Migrate v8 -> v9: Add library_path for post-encode intake library move.
+			_, err := db.Exec(`ALTER TABLE jobs ADD COLUMN library_path TEXT DEFAULT ''`)
+			if err != nil {
+				db.Close()
+				return nil, fmt.Errorf("migration v8->v9 failed: %w", err)
 			}
 		}
 		// Update version
@@ -803,7 +813,7 @@ func scanJob(row rowScanner) (*jobs.Job, error) {
 	var videoCodec, profile sql.NullString
 	var colorTransfer sql.NullString
 	var phase, skipReason sql.NullString
-	var smartShrinkQuality sql.NullString
+	var smartShrinkQuality, libraryPath sql.NullString
 	var outputSize, spaceSaved, duration, bitrate, transcodeTime sql.NullInt64
 	var width, height, bitDepth, selectedCRF sql.NullInt64
 	var isHDR sql.NullInt64
@@ -821,7 +831,7 @@ func scanJob(row rowScanner) (*jobs.Job, error) {
 		&videoCodec, &profile, &bitDepth,
 		&isHDR, &colorTransfer, &transcodeTime,
 		&phase, &vmafScore, &selectedCRF, &qualityMod, &skipReason,
-		&smartShrinkQuality, &createdAt, &startedAt, &completedAt,
+		&smartShrinkQuality, &libraryPath, &createdAt, &startedAt, &completedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -852,6 +862,7 @@ func scanJob(row rowScanner) (*jobs.Job, error) {
 	job.QualityMod = qualityMod.Float64
 	job.SkipReason = skipReason.String
 	job.SmartShrinkQuality = smartShrinkQuality.String
+	job.LibraryPath = libraryPath.String
 	job.CreatedAt = parseTime(createdAt.String)
 	job.StartedAt = parseTime(startedAt.String)
 	job.CompletedAt = parseTime(completedAt.String)

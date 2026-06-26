@@ -62,6 +62,11 @@ type WorkerPool struct {
 	analysisMu    sync.Mutex
 	analysisCount int // Currently running analyses
 	analysisLimit int // Max concurrent analyses (from config, 1-3)
+
+	// OnLibraryMoveComplete is called when an intake job's encoded output is
+	// successfully moved to its library path. May be nil.
+	// The job copy has OutputPath set to the final library location.
+	OnLibraryMoveComplete func(job *Job)
 }
 
 // SmartShrink quality thresholds (hardcoded for simplicity)

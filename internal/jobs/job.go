@@ -59,6 +59,7 @@ type Job struct {
 	QualityMod  float64 `json:"quality_mod,omitempty"`   // Bitrate modifier for VideoToolbox (0.0-1.0)
 	SkipReason         string `json:"skip_reason,omitempty"`          // Reason for skip status
 	SmartShrinkQuality string `json:"smartshrink_quality,omitempty"` // Quality tier: acceptable, good, excellent
+	LibraryPath        string `json:"library_path,omitempty"`        // Post-encode library destination (intake pipeline only)
 	CreatedAt          time.Time `json:"created_at"`
 	StartedAt   time.Time `json:"started_at,omitempty"`
 	CompletedAt time.Time `json:"completed_at,omitempty"`

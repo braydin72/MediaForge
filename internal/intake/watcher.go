@@ -13,8 +13,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/braydin72/mediaforge/internal/config"
 	"github.com/braydin72/mediaforge/internal/ffmpeg"
+	"github.com/braydin72/mediaforge/internal/jobs"
 	"github.com/braydin72/mediaforge/internal/logger"
 	"github.com/braydin72/mediaforge/internal/store"
+	"github.com/braydin72/mediaforge/internal/util"
 )
 
 // defaultScanInterval is how often the watch folder is polled in production.
@@ -45,6 +47,22 @@ type Watcher struct {
 	// OnReviewQueueAdd is called each time a file is added to the Review Queue.
 	// May be nil.
 	OnReviewQueueAdd ReviewQueueNotifyFn
+
+	// EncodeQueue is the job queue used to schedule H264/AVC files for encoding.
+	// If nil, AVC files are detected but not queued (logged only).
+	EncodeQueue *jobs.Queue
+
+	// EncodePresetID is the preset used when adding AVC files to the encode queue.
+	// Defaults to "compress-hevc" when empty.
+	EncodePresetID string
+
+	// SmartShrinkQuality is the quality tier for SmartShrink presets ("good" by default).
+	SmartShrinkQuality string
+
+	// OutputFormat is the container format for encoded output ("mkv" or "mp4").
+	// Used to determine the file extension when resolving the library destination path.
+	// Defaults to "mkv" when empty.
+	OutputFormat string
 
 	// known tracks files we have seen and are currently processing or have processed
 	// in this session. Files removed from the watch folder by later pipeline phases
@@ -170,10 +188,11 @@ func (w *Watcher) process(ctx context.Context, path string) {
 			"resolution", fmt.Sprintf("%dx%d", probe.Width, probe.Height),
 		)
 	case "h264":
-		logger.Info("Intake: H264 — ready for staging",
+		logger.Info("Intake: H264 — staging for encode",
 			"file", filename, "codec", probe.VideoCodec,
 			"resolution", fmt.Sprintf("%dx%d", probe.Width, probe.Height),
 		)
+		w.stageAndEnqueue(ctx, path, probe)
 	default:
 		var reason string
 		if probe.VideoCodec == "" {
@@ -183,6 +202,67 @@ func (w *Watcher) process(ctx context.Context, path string) {
 		}
 		logger.Warn("Intake: unknown codec, queuing for review", "file", filename, "codec", probe.VideoCodec)
 		w.sendToReviewQueue(path, reason, probe)
+	}
+}
+
+// stageAndEnqueue moves an AVC file to the staging folder and adds it to the
+// encode queue. On any failure the file is sent to the Review Queue with a
+// specific reason and the source file is left untouched.
+func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpeg.ProbeResult) {
+	filename := filepath.Base(path)
+
+	if w.EncodeQueue == nil {
+		logger.Info("Intake: H264 detected but no encode queue configured — skipping", "file", filename)
+		return
+	}
+
+	if w.cfg.StagingFolder == "" {
+		w.sendToReviewQueue(path, "staging folder not configured", probe)
+		return
+	}
+
+	stagingPath := filepath.Join(w.cfg.StagingFolder, filename)
+	if err := util.SafeMove(path, stagingPath); err != nil {
+		reason := fmt.Sprintf("staging move failed: %v", err)
+		logger.Warn("Intake: failed to move AVC file to staging", "file", filename, "error", err)
+		w.sendToReviewQueue(path, reason, probe)
+		return
+	}
+
+	presetID := w.EncodePresetID
+	if presetID == "" {
+		presetID = "compress-hevc"
+	}
+	quality := w.SmartShrinkQuality
+	if quality == "" {
+		quality = "good"
+	}
+
+	job, err := w.EncodeQueue.Add(stagingPath, presetID, probe, quality)
+	if err != nil {
+		reason := fmt.Sprintf("failed to queue encode job: %v", err)
+		logger.Warn("Intake: failed to enqueue AVC file", "file", filename, "error", err)
+		w.sendToReviewQueue(stagingPath, reason, probe)
+		return
+	}
+
+	// Resolve the library destination path from naming templates and parsed metadata.
+	parsed := ParseFilename(filename)
+	outFmt := w.OutputFormat
+	if outFmt == "" || outFmt == "preserve" {
+		outFmt = "mkv"
+	}
+	libraryPath := resolveLibraryPath(w.cfg, parsed, "."+outFmt)
+	if libraryPath != "" {
+		w.EncodeQueue.SetLibraryPath(job.ID, libraryPath)
+		logger.Info("Intake: AVC file queued for encode",
+			"file", filename, "job_id", job.ID,
+			"staging", stagingPath, "library", libraryPath,
+		)
+	} else {
+		logger.Info("Intake: AVC file queued for encode (library path pending identification)",
+			"file", filename, "job_id", job.ID, "staging", stagingPath,
+		)
 	}
 }
 

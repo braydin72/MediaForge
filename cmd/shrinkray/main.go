@@ -215,6 +215,10 @@ func main() {
 					Reason:   reason,
 				})
 			}
+			intakeWatcher.EncodeQueue = queue
+			intakeWatcher.EncodePresetID = cfg.DefaultPreset
+			intakeWatcher.SmartShrinkQuality = "good"
+			intakeWatcher.OutputFormat = cfg.OutputFormat
 			intakeWatcherMu.Unlock()
 			go intakeWatcher.Start(context.Background())
 		} else {

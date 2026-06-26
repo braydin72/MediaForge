@@ -759,6 +759,17 @@ func checkSkipReason(probe *ffmpeg.ProbeResult, meta *ffmpeg.BasePresetMeta, all
 	return "" // Proceed with transcode
 }
 
+// SetLibraryPath sets the intended post-encode library destination on a job.
+// Called by the intake pipeline after creating a job but before it starts.
+func (q *Queue) SetLibraryPath(id, libraryPath string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if job, ok := q.jobs[id]; ok {
+		job.LibraryPath = libraryPath
+		q.persist(job)
+	}
+}
+
 // SendToReviewQueue persists a review queue entry if the backing store supports it.
 func (q *Queue) SendToReviewQueue(jobID, originalPath, filename, reason, ffprobeJSON string) {
 	q.mu.RLock()
