@@ -54,6 +54,33 @@ type PosterCacheConfig struct {
 	Path    string `yaml:"path"`
 }
 
+type NotificationEventsConfig struct {
+	EncodeComplete  bool `yaml:"encode_complete"`
+	EncodeFailed    bool `yaml:"encode_failed"`
+	ReviewQueueItem bool `yaml:"review_queue_item"`
+	DailySummary    bool `yaml:"daily_summary"`
+	WeeklySummary   bool `yaml:"weekly_summary"`
+}
+
+type EmailNotificationConfig struct {
+	Enabled         bool   `yaml:"enabled"`
+	SMTPHost        string `yaml:"smtp_host"`
+	SMTPPort        int    `yaml:"smtp_port"`
+	SMTPTLS         bool   `yaml:"smtp_tls"`
+	Username        string `yaml:"username"`
+	Password        string `yaml:"password"`
+	From            string `yaml:"from"`
+	To              string `yaml:"to"`
+	Mode            string `yaml:"mode"`             // "per_file" | "batched"
+	IntervalMinutes int    `yaml:"interval_minutes"` // used when mode == "batched"
+}
+
+type NotificationsConfig struct {
+	BaseURL string                   `yaml:"base_url"`
+	Events  NotificationEventsConfig `yaml:"events"`
+	Email   EmailNotificationConfig  `yaml:"email"`
+}
+
 type Config struct {
 	// Intake is the ingest pipeline configuration
 	Intake IntakeConfig `yaml:"intake"`
@@ -66,6 +93,9 @@ type Config struct {
 
 	// PosterCache controls artwork thumbnail caching
 	PosterCache PosterCacheConfig `yaml:"poster_cache"`
+
+	// Notifications holds all notification channel and event configuration
+	Notifications NotificationsConfig `yaml:"notifications"`
 
 	// MediaPath is the root directory to browse for media files
 	MediaPath string `yaml:"media_path"`
@@ -211,6 +241,21 @@ func DefaultConfig() *Config {
 		TranscodeMode:         "smartshrink",
 		TargetReductionPct:    40,
 		DefaultPreset:         "compress-hevc",
+		Notifications: NotificationsConfig{
+			Events: NotificationEventsConfig{
+				EncodeComplete:  false,
+				EncodeFailed:    true,
+				ReviewQueueItem: true,
+				DailySummary:    false,
+				WeeklySummary:   false,
+			},
+			Email: EmailNotificationConfig{
+				SMTPPort:        587,
+				SMTPTLS:         true,
+				Mode:            "per_file",
+				IntervalMinutes: 60,
+			},
+		},
 	}
 }
 
@@ -307,6 +352,17 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.LLM.OllamaHost == "" {
 		cfg.LLM.OllamaHost = "http://localhost:11434"
+	}
+
+	// Notification defaults
+	if cfg.Notifications.Email.SMTPPort == 0 {
+		cfg.Notifications.Email.SMTPPort = 587
+	}
+	if cfg.Notifications.Email.Mode == "" {
+		cfg.Notifications.Email.Mode = "per_file"
+	}
+	if cfg.Notifications.Email.IntervalMinutes < 1 {
+		cfg.Notifications.Email.IntervalMinutes = 60
 	}
 
 	return cfg, nil

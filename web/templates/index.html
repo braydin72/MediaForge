@@ -2913,6 +2913,219 @@
                             <button class="btn btn-secondary btn-sm" id="test-pushover-btn" onclick="testPushover()">Test</button>
                         </div>
                     </div>
+                    <!-- Email (SMTP) subsection -->
+                    <div class="setting-item" style="margin-top: 12px;">
+                        <div class="setting-info">
+                            <div class="setting-name">Email Notifications</div>
+                            <div class="setting-desc">Send notifications via SMTP email</div>
+                        </div>
+                        <div class="setting-control">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-notify-email-enabled"
+                                       onchange="updateSetting('notify_email_enabled', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">SMTP Host</div>
+                            <div class="setting-desc">Mail server hostname (e.g. smtp.gmail.com)</div>
+                        </div>
+                        <div class="setting-control">
+                            <input type="text" class="setting-input" id="setting-notify-email-host"
+                                   placeholder="smtp.gmail.com"
+                                   onchange="updateSetting('notify_email_smtp_host', this.value); updateGmailHelper()">
+                        </div>
+                    </div>
+                    <div class="setting-item" id="gmail-helper-row" style="display:none;">
+                        <div class="setting-info" style="color: var(--text-secondary); font-size: 12px; line-height: 1.5;">
+                            Gmail requires an App Password, not your account password. Get one at
+                            <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener"
+                               style="color: var(--accent);">myaccount.google.com/apppasswords</a>
+                            (requires 2FA to be enabled on your Google account).
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">SMTP Port</div>
+                            <div class="setting-desc">587 (STARTTLS) · 465 (TLS) · 25 (plain)</div>
+                        </div>
+                        <div class="setting-control">
+                            <input type="number" class="setting-input" id="setting-notify-email-port"
+                                   placeholder="587" min="1" max="65535" style="width: 80px;"
+                                   onchange="updateSetting('notify_email_smtp_port', parseInt(this.value))">
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Use STARTTLS</div>
+                            <div class="setting-desc">Enable for port 587 (Gmail and most providers)</div>
+                        </div>
+                        <div class="setting-control">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-notify-email-tls"
+                                       onchange="updateSetting('notify_email_smtp_tls', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Username</div>
+                            <div class="setting-desc">Your email address or SMTP login</div>
+                        </div>
+                        <div class="setting-control">
+                            <input type="text" class="setting-input" id="setting-notify-email-username"
+                                   placeholder="you@gmail.com"
+                                   onchange="updateSetting('notify_email_username', this.value)">
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Password</div>
+                            <div class="setting-desc">App Password (Gmail) or SMTP password</div>
+                        </div>
+                        <div class="setting-control">
+                            <input type="password" class="setting-input" id="setting-notify-email-password"
+                                   placeholder="••••••••••••"
+                                   onchange="updateSetting('notify_email_password', this.value)">
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">From Address</div>
+                            <div class="setting-desc">Sender address shown in the email</div>
+                        </div>
+                        <div class="setting-control">
+                            <input type="text" class="setting-input" id="setting-notify-email-from"
+                                   placeholder="you@gmail.com"
+                                   onchange="updateSetting('notify_email_from', this.value)">
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">To Address</div>
+                            <div class="setting-desc">Recipient email address</div>
+                        </div>
+                        <div class="setting-control">
+                            <input type="text" class="setting-input" id="setting-notify-email-to"
+                                   placeholder="you@example.com"
+                                   onchange="updateSetting('notify_email_to', this.value)">
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Frequency Mode</div>
+                            <div class="setting-desc">Send per file or collect into a digest</div>
+                        </div>
+                        <div class="setting-control">
+                            <select class="setting-select" id="setting-notify-email-mode"
+                                    onchange="updateSetting('notify_email_mode', this.value); updateBatchIntervalVisibility()">
+                                <option value="per_file">Per file (immediate)</option>
+                                <option value="batched">Batched digest</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="setting-item" id="notify-batch-interval-row" style="display:none;">
+                        <div class="setting-info">
+                            <div class="setting-name">Digest Interval</div>
+                            <div class="setting-desc">Send digest every N minutes</div>
+                        </div>
+                        <div class="setting-control">
+                            <input type="number" class="setting-input" id="setting-notify-email-interval"
+                                   placeholder="60" min="1" style="width: 80px;"
+                                   onchange="updateSetting('notify_email_interval_minutes', parseInt(this.value))">
+                            <span style="color: var(--text-secondary); margin-left: 6px;">min</span>
+                        </div>
+                    </div>
+                    <!-- Web UI link -->
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Web UI URL</div>
+                            <div class="setting-desc">Included as a link in notifications (e.g. http://192.168.1.10:8080)</div>
+                        </div>
+                        <div class="setting-control">
+                            <input type="text" class="setting-input" id="setting-notify-base-url"
+                                   placeholder="http://localhost:8080"
+                                   onchange="updateSetting('notify_base_url', this.value)">
+                        </div>
+                    </div>
+                    <!-- Per-event toggles -->
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Notify: Encode Complete</div>
+                            <div class="setting-desc">Fire when a file finishes encoding</div>
+                        </div>
+                        <div class="setting-control">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-notify-encode-complete"
+                                       onchange="updateSetting('notify_events_encode_complete', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Notify: Encode Failed</div>
+                            <div class="setting-desc">Fire when an encode fails (default on)</div>
+                        </div>
+                        <div class="setting-control">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-notify-encode-failed"
+                                       onchange="updateSetting('notify_events_encode_failed', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Notify: Review Queue Item</div>
+                            <div class="setting-desc">Fire when a file is added to the Review Queue (default on)</div>
+                        </div>
+                        <div class="setting-control">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-notify-review-queue"
+                                       onchange="updateSetting('notify_events_review_queue_item', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Notify: Daily Summary</div>
+                            <div class="setting-desc">Send a daily stats digest</div>
+                        </div>
+                        <div class="setting-control">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-notify-daily-summary"
+                                       onchange="updateSetting('notify_events_daily_summary', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Notify: Weekly Summary</div>
+                            <div class="setting-desc">Send a weekly stats digest</div>
+                        </div>
+                        <div class="setting-control">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-notify-weekly-summary"
+                                       onchange="updateSetting('notify_events_weekly_summary', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Test All Notifications</div>
+                            <div class="setting-desc">Send a test message via all configured channels</div>
+                        </div>
+                        <div class="setting-control">
+                            <button class="btn btn-secondary btn-sm" id="test-notifications-btn" onclick="testNotifications()">Test</button>
+                        </div>
+                    </div>
                 </div>
                 <div class="setting-group collapsed" id="advanced-settings">
                     <div class="setting-group-header" onclick="toggleAdvancedSettings()">
@@ -4626,6 +4839,26 @@
                 document.getElementById('setting-naming-movie-file').value = config.intake_naming_movie_file || '{title} ({year})';
                 document.getElementById('setting-naming-show-folder').value = config.intake_naming_show_folder || '{show} ({year})';
                 document.getElementById('setting-naming-episode-file').value = config.intake_naming_episode_file || '{show} - S{season:02d}E{episode:02d} - {episode_title}';
+
+                // Email notification settings
+                document.getElementById('setting-notify-email-enabled').checked = config.notify_email_enabled === true;
+                document.getElementById('setting-notify-email-host').value = config.notify_email_smtp_host || '';
+                document.getElementById('setting-notify-email-port').value = config.notify_email_smtp_port || 587;
+                document.getElementById('setting-notify-email-tls').checked = config.notify_email_smtp_tls !== false;
+                document.getElementById('setting-notify-email-username').value = config.notify_email_username || '';
+                document.getElementById('setting-notify-email-from').value = config.notify_email_from || '';
+                document.getElementById('setting-notify-email-to').value = config.notify_email_to || '';
+                document.getElementById('setting-notify-email-mode').value = config.notify_email_mode || 'per_file';
+                document.getElementById('setting-notify-email-interval').value = config.notify_email_interval_minutes || 60;
+                document.getElementById('setting-notify-base-url').value = config.notify_base_url || '';
+                // Per-event toggles
+                document.getElementById('setting-notify-encode-complete').checked = config.notify_events_encode_complete === true;
+                document.getElementById('setting-notify-encode-failed').checked = config.notify_events_encode_failed !== false;
+                document.getElementById('setting-notify-review-queue').checked = config.notify_events_review_queue_item !== false;
+                document.getElementById('setting-notify-daily-summary').checked = config.notify_events_daily_summary === true;
+                document.getElementById('setting-notify-weekly-summary').checked = config.notify_events_weekly_summary === true;
+                updateGmailHelper();
+                updateBatchIntervalVisibility();
             } catch (err) {
                 console.error('Load settings error:', err);
             }
@@ -4780,6 +5013,44 @@
                 });
             } catch (err) {
                 console.error('Update notify setting error:', err);
+            }
+        }
+
+        function updateGmailHelper() {
+            const host = (document.getElementById('setting-notify-email-host').value || '').trim();
+            const row = document.getElementById('gmail-helper-row');
+            if (row) row.style.display = host === 'smtp.gmail.com' ? '' : 'none';
+        }
+
+        function updateBatchIntervalVisibility() {
+            const mode = document.getElementById('setting-notify-email-mode').value;
+            const row = document.getElementById('notify-batch-interval-row');
+            if (row) row.style.display = mode === 'batched' ? '' : 'none';
+        }
+
+        async function testNotifications() {
+            const btn = document.getElementById('test-notifications-btn');
+            const statusEl = document.getElementById('settings-status');
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+
+            try {
+                const resp = await fetch('/api/notifications/test', { method: 'POST' });
+                const data = await resp.json();
+
+                if (!resp.ok) {
+                    throw new Error(data.error || 'Failed to send test notification');
+                }
+
+                statusEl.textContent = 'Test notification sent!';
+                statusEl.className = 'settings-status';
+                setTimeout(() => { statusEl.textContent = ''; }, 3000);
+            } catch (err) {
+                statusEl.textContent = `Error: ${err.message}`;
+                statusEl.className = 'settings-status error';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Test';
             }
         }
 

@@ -22,6 +22,7 @@ import (
 	"github.com/braydin72/mediaforge/internal/intake"
 	"github.com/braydin72/mediaforge/internal/jobs"
 	"github.com/braydin72/mediaforge/internal/logger"
+	"github.com/braydin72/mediaforge/internal/notify"
 	"github.com/braydin72/mediaforge/internal/setup"
 	"github.com/braydin72/mediaforge/internal/store"
 )
@@ -207,6 +208,13 @@ func main() {
 		if cfg.Intake.Enabled {
 			intakeWatcherMu.Lock()
 			intakeWatcher = intake.NewWatcher(&cfg.Intake, cfg.FFprobePath, jobStore)
+			intakeWatcher.OnReviewQueueAdd = func(filename, reason string) {
+				handler.DispatchNotification(notify.Event{
+					Type:     notify.EventReviewQueueItem,
+					Filename: filename,
+					Reason:   reason,
+				})
+			}
 			intakeWatcherMu.Unlock()
 			go intakeWatcher.Start(context.Background())
 		} else {
@@ -264,6 +272,7 @@ func main() {
 			w.Stop()
 		}
 		workerPool.Stop()
+		handler.Dispatcher().Stop()
 		server.Close()
 	}()
 

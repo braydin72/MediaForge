@@ -32,11 +32,19 @@ const probeTimeout = 2 * time.Minute
 //  3. Run ffprobe to detect the video codec.
 //  4. Route: HEVC → log "ready for library move", H264 → log "ready for staging",
 //     unknown → Review Queue with specific reason.
+// ReviewQueueNotifyFn is called when a file is added to the Review Queue.
+// filename is the base name of the file; reason is the human-readable failure reason.
+type ReviewQueueNotifyFn func(filename, reason string)
+
 type Watcher struct {
 	cfg          config.IntakeConfig
 	prober       *ffmpeg.Prober
 	st           *store.SQLiteStore
 	ScanInterval time.Duration // overridable for tests; defaults to defaultScanInterval
+
+	// OnReviewQueueAdd is called each time a file is added to the Review Queue.
+	// May be nil.
+	OnReviewQueueAdd ReviewQueueNotifyFn
 
 	// known tracks files we have seen and are currently processing or have processed
 	// in this session. Files removed from the watch folder by later pipeline phases
@@ -245,6 +253,9 @@ func (w *Watcher) sendToReviewQueue(path, reason string, probe *ffmpeg.ProbeResu
 		logger.Error("Intake: failed to save review queue entry", "file", entry.Filename, "error", err)
 	} else {
 		logger.Info("Intake: added to review queue", "file", entry.Filename, "reason", reason)
+		if w.OnReviewQueueAdd != nil {
+			w.OnReviewQueueAdd(entry.Filename, reason)
+		}
 	}
 }
 

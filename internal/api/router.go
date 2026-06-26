@@ -35,6 +35,7 @@ func registerAPIRoutes(mux *http.ServeMux, h *Handler) {
 	mux.HandleFunc("POST /api/stats/reset-session", h.ResetSession)
 	mux.HandleFunc("POST /api/cache/clear", h.ClearCache)
 	mux.HandleFunc("POST /api/pushover/test", h.TestPushover)
+	mux.HandleFunc("POST /api/notifications/test", h.TestNotifications)
 
 	// Review Queue
 	mux.HandleFunc("GET /api/review", h.ListReviewQueue)

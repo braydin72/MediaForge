@@ -1,11 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 
+	"github.com/braydin72/mediaforge/internal/jobs"
 	"github.com/braydin72/mediaforge/internal/logger"
+	"github.com/braydin72/mediaforge/internal/notify"
 	"github.com/braydin72/mediaforge/internal/util"
 )
 
@@ -60,8 +64,32 @@ func (h *Handler) JobStream(w http.ResponseWriter, r *http.Request) {
 			// This happens when a job completes/fails/skips/cancels and the queue is empty
 			if event.Type == "complete" || event.Type == "failed" || event.Type == "cancelled" || event.Type == "skipped" {
 				h.checkAndSendNotification(w, flusher)
+				h.dispatchEncodeEvent(r.Context(), event)
 			}
 		}
+	}
+}
+
+// dispatchEncodeEvent routes a completed/failed job event to the notification dispatcher.
+func (h *Handler) dispatchEncodeEvent(ctx context.Context, event jobs.JobEvent) {
+	if h.dispatcher == nil || event.Job == nil {
+		return
+	}
+
+	filename := filepath.Base(event.Job.InputPath)
+
+	switch event.Type {
+	case "complete":
+		h.dispatcher.Dispatch(ctx, notify.Event{
+			Type:     notify.EventEncodeComplete,
+			Filename: filename,
+		})
+	case "failed":
+		h.dispatcher.Dispatch(ctx, notify.Event{
+			Type:     notify.EventEncodeFailed,
+			Filename: filename,
+			Reason:   event.Job.Error,
+		})
 	}
 }
 

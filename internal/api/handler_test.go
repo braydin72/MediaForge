@@ -356,3 +356,44 @@ func TestJobStreamEndpoint(t *testing.T) {
 	t.Logf("SSE response: %s", w.Body.String()[:min(200, len(w.Body.String()))])
 }
 
+func TestTestNotificationsNoChannels(t *testing.T) {
+	handler, _ := setupTestHandler(t)
+	// Default config has no email credentials, so no channels should be configured.
+	req := httptest.NewRequest("POST", "/api/notifications/test", nil)
+	w := httptest.NewRecorder()
+	handler.TestNotifications(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 when no channels configured, got %d", w.Code)
+	}
+}
+
+func TestTestNotificationsWithChannel(t *testing.T) {
+	handler, _ := setupTestHandler(t)
+
+	// Wire a working mock notifier via the exported method.
+	sent := 0
+	mn := &handlerTestNotifier{sendFn: func() error { sent++; return nil }}
+	handler.dispatcher.AddPerFileNotifier(mn)
+
+	req := httptest.NewRequest("POST", "/api/notifications/test", nil)
+	w := httptest.NewRecorder()
+	handler.TestNotifications(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 when channel configured, got %d body=%s", w.Code, w.Body.String())
+	}
+	if sent != 1 {
+		t.Errorf("expected 1 notification sent, got %d", sent)
+	}
+}
+
+// handlerTestNotifier is a minimal Notifier for handler tests.
+type handlerTestNotifier struct {
+	sendFn func() error
+}
+
+func (n *handlerTestNotifier) Name() string        { return "test" }
+func (n *handlerTestNotifier) IsConfigured() bool  { return true }
+func (n *handlerTestNotifier) Send(_ context.Context, _, _ string) error {
+	return n.sendFn()
+}

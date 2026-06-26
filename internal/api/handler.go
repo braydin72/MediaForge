@@ -19,6 +19,7 @@ import (
 	"github.com/braydin72/mediaforge/internal/intake"
 	"github.com/braydin72/mediaforge/internal/jobs"
 	"github.com/braydin72/mediaforge/internal/logger"
+	"github.com/braydin72/mediaforge/internal/notify"
 	"github.com/braydin72/mediaforge/internal/pushover"
 	"github.com/braydin72/mediaforge/internal/store"
 )
@@ -44,13 +45,18 @@ type Handler struct {
 	cfg          *config.Config
 	cfgPath      string
 	pushover     *pushover.Client
-	notifyMu     sync.Mutex    // Protects notification sending to prevent duplicates
-	store        StatsStore    // For stats operations (may be nil)
+	dispatcher   *notify.Dispatcher
+	notifyMu     sync.Mutex       // Protects notification sending to prevent duplicates
+	store        StatsStore       // For stats operations (may be nil)
 	reviewStore  ReviewQueueStore // For Review Queue operations (may be nil)
 }
 
 // NewHandler creates a new API handler
 func NewHandler(browser *browse.Browser, queue *jobs.Queue, workerPool *jobs.WorkerPool, cfg *config.Config, cfgPath string) *Handler {
+	d := notify.NewDispatcher(&cfg.Notifications)
+	smtpClient := notify.NewSMTPClient(&cfg.Notifications.Email)
+	d.AddChannel(smtpClient, cfg.Notifications.Email.IntervalMinutes)
+
 	return &Handler{
 		browser:    browser,
 		queue:      queue,
@@ -58,7 +64,14 @@ func NewHandler(browser *browse.Browser, queue *jobs.Queue, workerPool *jobs.Wor
 		cfg:        cfg,
 		cfgPath:    cfgPath,
 		pushover:   pushover.NewClient(cfg.PushoverUserKey, cfg.PushoverAppToken),
+		dispatcher: d,
 	}
+}
+
+// Dispatcher returns the notification dispatcher so callers (e.g. main.go) can
+// call Stop() on shutdown.
+func (h *Handler) Dispatcher() *notify.Dispatcher {
+	return h.dispatcher
 }
 
 // SetStore sets the stats store for session/lifetime stats operations.
@@ -390,6 +403,22 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		// Poster cache
 		"poster_cache_enabled": h.cfg.PosterCache.Enabled,
 		"poster_cache_path":    h.cfg.PosterCache.Path,
+		// Notifications
+		"notify_base_url":                  h.cfg.Notifications.BaseURL,
+		"notify_events_encode_complete":    h.cfg.Notifications.Events.EncodeComplete,
+		"notify_events_encode_failed":      h.cfg.Notifications.Events.EncodeFailed,
+		"notify_events_review_queue_item":  h.cfg.Notifications.Events.ReviewQueueItem,
+		"notify_events_daily_summary":      h.cfg.Notifications.Events.DailySummary,
+		"notify_events_weekly_summary":     h.cfg.Notifications.Events.WeeklySummary,
+		"notify_email_enabled":             h.cfg.Notifications.Email.Enabled,
+		"notify_email_smtp_host":           h.cfg.Notifications.Email.SMTPHost,
+		"notify_email_smtp_port":           h.cfg.Notifications.Email.SMTPPort,
+		"notify_email_smtp_tls":            h.cfg.Notifications.Email.SMTPTLS,
+		"notify_email_username":            h.cfg.Notifications.Email.Username,
+		"notify_email_from":                h.cfg.Notifications.Email.From,
+		"notify_email_to":                  h.cfg.Notifications.Email.To,
+		"notify_email_mode":                h.cfg.Notifications.Email.Mode,
+		"notify_email_interval_minutes":    h.cfg.Notifications.Email.IntervalMinutes,
 	})
 }
 
@@ -438,6 +467,23 @@ type UpdateConfigRequest struct {
 	// Poster cache
 	PosterCacheEnabled *bool   `json:"poster_cache_enabled,omitempty"`
 	PosterCachePath    *string `json:"poster_cache_path,omitempty"`
+	// Notifications
+	NotifyBaseURL               *string `json:"notify_base_url,omitempty"`
+	NotifyEventsEncodeComplete  *bool   `json:"notify_events_encode_complete,omitempty"`
+	NotifyEventsEncodeFailed    *bool   `json:"notify_events_encode_failed,omitempty"`
+	NotifyEventsReviewQueueItem *bool   `json:"notify_events_review_queue_item,omitempty"`
+	NotifyEventsDailySummary    *bool   `json:"notify_events_daily_summary,omitempty"`
+	NotifyEventsWeeklySummary   *bool   `json:"notify_events_weekly_summary,omitempty"`
+	NotifyEmailEnabled          *bool   `json:"notify_email_enabled,omitempty"`
+	NotifyEmailSMTPHost         *string `json:"notify_email_smtp_host,omitempty"`
+	NotifyEmailSMTPPort         *int    `json:"notify_email_smtp_port,omitempty"`
+	NotifyEmailSMTPTLS          *bool   `json:"notify_email_smtp_tls,omitempty"`
+	NotifyEmailUsername         *string `json:"notify_email_username,omitempty"`
+	NotifyEmailPassword         *string `json:"notify_email_password,omitempty"`
+	NotifyEmailFrom             *string `json:"notify_email_from,omitempty"`
+	NotifyEmailTo               *string `json:"notify_email_to,omitempty"`
+	NotifyEmailMode             *string `json:"notify_email_mode,omitempty"`
+	NotifyEmailIntervalMinutes  *int    `json:"notify_email_interval_minutes,omitempty"`
 }
 
 // UpdateConfig handles PUT /api/config
@@ -660,6 +706,70 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.PosterCachePath != nil {
 		h.cfg.PosterCache.Path = *req.PosterCachePath
+	}
+
+	// Handle notification settings
+	if req.NotifyBaseURL != nil {
+		h.cfg.Notifications.BaseURL = *req.NotifyBaseURL
+	}
+	if req.NotifyEventsEncodeComplete != nil {
+		h.cfg.Notifications.Events.EncodeComplete = *req.NotifyEventsEncodeComplete
+	}
+	if req.NotifyEventsEncodeFailed != nil {
+		h.cfg.Notifications.Events.EncodeFailed = *req.NotifyEventsEncodeFailed
+	}
+	if req.NotifyEventsReviewQueueItem != nil {
+		h.cfg.Notifications.Events.ReviewQueueItem = *req.NotifyEventsReviewQueueItem
+	}
+	if req.NotifyEventsDailySummary != nil {
+		h.cfg.Notifications.Events.DailySummary = *req.NotifyEventsDailySummary
+	}
+	if req.NotifyEventsWeeklySummary != nil {
+		h.cfg.Notifications.Events.WeeklySummary = *req.NotifyEventsWeeklySummary
+	}
+	if req.NotifyEmailEnabled != nil {
+		h.cfg.Notifications.Email.Enabled = *req.NotifyEmailEnabled
+	}
+	if req.NotifyEmailSMTPHost != nil {
+		h.cfg.Notifications.Email.SMTPHost = *req.NotifyEmailSMTPHost
+	}
+	if req.NotifyEmailSMTPPort != nil {
+		port := *req.NotifyEmailSMTPPort
+		if port < 1 || port > 65535 {
+			writeError(w, http.StatusBadRequest, "notify_email_smtp_port must be between 1 and 65535")
+			return
+		}
+		h.cfg.Notifications.Email.SMTPPort = port
+	}
+	if req.NotifyEmailSMTPTLS != nil {
+		h.cfg.Notifications.Email.SMTPTLS = *req.NotifyEmailSMTPTLS
+	}
+	if req.NotifyEmailUsername != nil {
+		h.cfg.Notifications.Email.Username = *req.NotifyEmailUsername
+	}
+	if req.NotifyEmailPassword != nil {
+		h.cfg.Notifications.Email.Password = *req.NotifyEmailPassword
+	}
+	if req.NotifyEmailFrom != nil {
+		h.cfg.Notifications.Email.From = *req.NotifyEmailFrom
+	}
+	if req.NotifyEmailTo != nil {
+		h.cfg.Notifications.Email.To = *req.NotifyEmailTo
+	}
+	if req.NotifyEmailMode != nil {
+		val := *req.NotifyEmailMode
+		if val != "per_file" && val != "batched" {
+			writeError(w, http.StatusBadRequest, "notify_email_mode must be 'per_file' or 'batched'")
+			return
+		}
+		h.cfg.Notifications.Email.Mode = val
+	}
+	if req.NotifyEmailIntervalMinutes != nil {
+		val := *req.NotifyEmailIntervalMinutes
+		if val < 1 {
+			val = 1
+		}
+		h.cfg.Notifications.Email.IntervalMinutes = val
 	}
 
 	// Persist config to disk
@@ -1034,4 +1144,28 @@ func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
 	h.queue.Remove(id)
 
 	writeJSON(w, http.StatusOK, newJob)
+}
+
+// TestNotifications handles POST /api/notifications/test
+// Sends a test message through all configured notification channels.
+func (h *Handler) TestNotifications(w http.ResponseWriter, r *http.Request) {
+	if h.dispatcher == nil || !h.dispatcher.IsAnyConfigured() {
+		writeError(w, http.StatusBadRequest, "no notification channels configured")
+		return
+	}
+
+	if err := h.dispatcher.DispatchTest(r.Context()); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "test notification sent"})
+}
+
+// DispatchNotification dispatches a notification event from outside the handler
+// (e.g. from the SSE handler or intake watcher).
+func (h *Handler) DispatchNotification(e notify.Event) {
+	if h.dispatcher != nil {
+		h.dispatcher.Dispatch(context.Background(), e)
+	}
 }
