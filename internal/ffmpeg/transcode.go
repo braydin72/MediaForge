@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gwlsn/shrinkray/internal/logger"
-	"github.com/gwlsn/shrinkray/internal/util"
+	"github.com/braydin72/mediaforge/internal/logger"
+	"github.com/braydin72/mediaforge/internal/util"
 )
 
 // Progress represents the current transcoding progress
@@ -343,7 +343,7 @@ func BuildTempPath(inputPath, tempDir, format string) string {
 			outExt = "mp4"
 		}
 	}
-	tempName := fmt.Sprintf("%s.%016x.shrinkray.tmp.%s", name, rand.Uint64(), outExt) //nolint:gosec // temp filename uniqueness, not security
+	tempName := fmt.Sprintf("%s.%016x.mediaforge.tmp.%s", name, rand.Uint64(), outExt) //nolint:gosec // temp filename uniqueness, not security
 	return filepath.Join(tempDir, tempName)
 }
 

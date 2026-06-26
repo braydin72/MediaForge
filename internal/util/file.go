@@ -40,7 +40,7 @@ func SafeMove(src, dst string) error {
 		return fmt.Errorf("create destination dir: %w", err)
 	}
 
-	tmpDst := dst + ".shrinkray.tmp"
+	tmpDst := dst + ".mediaforge.tmp"
 
 	if err := os.Rename(src, tmpDst); err != nil {
 		if !isCrossDeviceError(err) {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gwlsn/shrinkray/internal/logger"
+	"github.com/braydin72/mediaforge/internal/logger"
 )
 
 // lastLines returns the last n non-empty lines from output

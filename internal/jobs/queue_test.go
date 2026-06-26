@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gwlsn/shrinkray/internal/ffmpeg"
-	"github.com/gwlsn/shrinkray/internal/jobs"
-	"github.com/gwlsn/shrinkray/internal/store"
+	"github.com/braydin72/mediaforge/internal/ffmpeg"
+	"github.com/braydin72/mediaforge/internal/jobs"
+	"github.com/braydin72/mediaforge/internal/store"
 )
 
 func TestQueue(t *testing.T) {

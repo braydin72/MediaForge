@@ -11,16 +11,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	shrinkray "github.com/gwlsn/shrinkray"
-	"github.com/gwlsn/shrinkray/internal/browse"
-	"github.com/gwlsn/shrinkray/internal/config"
-	"github.com/gwlsn/shrinkray/internal/ffmpeg"
-	"github.com/gwlsn/shrinkray/internal/ffmpeg/vmaf"
-	"github.com/gwlsn/shrinkray/internal/intake"
-	"github.com/gwlsn/shrinkray/internal/jobs"
-	"github.com/gwlsn/shrinkray/internal/logger"
-	"github.com/gwlsn/shrinkray/internal/pushover"
-	"github.com/gwlsn/shrinkray/internal/store"
+	mediaforge "github.com/braydin72/mediaforge"
+	"github.com/braydin72/mediaforge/internal/browse"
+	"github.com/braydin72/mediaforge/internal/config"
+	"github.com/braydin72/mediaforge/internal/ffmpeg"
+	"github.com/braydin72/mediaforge/internal/ffmpeg/vmaf"
+	"github.com/braydin72/mediaforge/internal/intake"
+	"github.com/braydin72/mediaforge/internal/jobs"
+	"github.com/braydin72/mediaforge/internal/logger"
+	"github.com/braydin72/mediaforge/internal/pushover"
+	"github.com/braydin72/mediaforge/internal/store"
 )
 
 // StatsStore defines the interface for stats-related store operations.
@@ -340,7 +340,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Return a sanitized config (no sensitive paths exposed)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"version":                 shrinkray.Version,
+		"version":                 mediaforge.Version,
 		"media_path":              h.cfg.MediaPath,
 		"original_handling":       h.cfg.OriginalHandling,
 		"use_completed_dir":       h.cfg.UseCompletedDir,

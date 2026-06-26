@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gwlsn/shrinkray/internal/jobs"
+	"github.com/braydin72/mediaforge/internal/jobs"
 )
 
 // jsonPersistenceData matches the structure used in migration
@@ -34,7 +34,7 @@ func createTestJobForMigration(id string, status jobs.Status) *jobs.Job {
 func TestNeedsMigration(t *testing.T) {
 	tmpDir := t.TempDir()
 	jsonPath := filepath.Join(tmpDir, "queue.json")
-	dbPath := filepath.Join(tmpDir, "shrinkray.db")
+	dbPath := filepath.Join(tmpDir, "mediaforge.db")
 
 	// Neither exists - no migration needed
 	if NeedsMigration(jsonPath, dbPath) {
@@ -63,7 +63,7 @@ func TestNeedsMigration(t *testing.T) {
 func TestMigration_EmptyQueue(t *testing.T) {
 	tmpDir := t.TempDir()
 	jsonPath := filepath.Join(tmpDir, "queue.json")
-	dbPath := filepath.Join(tmpDir, "shrinkray.db")
+	dbPath := filepath.Join(tmpDir, "mediaforge.db")
 
 	// Create empty queue JSON
 	data := testPersistenceData{Jobs: []*jobs.Job{}, Order: []string{}}
@@ -95,7 +95,7 @@ func TestMigration_EmptyQueue(t *testing.T) {
 func TestMigration_ValidQueue(t *testing.T) {
 	tmpDir := t.TempDir()
 	jsonPath := filepath.Join(tmpDir, "queue.json")
-	dbPath := filepath.Join(tmpDir, "shrinkray.db")
+	dbPath := filepath.Join(tmpDir, "mediaforge.db")
 
 	// Create queue with jobs
 	job1 := createTestJobForMigration("job1", jobs.StatusComplete)
@@ -153,7 +153,7 @@ func TestMigration_ValidQueue(t *testing.T) {
 func TestMigration_OrderPreserved(t *testing.T) {
 	tmpDir := t.TempDir()
 	jsonPath := filepath.Join(tmpDir, "queue.json")
-	dbPath := filepath.Join(tmpDir, "shrinkray.db")
+	dbPath := filepath.Join(tmpDir, "mediaforge.db")
 
 	// Create jobs with specific order
 	jobA := createTestJobForMigration("A", jobs.StatusPending)
@@ -187,7 +187,7 @@ func TestMigration_OrderPreserved(t *testing.T) {
 func TestMigration_CorruptJSON_Truncated(t *testing.T) {
 	tmpDir := t.TempDir()
 	jsonPath := filepath.Join(tmpDir, "queue.json")
-	dbPath := filepath.Join(tmpDir, "shrinkray.db")
+	dbPath := filepath.Join(tmpDir, "mediaforge.db")
 
 	// Write truncated JSON
 	os.WriteFile(jsonPath, []byte(`{"jobs":[{"id":"1"`), 0644)
@@ -207,7 +207,7 @@ func TestMigration_CorruptJSON_Truncated(t *testing.T) {
 func TestMigration_CorruptJSON_InvalidSyntax(t *testing.T) {
 	tmpDir := t.TempDir()
 	jsonPath := filepath.Join(tmpDir, "queue.json")
-	dbPath := filepath.Join(tmpDir, "shrinkray.db")
+	dbPath := filepath.Join(tmpDir, "mediaforge.db")
 
 	// Write invalid JSON
 	os.WriteFile(jsonPath, []byte(`{invalid}`), 0644)
@@ -227,7 +227,7 @@ func TestMigration_CorruptJSON_InvalidSyntax(t *testing.T) {
 func TestMigration_CorruptJSON_BinaryGarbage(t *testing.T) {
 	tmpDir := t.TempDir()
 	jsonPath := filepath.Join(tmpDir, "queue.json")
-	dbPath := filepath.Join(tmpDir, "shrinkray.db")
+	dbPath := filepath.Join(tmpDir, "mediaforge.db")
 
 	// Write binary garbage
 	garbage := []byte{0x00, 0x01, 0x02, 0xFF, 0xFE}
@@ -243,7 +243,7 @@ func TestMigration_CorruptJSON_BinaryGarbage(t *testing.T) {
 func TestMigration_EmptyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	jsonPath := filepath.Join(tmpDir, "queue.json")
-	dbPath := filepath.Join(tmpDir, "shrinkray.db")
+	dbPath := filepath.Join(tmpDir, "mediaforge.db")
 
 	// Create empty file
 	os.WriteFile(jsonPath, []byte{}, 0644)
@@ -261,7 +261,7 @@ func TestMigration_EmptyFile(t *testing.T) {
 func TestMigration_BackupCreated(t *testing.T) {
 	tmpDir := t.TempDir()
 	jsonPath := filepath.Join(tmpDir, "queue.json")
-	dbPath := filepath.Join(tmpDir, "shrinkray.db")
+	dbPath := filepath.Join(tmpDir, "mediaforge.db")
 
 	// Create valid queue
 	data := testPersistenceData{
@@ -297,7 +297,7 @@ func TestMigration_LargeQueue(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	jsonPath := filepath.Join(tmpDir, "queue.json")
-	dbPath := filepath.Join(tmpDir, "shrinkray.db")
+	dbPath := filepath.Join(tmpDir, "mediaforge.db")
 
 	// Create 1000 jobs
 	numJobs := 1000
@@ -337,7 +337,7 @@ func TestMigration_LargeQueue(t *testing.T) {
 func TestMigration_OrderReferencesNonexistentJob(t *testing.T) {
 	tmpDir := t.TempDir()
 	jsonPath := filepath.Join(tmpDir, "queue.json")
-	dbPath := filepath.Join(tmpDir, "shrinkray.db")
+	dbPath := filepath.Join(tmpDir, "mediaforge.db")
 
 	// Create queue with orphan order entry
 	job := createTestJobForMigration("exists", jobs.StatusPending)
@@ -369,7 +369,7 @@ func TestInitStore_FreshStart(t *testing.T) {
 	defer store.Close()
 
 	// Verify DB was created
-	dbPath := filepath.Join(tmpDir, "shrinkray.db")
+	dbPath := filepath.Join(tmpDir, "mediaforge.db")
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		t.Error("database file should exist")
 	}
@@ -412,7 +412,7 @@ func TestInitStore_WithMigration(t *testing.T) {
 
 func TestInitStore_ResetsRunningJobs(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "shrinkray.db")
+	dbPath := filepath.Join(tmpDir, "mediaforge.db")
 
 	// Create store with running job
 	store1, _ := NewSQLiteStore(dbPath)
@@ -444,9 +444,9 @@ func TestGetDBPath(t *testing.T) {
 		jsonPath string
 		expected string
 	}{
-		{"/config/queue.json", "/config/shrinkray.db"},
-		{"/data/shrinkray/queue.json", "/data/shrinkray/shrinkray.db"},
-		{"./queue.json", "shrinkray.db"}, // filepath.Join normalizes ./
+		{"/config/queue.json", "/config/mediaforge.db"},
+		{"/data/shrinkray/queue.json", "/data/shrinkray/mediaforge.db"},
+		{"./queue.json", "mediaforge.db"}, // filepath.Join normalizes ./
 	}
 
 	for _, tt := range tests {

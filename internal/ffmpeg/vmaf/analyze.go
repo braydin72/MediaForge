@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/gwlsn/shrinkray/internal/logger"
+	"github.com/braydin72/mediaforge/internal/logger"
 )
 
 // Analyzer orchestrates VMAF analysis for SmartShrink.

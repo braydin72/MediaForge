@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/gwlsn/shrinkray/internal/config"
-	"github.com/gwlsn/shrinkray/internal/ffmpeg"
-	"github.com/gwlsn/shrinkray/internal/logger"
-	"github.com/gwlsn/shrinkray/internal/store"
+	"github.com/braydin72/mediaforge/internal/config"
+	"github.com/braydin72/mediaforge/internal/ffmpeg"
+	"github.com/braydin72/mediaforge/internal/logger"
+	"github.com/braydin72/mediaforge/internal/store"
 )
 
 // defaultScanInterval is how often the watch folder is polled in production.

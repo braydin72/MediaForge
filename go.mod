@@ -1,4 +1,4 @@
-module github.com/gwlsn/shrinkray
+module github.com/braydin72/mediaforge
 
 go 1.25.0
 

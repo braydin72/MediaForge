@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gwlsn/shrinkray/internal/ffmpeg"
-	"github.com/gwlsn/shrinkray/internal/logger"
+	"github.com/braydin72/mediaforge/internal/ffmpeg"
+	"github.com/braydin72/mediaforge/internal/logger"
 )
 
 // Store defines the persistence interface for job data.

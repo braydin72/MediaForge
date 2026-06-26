@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gwlsn/shrinkray/internal/config"
+	"github.com/braydin72/mediaforge/internal/config"
 )
 
 const llmTimeout = 30 * time.Second

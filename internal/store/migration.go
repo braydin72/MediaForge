@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/gwlsn/shrinkray/internal/jobs"
-	"github.com/gwlsn/shrinkray/internal/logger"
-	"github.com/gwlsn/shrinkray/internal/util"
+	"github.com/braydin72/mediaforge/internal/jobs"
+	"github.com/braydin72/mediaforge/internal/logger"
+	"github.com/braydin72/mediaforge/internal/util"
 )
 
 // jsonPersistenceData matches the structure in internal/jobs/queue.go
@@ -179,10 +179,10 @@ func renameToBackup(jsonPath string, result *MigrationResult) {
 }
 
 // GetDBPath converts a JSON queue path to the corresponding SQLite path.
-// e.g., /config/queue.json -> /config/shrinkray.db
+// e.g., /config/queue.json -> /config/mediaforge.db
 func GetDBPath(jsonPath string) string {
 	dir := filepath.Dir(jsonPath)
-	return filepath.Join(dir, "shrinkray.db")
+	return filepath.Join(dir, "mediaforge.db")
 }
 
 // GetJSONPath returns the expected JSON queue path for a config directory.

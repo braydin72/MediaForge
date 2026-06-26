@@ -9,19 +9,21 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
-	shrinkray "github.com/gwlsn/shrinkray"
-	"github.com/gwlsn/shrinkray/internal/api"
-	"github.com/gwlsn/shrinkray/internal/browse"
-	"github.com/gwlsn/shrinkray/internal/config"
-	"github.com/gwlsn/shrinkray/internal/ffmpeg"
-	"github.com/gwlsn/shrinkray/internal/ffmpeg/vmaf"
-	"github.com/gwlsn/shrinkray/internal/intake"
-	"github.com/gwlsn/shrinkray/internal/jobs"
-	"github.com/gwlsn/shrinkray/internal/logger"
-	"github.com/gwlsn/shrinkray/internal/store"
+	mediaforge "github.com/braydin72/mediaforge"
+	"github.com/braydin72/mediaforge/internal/api"
+	"github.com/braydin72/mediaforge/internal/browse"
+	"github.com/braydin72/mediaforge/internal/config"
+	"github.com/braydin72/mediaforge/internal/ffmpeg"
+	"github.com/braydin72/mediaforge/internal/ffmpeg/vmaf"
+	"github.com/braydin72/mediaforge/internal/intake"
+	"github.com/braydin72/mediaforge/internal/jobs"
+	"github.com/braydin72/mediaforge/internal/logger"
+	"github.com/braydin72/mediaforge/internal/setup"
+	"github.com/braydin72/mediaforge/internal/store"
 )
 
 func main() {
@@ -43,6 +45,10 @@ func main() {
 		}
 	}
 
+	// Record whether config existed before Load (Load creates the file when absent).
+	_, statErr := os.Stat(cfgPath)
+	cfgFileExisted := statErr == nil
+
 	// Load config
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
@@ -51,6 +57,8 @@ func main() {
 		logger.Warn("Could not load config", "path", cfgPath, "error", err)
 		cfg = config.DefaultConfig()
 	}
+
+	firstRun := setup.IsFirstRun(cfgFileExisted, cfg)
 
 	// Initialize logger with configured level
 	logger.Init(cfg.LogLevel)
@@ -75,10 +83,12 @@ func main() {
 		}
 	}
 
-	// Validate media path exists
-	if _, err := os.Stat(cfg.MediaPath); os.IsNotExist(err) { //nolint:gosec // path comes from config file, not user input
-		logger.Error("Media path does not exist", "path", cfg.MediaPath)
-		os.Exit(1)
+	// Validate media path exists (skip on first run: path is a default placeholder).
+	if !firstRun {
+		if _, err := os.Stat(cfg.MediaPath); os.IsNotExist(err) { //nolint:gosec // path comes from config file, not user input
+			logger.Error("Media path does not exist", "path", cfg.MediaPath)
+			os.Exit(1)
+		}
 	}
 
 	// Determine config directory for data storage
@@ -103,7 +113,7 @@ func main() {
 	fmt.Println("╔═══════════════════════════════════════════════════════════╗")
 	fmt.Println("║                        MEDIAFORGE                         ║")
 	fmt.Println("║             Ingest, Transcode, Organize                   ║")
-	versionLine := fmt.Sprintf("v%s", shrinkray.Version)
+	versionLine := fmt.Sprintf("v%s", mediaforge.Version)
 	padding := 59 - len(versionLine)
 	fmt.Printf("║%*s%s%*s║\n", padding/2, "", versionLine, (padding+1)/2, "")
 	fmt.Println("╚═══════════════════════════════════════════════════════════╝")
@@ -172,18 +182,46 @@ func main() {
 	handler := api.NewHandler(browser, queue, workerPool, cfg, cfgPath)
 	handler.SetStore(jobStore)       // Enable session/lifetime stats
 	handler.SetReviewStore(jobStore) // Enable Review Queue API
-	router := api.NewRouter(handler, shrinkray.WebFS)
+	router := api.NewRouter(handler, mediaforge.WebFS)
+
+	// Wrap router with first-run wizard if needed.
+	var wizardHandler *setup.WizardHandler
+	var serverHandler http.Handler = router
+	if firstRun {
+		logger.Info("First-run detected: serving setup wizard until configuration is complete")
+		wizardHandler = setup.NewWizardHandler(router, cfgPath, cfg)
+		serverHandler = wizardHandler
+	}
 
 	// Start worker pool
 	workerPool.Start()
 
-	// Start intake watcher if enabled
-	var intakeWatcher *intake.Watcher
-	if cfg.Intake.Enabled {
-		intakeWatcher = intake.NewWatcher(&cfg.Intake, cfg.FFprobePath, jobStore)
-		go intakeWatcher.Start(context.Background())
+	// Protect intakeWatcher so the wizard-complete goroutine and shutdown goroutine
+	// can access it safely.
+	var (
+		intakeWatcher   *intake.Watcher
+		intakeWatcherMu sync.Mutex
+	)
+
+	startIntake := func() {
+		if cfg.Intake.Enabled {
+			intakeWatcherMu.Lock()
+			intakeWatcher = intake.NewWatcher(&cfg.Intake, cfg.FFprobePath, jobStore)
+			intakeWatcherMu.Unlock()
+			go intakeWatcher.Start(context.Background())
+		} else {
+			logger.Info("Intake pipeline disabled (enable in Settings to activate)")
+		}
+	}
+
+	if firstRun {
+		go func() {
+			<-wizardHandler.Done()
+			logger.Info("Setup wizard complete: starting intake watcher")
+			startIntake()
+		}()
 	} else {
-		logger.Info("Intake pipeline disabled (enable in Settings to activate)")
+		startIntake()
 	}
 
 	fmt.Printf("  Starting server on port %d\n", *port)
@@ -195,7 +233,7 @@ func main() {
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Printf("  Logging started (level: %s)\n", cfg.LogLevel)
 	fmt.Println("─────────────────────────────────────────────────────────────")
-	logger.Info("MediaForge started", "version", shrinkray.Version, "encoder", best.Name, "workers", cfg.Workers, "port", *port)
+	logger.Info("MediaForge started", "version", mediaforge.Version, "encoder", best.Name, "workers", cfg.Workers, "port", *port)
 	go browser.WarmCountCache(context.Background())
 	if vmaf.IsAvailable() {
 		logger.Info("VMAF support detected", "models", vmaf.GetModels())
@@ -207,7 +245,7 @@ func main() {
 	// Set up graceful shutdown
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", *port),
-		Handler:           router,
+		Handler:           serverHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -219,8 +257,11 @@ func main() {
 		<-sigChan
 		fmt.Println("\n  Shutting down...")
 		logger.Info("Shutdown signal received")
-		if intakeWatcher != nil {
-			intakeWatcher.Stop()
+		intakeWatcherMu.Lock()
+		w := intakeWatcher
+		intakeWatcherMu.Unlock()
+		if w != nil {
+			w.Stop()
 		}
 		workerPool.Stop()
 		server.Close()

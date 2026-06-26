@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gwlsn/shrinkray/internal/config"
-	"github.com/gwlsn/shrinkray/internal/ffmpeg"
-	"github.com/gwlsn/shrinkray/internal/ffmpeg/vmaf"
-	"github.com/gwlsn/shrinkray/internal/logger"
-	"github.com/gwlsn/shrinkray/internal/util"
+	"github.com/braydin72/mediaforge/internal/config"
+	"github.com/braydin72/mediaforge/internal/ffmpeg"
+	"github.com/braydin72/mediaforge/internal/ffmpeg/vmaf"
+	"github.com/braydin72/mediaforge/internal/logger"
+	"github.com/braydin72/mediaforge/internal/util"
 )
 
 // CacheInvalidator is called when a file is transcoded to invalidate cached probe data

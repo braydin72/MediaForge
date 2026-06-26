@@ -18,9 +18,9 @@ func TestBuildTempPath(t *testing.T) {
 		prefix  string
 		suffix  string
 	}{
-		{"/media/movie.mkv", "/tmp", "mkv", "/tmp", "movie.", ".shrinkray.tmp.mkv"},
-		{"/media/tv/show/episode.mp4", "/media/tv/show", "mkv", "/media/tv/show", "episode.", ".shrinkray.tmp.mkv"},
-		{"/data/video.avi", "/data", "mp4", "/data", "video.", ".shrinkray.tmp.mp4"},
+		{"/media/movie.mkv", "/tmp", "mkv", "/tmp", "movie.", ".mediaforge.tmp.mkv"},
+		{"/media/tv/show/episode.mp4", "/media/tv/show", "mkv", "/media/tv/show", "episode.", ".mediaforge.tmp.mkv"},
+		{"/data/video.avi", "/data", "mp4", "/data", "video.", ".mediaforge.tmp.mp4"},
 	}
 
 	for _, tt := range tests {
@@ -142,7 +142,7 @@ func TestFinalizeTranscodeReplace(t *testing.T) {
 	}
 
 	// Create a fake "temp" file (transcoded output)
-	tempPath := filepath.Join(tmpDir, "video.shrinkray.tmp.mkv")
+	tempPath := filepath.Join(tmpDir, "video.mediaforge.tmp.mkv")
 	if err := os.WriteFile(tempPath, []byte("transcoded content"), 0644); err != nil {
 		t.Fatalf("failed to create temp: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestFinalizeTranscodeReplaceDifferentExt(t *testing.T) {
 	}
 
 	// Create a fake "temp" file (transcoded output)
-	tempPath := filepath.Join(tmpDir, "video.shrinkray.tmp.mkv")
+	tempPath := filepath.Join(tmpDir, "video.mediaforge.tmp.mkv")
 	if err := os.WriteFile(tempPath, []byte("transcoded content"), 0644); err != nil {
 		t.Fatalf("failed to create temp: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestFinalizeTranscodeKeep(t *testing.T) {
 	}
 
 	// Create a fake "temp" file
-	tempPath := filepath.Join(tmpDir, "video.shrinkray.tmp.mkv")
+	tempPath := filepath.Join(tmpDir, "video.mediaforge.tmp.mkv")
 	if err := os.WriteFile(tempPath, []byte("transcoded content"), 0644); err != nil {
 		t.Fatalf("failed to create temp: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestFinalizeTranscodeCompletedDir(t *testing.T) {
 	if err := os.WriteFile(originalPath, []byte("original content"), 0644); err != nil {
 		t.Fatalf("failed to create original: %v", err)
 	}
-	tempPath := filepath.Join(tmpDir, "video.shrinkray.tmp.mkv")
+	tempPath := filepath.Join(tmpDir, "video.mediaforge.tmp.mkv")
 	if err := os.WriteFile(tempPath, []byte("transcoded content"), 0644); err != nil {
 		t.Fatalf("failed to create temp: %v", err)
 	}

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gwlsn/shrinkray/internal/jobs"
+	"github.com/braydin72/mediaforge/internal/jobs"
 	_ "modernc.org/sqlite"
 )
 

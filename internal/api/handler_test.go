@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gwlsn/shrinkray/internal/browse"
-	"github.com/gwlsn/shrinkray/internal/config"
-	"github.com/gwlsn/shrinkray/internal/ffmpeg"
-	"github.com/gwlsn/shrinkray/internal/jobs"
+	"github.com/braydin72/mediaforge/internal/browse"
+	"github.com/braydin72/mediaforge/internal/config"
+	"github.com/braydin72/mediaforge/internal/ffmpeg"
+	"github.com/braydin72/mediaforge/internal/jobs"
 )
 
 func setupTestHandler(t *testing.T) (*Handler, string) {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gwlsn/shrinkray/internal/jobs"
+	"github.com/braydin72/mediaforge/internal/jobs"
 )
 
 func createBenchmarkJob(id string) *jobs.Job {
@@ -251,7 +251,7 @@ func BenchmarkMigration10000(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		tmpDir := b.TempDir()
 		jsonPath := filepath.Join(tmpDir, "queue.json")
-		dbPath := filepath.Join(tmpDir, "shrinkray.db")
+		dbPath := filepath.Join(tmpDir, "mediaforge.db")
 
 		// Create 10000 jobs
 		numJobs := 10000

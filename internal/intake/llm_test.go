@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gwlsn/shrinkray/internal/config"
+	"github.com/braydin72/mediaforge/internal/config"
 )
 
 // newMockLLMClient builds an LLMClient backed by a roundTripFunc mock.

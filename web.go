@@ -1,4 +1,4 @@
-package shrinkray
+package mediaforge
 
 import "embed"
 

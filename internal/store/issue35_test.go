@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gwlsn/shrinkray/internal/ffmpeg"
-	"github.com/gwlsn/shrinkray/internal/jobs"
+	"github.com/braydin72/mediaforge/internal/ffmpeg"
+	"github.com/braydin72/mediaforge/internal/jobs"
 )
 
 // TestIssue35_RunningJobsNotSkippedAfterRestart verifies the fix for issue #35:

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gwlsn/shrinkray/internal/ffmpeg/vmaf"
+	"github.com/braydin72/mediaforge/internal/ffmpeg/vmaf"
 )
 
 // Preset defines a transcoding preset with its FFmpeg parameters

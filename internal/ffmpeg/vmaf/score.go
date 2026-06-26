@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gwlsn/shrinkray/internal/logger"
+	"github.com/braydin72/mediaforge/internal/logger"
 	"golang.org/x/sync/errgroup"
 )
 

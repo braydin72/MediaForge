@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gwlsn/shrinkray/internal/jobs"
+	"github.com/braydin72/mediaforge/internal/jobs"
 )
 
 func TestConcurrency_MultipleWriters(t *testing.T) {

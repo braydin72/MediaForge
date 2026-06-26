@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gwlsn/shrinkray/internal/config"
-	"github.com/gwlsn/shrinkray/internal/store"
+	"github.com/braydin72/mediaforge/internal/config"
+	"github.com/braydin72/mediaforge/internal/store"
 )
 
 func TestClassifyCodec(t *testing.T) {
