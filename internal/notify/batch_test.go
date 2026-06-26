@@ -13,8 +13,8 @@ func TestBatchCollector_CollectsAndSendsDigest(t *testing.T) {
 	bc := NewBatchCollector(mn, 999, &baseURL) // very long interval; flush manually
 	defer bc.Stop()
 
-	bc.Add(Event{Type: EventEncodeFailed, Filename: "a.mkv", Reason: "too big", Timestamp: time.Now()})
-	bc.Add(Event{Type: EventEncodeComplete, Filename: "b.mkv", Timestamp: time.Now()})
+	bc.Add(&Event{Type: EventEncodeFailed, Filename: "a.mkv", Reason: "too big", Timestamp: time.Now()})
+	bc.Add(&Event{Type: EventEncodeComplete, Filename: "b.mkv", Timestamp: time.Now()})
 
 	bc.FlushNow()
 
@@ -52,7 +52,7 @@ func TestBatchCollector_EventsClearedAfterFlush(t *testing.T) {
 	bc := NewBatchCollector(mn, 999, &baseURL)
 	defer bc.Stop()
 
-	bc.Add(Event{Type: EventEncodeFailed, Filename: "x.mkv", Timestamp: time.Now()})
+	bc.Add(&Event{Type: EventEncodeFailed, Filename: "x.mkv", Timestamp: time.Now()})
 	bc.FlushNow()
 	bc.FlushNow() // second flush should send nothing
 
@@ -78,7 +78,7 @@ func TestDispatcher_BatchedMode(t *testing.T) {
 		batch:    NewBatchCollector(mn, 999, &cfg.BaseURL),
 	})
 
-	d.Dispatch(nil, Event{Type: EventEncodeFailed, Filename: "file.mkv", Timestamp: time.Now()}) //nolint:staticcheck
+	d.Dispatch(nil, &Event{Type: EventEncodeFailed, Filename: "file.mkv", Timestamp: time.Now()}) //nolint:staticcheck
 
 	// Event should be batched, not sent yet.
 	if mn.callCount() != 0 {

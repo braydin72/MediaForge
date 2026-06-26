@@ -1164,7 +1164,7 @@ func (h *Handler) TestNotifications(w http.ResponseWriter, r *http.Request) {
 
 // DispatchNotification dispatches a notification event from outside the handler
 // (e.g. from the SSE handler or intake watcher).
-func (h *Handler) DispatchNotification(e notify.Event) {
+func (h *Handler) DispatchNotification(e *notify.Event) {
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(context.Background(), e)
 	}

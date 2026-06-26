@@ -79,7 +79,7 @@ func (d *Dispatcher) AddChannel(n Notifier, intervalMinutes int) {
 
 // Dispatch sends an event to all configured channels that have the event
 // type enabled.
-func (d *Dispatcher) Dispatch(ctx context.Context, e Event) {
+func (d *Dispatcher) Dispatch(ctx context.Context, e *Event) {
 	if e.Timestamp.IsZero() {
 		e.Timestamp = time.Now()
 	}
@@ -109,7 +109,7 @@ func (d *Dispatcher) DispatchTest(ctx context.Context) error {
 	if len(channels) == 0 {
 		return fmt.Errorf("no notification channels configured")
 	}
-	e := Event{
+	e := &Event{
 		Type:      EventTest,
 		Filename:  "test.mkv",
 		Timestamp: time.Now(),
@@ -179,14 +179,13 @@ func (d *Dispatcher) eventEnabled(t EventType) bool {
 }
 
 func (d *Dispatcher) channelMode(n Notifier) string {
-	switch n.Name() {
-	case "email":
+	if n.Name() == "email" {
 		return d.cfg.Email.Mode
 	}
 	return "per_file"
 }
 
-func formatEvent(e Event, baseURL string) (subject, body string) {
+func formatEvent(e *Event, baseURL string) (subject, body string) {
 	switch e.Type {
 	case EventTest:
 		subject = "MediaForge: Test Notification"

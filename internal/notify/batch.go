@@ -36,10 +36,10 @@ func NewBatchCollector(n Notifier, intervalMinutes int, baseURL *string) *BatchC
 }
 
 // Add enqueues an event for the next digest.
-func (bc *BatchCollector) Add(e Event) {
+func (bc *BatchCollector) Add(e *Event) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
-	bc.events = append(bc.events, e)
+	bc.events = append(bc.events, *e)
 }
 
 // Stop shuts down the background ticker. Safe to call more than once.

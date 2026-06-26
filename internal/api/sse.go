@@ -80,12 +80,12 @@ func (h *Handler) dispatchEncodeEvent(ctx context.Context, event jobs.JobEvent) 
 
 	switch event.Type {
 	case "complete":
-		h.dispatcher.Dispatch(ctx, notify.Event{
+		h.dispatcher.Dispatch(ctx, &notify.Event{
 			Type:     notify.EventEncodeComplete,
 			Filename: filename,
 		})
 	case "failed":
-		h.dispatcher.Dispatch(ctx, notify.Event{
+		h.dispatcher.Dispatch(ctx, &notify.Event{
 			Type:     notify.EventEncodeFailed,
 			Filename: filename,
 			Reason:   event.Job.Error,

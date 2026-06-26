@@ -83,7 +83,7 @@ func (c *SMTPClient) sendSTARTTLS(addr string, auth smtp.Auth, to []string, msg 
 	}
 	defer client.Close()
 
-	if err := client.StartTLS(&tls.Config{ServerName: c.cfg.SMTPHost}); err != nil {
+	if err := client.StartTLS(&tls.Config{ServerName: c.cfg.SMTPHost, MinVersion: tls.VersionTLS12}); err != nil {
 		return fmt.Errorf("STARTTLS: %w", err)
 	}
 	if err := client.Auth(auth); err != nil {
@@ -96,7 +96,7 @@ func (c *SMTPClient) sendSMTPS(addr string, auth smtp.Auth, to []string, msg []b
 	conn, err := tls.DialWithDialer(
 		&net.Dialer{Timeout: 15 * time.Second},
 		"tcp", addr,
-		&tls.Config{ServerName: c.cfg.SMTPHost},
+		&tls.Config{ServerName: c.cfg.SMTPHost, MinVersion: tls.VersionTLS12},
 	)
 	if err != nil {
 		return fmt.Errorf("SMTPS connect: %w", err)
@@ -131,7 +131,7 @@ func sendViaClient(client *smtp.Client, from string, to []string, msg []byte) er
 	if _, err = wc.Write(msg); err != nil {
 		return err
 	}
-	if err = wc.Close(); err != nil {
+	if err := wc.Close(); err != nil {
 		return err
 	}
 	return client.Quit()

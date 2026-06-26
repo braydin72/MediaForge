@@ -209,7 +209,7 @@ func main() {
 			intakeWatcherMu.Lock()
 			intakeWatcher = intake.NewWatcher(&cfg.Intake, cfg.FFprobePath, jobStore)
 			intakeWatcher.OnReviewQueueAdd = func(filename, reason string) {
-				handler.DispatchNotification(notify.Event{
+				handler.DispatchNotification(&notify.Event{
 					Type:     notify.EventReviewQueueItem,
 					Filename: filename,
 					Reason:   reason,

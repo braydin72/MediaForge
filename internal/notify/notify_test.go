@@ -64,7 +64,7 @@ func TestDispatcher_DispatchPerFile(t *testing.T) {
 	mn := &mockNotifier{name: "test"}
 	d.AddChannel(mn, 60)
 
-	d.Dispatch(context.Background(), Event{
+	d.Dispatch(context.Background(), &Event{
 		Type:     EventEncodeFailed,
 		Filename: "movie.mkv",
 		Reason:   "output too large",
@@ -88,7 +88,7 @@ func TestDispatcher_DisabledEventSkipped(t *testing.T) {
 	mn := &mockNotifier{name: "test"}
 	d.AddChannel(mn, 60)
 
-	d.Dispatch(context.Background(), Event{Type: EventEncodeFailed, Filename: "a.mkv"})
+	d.Dispatch(context.Background(), &Event{Type: EventEncodeFailed, Filename: "a.mkv"})
 
 	if mn.callCount() != 0 {
 		t.Errorf("expected 0 calls for disabled event, got %d", mn.callCount())
@@ -126,7 +126,7 @@ func TestDispatcher_BaseURLInBody(t *testing.T) {
 	mn := &mockNotifier{name: "test"}
 	d.AddChannel(mn, 60)
 
-	d.Dispatch(context.Background(), Event{
+	d.Dispatch(context.Background(), &Event{
 		Type:      EventEncodeComplete,
 		Filename:  "movie.mkv",
 		Timestamp: time.Now(),
