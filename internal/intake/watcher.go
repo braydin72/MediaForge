@@ -252,7 +252,7 @@ func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpe
 	if outFmt == "" || outFmt == "preserve" {
 		outFmt = "mkv"
 	}
-	libraryPath := resolveLibraryPath(w.cfg, parsed, "."+outFmt)
+	libraryPath := resolveLibraryPath(&w.cfg, &parsed, "."+outFmt)
 	if libraryPath != "" {
 		w.EncodeQueue.SetLibraryPath(job.ID, libraryPath)
 		logger.Info("Intake: AVC file queued for encode",

@@ -12,7 +12,7 @@ import (
 // library for an AVC file, using the naming templates in cfg and the parsed
 // filename metadata. ext should be the output container extension (e.g. ".mkv").
 // Returns an empty string if not enough metadata is available to build a path.
-func resolveLibraryPath(cfg config.IntakeConfig, parsed ParsedFilename, ext string) string {
+func resolveLibraryPath(cfg *config.IntakeConfig, parsed *ParsedFilename, ext string) string {
 	if parsed.Title == "" {
 		return ""
 	}
@@ -52,7 +52,7 @@ func resolveLibraryPath(cfg config.IntakeConfig, parsed ParsedFilename, ext stri
 
 // applyNamingTemplate replaces template tokens in tmpl with values from parsed.
 // Supported tokens: {title}, {show}, {year}, {season:02d}, {episode:02d}, {episode_title}.
-func applyNamingTemplate(tmpl string, parsed ParsedFilename) string {
+func applyNamingTemplate(tmpl string, parsed *ParsedFilename) string {
 	var yearStr string
 	if parsed.Year > 0 {
 		yearStr = fmt.Sprintf("%d", parsed.Year)
