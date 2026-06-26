@@ -63,7 +63,7 @@ func buildSceneTokenRe() *regexp.Regexp {
 // is parsed. filepath.Base and filepath.Ext are used so both / and \ are
 // handled correctly on all platforms.
 func ParseFilename(filename string) ParsedFilename {
-	base := filepath.Base(filename)
+	base := filepath.Base(strings.ReplaceAll(filename, `\`, "/"))
 	stem := strings.TrimSuffix(base, filepath.Ext(base))
 
 	result := ParsedFilename{Raw: stem}

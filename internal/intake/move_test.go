@@ -97,9 +97,7 @@ func TestSafeMove(t *testing.T) {
 
 				orig := renameFn
 				t.Cleanup(func() { renameFn = orig })
-				renameFn = func(oldpath, newpath string) error {
-					return exdevErr(oldpath, newpath)
-				}
+				renameFn = exdevErr
 
 				err := SafeMove(src, dst)
 				if err == nil {
