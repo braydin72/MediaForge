@@ -390,7 +390,10 @@ func (w *Watcher) moveHEVCToLibrary(ctx context.Context, path string, probe *ffm
 }
 
 // waitForStability polls the file size every StabilityCheck.IntervalSeconds seconds
-// until StabilityCheck.PassesRequired consecutive reads return the same non-zero size.
+// until StabilityCheck.PassesRequired consecutive reads return the same non-zero size,
+// then confirms the file is fully released by attempting an exclusive open. On Windows,
+// the reported file size can appear stable momentarily during an active copy, so both
+// signals must pass before the file is considered ready.
 func (w *Watcher) waitForStability(ctx context.Context, path string) error {
 	interval := time.Duration(w.cfg.StabilityCheck.IntervalSeconds) * time.Second
 	required := w.cfg.StabilityCheck.PassesRequired
@@ -423,6 +426,16 @@ func (w *Watcher) waitForStability(ctx context.Context, path string) error {
 		if size == lastSize {
 			consecutive++
 			if consecutive >= required {
+				// Size is stable — confirm the file is not held open for writing
+				// by attempting an exclusive open. On Windows this fails while a
+				// copy is in progress even when the reported size is stable.
+				f, openErr := os.OpenFile(path, os.O_RDWR, 0)
+				if openErr != nil {
+					// File still locked; reset size streak and keep waiting.
+					consecutive = 0
+					continue
+				}
+				f.Close()
 				return nil
 			}
 		} else {

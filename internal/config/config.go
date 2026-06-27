@@ -202,8 +202,8 @@ func DefaultConfig() *Config {
 				TVShows: "/media/TV Shows",
 			},
 			StabilityCheck: IntakeStabilityConfig{
-				IntervalSeconds: 5,
-				PassesRequired:  3,
+				IntervalSeconds: 10,
+				PassesRequired:  6,
 			},
 			ConfidenceThreshold: 0.85,
 			ReviewThreshold:     0.60,
@@ -332,10 +332,10 @@ func Load(path string) (*Config, error) {
 
 	// Intake defaults
 	if cfg.Intake.StabilityCheck.IntervalSeconds < 1 {
-		cfg.Intake.StabilityCheck.IntervalSeconds = 5
+		cfg.Intake.StabilityCheck.IntervalSeconds = 10
 	}
 	if cfg.Intake.StabilityCheck.PassesRequired < 1 {
-		cfg.Intake.StabilityCheck.PassesRequired = 3
+		cfg.Intake.StabilityCheck.PassesRequired = 6
 	}
 	if cfg.Intake.ConfidenceThreshold == 0 {
 		cfg.Intake.ConfidenceThreshold = 0.85
