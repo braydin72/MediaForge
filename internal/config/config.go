@@ -286,6 +286,11 @@ func Load(path string) (*Config, error) {
 	if cfg.FFprobePath == "" {
 		cfg.FFprobePath = "ffprobe"
 	}
+
+	// Normalize tool paths so forward slashes and redundant separators work on
+	// all platforms. filepath.Clean("ffmpeg") == "ffmpeg" (no-op for bare names).
+	cfg.FFmpegPath = filepath.Clean(cfg.FFmpegPath)
+	cfg.FFprobePath = filepath.Clean(cfg.FFprobePath)
 	if cfg.Workers < 1 {
 		cfg.Workers = 1
 	}

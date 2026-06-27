@@ -3,7 +3,9 @@ package setup
 import (
 	"encoding/json"
 	"net/http"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 
@@ -71,6 +73,16 @@ func (w *WizardHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Tool auto-detect endpoint (GET /api/setup/detect-tool?name=ffprobe)
+	if r.URL.Path == "/api/setup/detect-tool" {
+		if r.Method == http.MethodGet {
+			w.handleDetectTool(rw, r)
+		} else {
+			http.Error(rw, "method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
 	// After wizard completion, all traffic goes to the main handler.
 	if w.complete.Load() {
 		w.main.ServeHTTP(rw, r)
@@ -95,11 +107,57 @@ func (w *WizardHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	http.Redirect(rw, r, "/setup", http.StatusTemporaryRedirect)
 }
 
+// handleDetectTool runs `where` (Windows) or `which` (Unix) to find ffprobe or ffmpeg.
+func (w *WizardHandler) handleDetectTool(rw http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	if name != "ffprobe" && name != "ffmpeg" {
+		http.Error(rw, "invalid tool name", http.StatusBadRequest)
+		return
+	}
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("where", name)
+	} else {
+		cmd = exec.Command("which", name)
+	}
+
+	output, err := cmd.Output()
+	if err != nil {
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(rw).Encode(map[string]string{"error": name + " not found in PATH"}) //nolint:errcheck
+		return
+	}
+
+	// `where` may return multiple lines; take the first non-empty one.
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	found := ""
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			found = line
+			break
+		}
+	}
+	if found == "" {
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(rw).Encode(map[string]string{"error": name + " not found"}) //nolint:errcheck
+		return
+	}
+
+	rw.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(rw).Encode(map[string]string{"path": found}) //nolint:errcheck
+}
+
 type setupRequest struct {
 	WatchFolder   string `json:"watch_folder"`
 	StagingFolder string `json:"staging_folder"`
 	MoviesLib     string `json:"movies_library"`
 	TVShowsLib    string `json:"tvshows_library"`
+	FFprobePath   string `json:"ffprobe_path"`
+	FFmpegPath    string `json:"ffmpeg_path"`
 	TMDBKey       string `json:"tmdb_key"`
 	TVDBKey       string `json:"tvdb_key"`
 	OMDbKey       string `json:"omdb_key"`
@@ -129,6 +187,17 @@ func (w *WizardHandler) handleSetupSubmit(rw http.ResponseWriter, r *http.Reques
 	}
 	w.cfg.Intake.Library.Movies = filepath.FromSlash(req.MoviesLib)
 	w.cfg.Intake.Library.TVShows = filepath.FromSlash(req.TVShowsLib)
+
+	// Tool paths: only override if user provided a non-empty value.
+	// Pass directly to exec.Command as the executable argument — spaces in the
+	// path are handled natively by exec.Command without shell interpolation.
+	if req.FFprobePath != "" {
+		w.cfg.FFprobePath = filepath.Clean(req.FFprobePath)
+	}
+	if req.FFmpegPath != "" {
+		w.cfg.FFmpegPath = filepath.Clean(req.FFmpegPath)
+	}
+
 	w.cfg.APIs.TMDBKey = req.TMDBKey
 	w.cfg.APIs.TVDBKey = req.TVDBKey
 	w.cfg.APIs.OMDbKey = req.OMDbKey
@@ -181,6 +250,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 .field select option{background:#1a1d2e}
 .hint{font-size:12px;color:#64748b;margin-top:4px}
 .errmsg{font-size:12px;color:#f87171;margin-top:4px;display:none}
+.detect-row{display:flex;gap:8px;align-items:stretch}
+.detect-row input{flex:1}
+.btn-detect{background:#2d3250;color:#cbd5e1;border:1px solid #3d4570;border-radius:8px;padding:0 14px;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap;transition:background 0.2s}
+.btn-detect:hover{background:#374170}
+.btn-detect:disabled{opacity:0.4;cursor:not-allowed}
 .actions{display:flex;gap:12px;margin-top:32px}
 .btn{flex:1;padding:12px 20px;border-radius:8px;font-size:14px;font-weight:600;border:none;cursor:pointer;transition:opacity 0.2s}
 .btn:disabled{opacity:0.4;cursor:not-allowed}
@@ -206,9 +280,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
     <div class="bar active" id="b1"></div>
     <div class="bar" id="b2"></div>
     <div class="bar" id="b3"></div>
+    <div class="bar" id="b4"></div>
   </div>
   <div class="step-label" id="lbl">
-    <strong>Step 1 of 3: Folders</strong>
+    <strong>Step 1 of 4: Folders</strong>
     Configure where MediaForge watches for new files and stores your library.
   </div>
 
@@ -242,6 +317,27 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 
   <div id="s2" style="display:none">
     <div class="field">
+      <label>ffprobe Path <span class="opt">(optional)</span></label>
+      <div class="detect-row">
+        <input type="text" id="ffprobe_path" placeholder="ffprobe  or  C:\Program Files\ffmpeg\bin\ffprobe.exe">
+        <button class="btn-detect" onclick="detect('ffprobe')" id="btn-detect-ffprobe">Detect</button>
+      </div>
+      <div class="hint">Leave blank to use ffprobe from your system PATH. Use Detect to find it automatically.</div>
+      <div class="errmsg" id="e-ffprobe_path"></div>
+    </div>
+    <div class="field">
+      <label>ffmpeg Path <span class="opt">(optional)</span></label>
+      <div class="detect-row">
+        <input type="text" id="ffmpeg_path" placeholder="ffmpeg  or  C:\Program Files\ffmpeg\bin\ffmpeg.exe">
+        <button class="btn-detect" onclick="detect('ffmpeg')" id="btn-detect-ffmpeg">Detect</button>
+      </div>
+      <div class="hint">Leave blank to use ffmpeg from your system PATH. Use Detect to find it automatically.</div>
+      <div class="errmsg" id="e-ffmpeg_path"></div>
+    </div>
+  </div>
+
+  <div id="s3" style="display:none">
+    <div class="field">
       <label>TMDB API Key <span class="req">*</span></label>
       <input type="password" id="tmdb_key" placeholder="Your TMDB v3 API key">
       <div class="hint">Required for movie lookups and TV fallback. Free at themoviedb.org.</div>
@@ -260,7 +356,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
     </div>
   </div>
 
-  <div id="s3" style="display:none">
+  <div id="s4" style="display:none">
     <div class="field">
       <label>AI Verification Backend <span class="opt">(optional)</span></label>
       <select id="llm_backend" onchange="onLLM()">
@@ -306,10 +402,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
   </div>
 </div>
 <script>
-var step=1,total=3;
-var labels=['Folders','API Keys','AI Verification'];
+var step=1,total=4;
+var labels=['Folders','Tool Paths','API Keys','AI Verification'];
 var descs=[
   'Configure where MediaForge watches for new files and stores your library.',
+  'Set paths to ffprobe and ffmpeg. Use Detect to find them automatically.',
   'API keys are used to identify movies and TV shows by title and year.',
   'Optionally configure an AI backend to verify ambiguous metadata matches.'
 ];
@@ -335,6 +432,33 @@ function onLLM(){
   g('llm-ollama').style.display=b==='ollama'?'':'none';
 }
 
+function detect(tool){
+  var btnId='btn-detect-'+tool;
+  var inputId=tool==='ffprobe'?'ffprobe_path':'ffmpeg_path';
+  var errId='e-'+inputId;
+  var btn=g(btnId);
+  btn.disabled=true;btn.textContent='Detecting...';
+  g(errId).style.display='none';
+  fetch('/api/setup/detect-tool?name='+tool)
+    .then(function(r){return r.json();})
+    .then(function(data){
+      if(data.path){
+        g(inputId).value=data.path;
+        g(inputId).className=g(inputId).className.replace(/ *error/g,'');
+      } else {
+        g(errId).textContent=(data.error||tool+' not found in PATH');
+        g(errId).style.display='';
+      }
+    })
+    .catch(function(){
+      g(errId).textContent='Detection failed';
+      g(errId).style.display='';
+    })
+    .finally(function(){
+      btn.disabled=false;btn.textContent='Detect';
+    });
+}
+
 function setErr(id,msg){
   var el=g(id);if(el&&el.tagName==='INPUT'){if(!el.className.includes('error'))el.className+=' error';}
   var em=g('e-'+id);if(em){em.textContent=msg||'Required';em.style.display='';}
@@ -351,10 +475,12 @@ function validate(){
       if(!v(id)){setErr(id);ok=false;}else clrErr(id);
     });
   }else if(step===2){
+    // Tool paths are optional — no validation required
+  }else if(step===3){
     ['tmdb_key','tvdb_key'].forEach(function(id){
       if(!v(id)){setErr(id);ok=false;}else clrErr(id);
     });
-  }else if(step===3){
+  }else if(step===4){
     var b=v('llm_backend');
     if((b==='anthropic'||b==='openai')&&!v('llm_api_key')){setErr('llm_api_key');ok=false;}
     else clrErr('llm_api_key');
@@ -384,6 +510,8 @@ function submit(){
     staging_folder:v('staging_folder'),
     movies_library:v('movies_library'),
     tvshows_library:v('tvshows_library'),
+    ffprobe_path:v('ffprobe_path'),
+    ffmpeg_path:v('ffmpeg_path'),
     tmdb_key:v('tmdb_key'),
     tvdb_key:v('tvdb_key'),
     omdb_key:v('omdb_key'),
@@ -395,7 +523,7 @@ function submit(){
   fetch('/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
     .then(function(r){if(!r.ok)return r.text().then(function(t){throw new Error(t);});return r.json();})
     .then(function(){
-      hide('s3');hide('actions');show('success');
+      hide('s4');hide('actions');show('success');
       for(var i=1;i<=total;i++)g('b'+i).className='bar done';
       setTimeout(function(){window.location.href='/';},2000);
     })
