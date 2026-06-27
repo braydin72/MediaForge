@@ -912,6 +912,26 @@ func (w *Worker) processJob(job *Job) {
 		return
 	}
 
+	// Post-encode library move for intake pipeline jobs.
+	// SafeMove uses a temp-name strategy so media servers never see a partial file.
+	if job.LibraryPath != "" {
+		if moveErr := util.SafeMove(finalPath, job.LibraryPath); moveErr != nil {
+			reason := fmt.Sprintf("post-encode move failed: %v", moveErr)
+			logger.Error("Post-encode library move failed", "job_id", job.ID, "src", finalPath, "dst", job.LibraryPath, "error", moveErr)
+			_ = w.queue.FailJob(job.ID, reason)
+			w.queue.SendToReviewQueue(job.ID, job.InputPath, filepath.Base(job.InputPath), reason, "")
+			return
+		}
+		logger.Info("Post-encode library move complete", "job_id", job.ID, "dst", job.LibraryPath)
+		finalPath = job.LibraryPath
+		if w.pool.OnLibraryMoveComplete != nil {
+			completedJob := job.Copy()
+			completedJob.OutputPath = finalPath
+			completedJob.OutputSize = result.OutputSize
+			w.pool.OnLibraryMoveComplete(completedJob)
+		}
+	}
+
 	// Invalidate cache for the output file so browser shows updated metadata
 	if w.invalidateCache != nil {
 		w.invalidateCache(finalPath)

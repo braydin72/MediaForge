@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -71,11 +72,17 @@ func SafeMove(src, dst string) error {
 
 // isCrossDeviceError reports whether err is an EXDEV / cross-device-link error.
 // On Windows, os.Rename across drives returns ERROR_NOT_SAME_DEVICE (0x11) which
-// equals syscall.EXDEV (17), so this check is correct on all supported platforms.
+// equals syscall.EXDEV (17). String fallbacks cover cases where the error is
+// wrapped or surfaced via a network path without a recognized syscall code.
 func isCrossDeviceError(err error) bool {
 	var linkErr *os.LinkError
 	if !errors.As(err, &linkErr) {
 		return false
 	}
-	return errors.Is(linkErr.Err, syscall.EXDEV)
+	if errors.Is(linkErr.Err, syscall.EXDEV) {
+		return true
+	}
+	msg := linkErr.Err.Error()
+	return strings.Contains(msg, "cannot move the file to a different disk drive") ||
+		strings.Contains(msg, "invalid cross-device link")
 }
