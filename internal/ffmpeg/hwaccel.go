@@ -364,7 +364,7 @@ func testEncoder(ffmpegPath string, encoder string) bool {
 
 		bareArgs := []string{
 			"-f", "lavfi",
-			"-i", "color=black:s=32x32:r=1",
+			"-i", "color=black:s=320x320:r=25",
 			"-t", "1",
 			"-vf", "format=yuv420p",
 			"-frames:v", "1",
@@ -386,7 +386,7 @@ func testEncoder(ffmpegPath string, encoder string) bool {
 			"-hwaccel", "cuda",
 			"-hwaccel_output_format", "cuda",
 			"-f", "lavfi",
-			"-i", "color=black:s=32x32:r=1",
+			"-i", "color=black:s=320x320:r=25",
 			"-t", "1",
 			"-frames:v", "1",
 			"-c:v", encoder,
@@ -410,7 +410,7 @@ func testEncoder(ffmpegPath string, encoder string) bool {
 			"-hwaccel", "cuda",
 			"-hwaccel_output_format", "cuda",
 			"-f", "lavfi",
-			"-i", "color=black:s=32x32:r=1",
+			"-i", "color=black:s=320x320:r=25",
 			"-t", "1",
 			"-frames:v", "1",
 			"-c:v", encoder,
