@@ -156,7 +156,8 @@ type Config struct {
 	// Useful for re-encoding at different bitrates or quality settings
 	AllowSameCodec bool `yaml:"allow_same_codec"`
 
-	// OutputFormat is the container format for transcoded files: "mkv" or "mp4"
+	// OutputFormat is the container format for transcoded files: "mkv", "mp4", or "preserve"
+	// preserve = output matches source container
 	// MKV preserves all streams; MP4 transcodes audio to AAC and strips subtitles
 	OutputFormat string `yaml:"output_format"`
 
@@ -186,8 +187,12 @@ type Config struct {
 	TargetReductionPct int `yaml:"target_reduction_pct"`
 
 	// DefaultPreset is the encode preset used for AVC files from the intake pipeline.
-	// Defaults to "compress-hevc".
+	// Defaults to "smartshrink-hevc".
 	DefaultPreset string `yaml:"default_preset"`
+
+	// DefaultQuality is the SmartShrink quality tier for intake-queued AVC files.
+	// Options: "excellent", "good", "acceptable"
+	DefaultQuality string `yaml:"default_quality"`
 }
 
 // DefaultConfig returns a config with sensible defaults
@@ -240,7 +245,8 @@ func DefaultConfig() *Config {
 		EncoderSpeed:          "medium",
 		TranscodeMode:         "smartshrink",
 		TargetReductionPct:    40,
-		DefaultPreset:         "compress-hevc",
+		DefaultPreset:         "smartshrink-hevc",
+		DefaultQuality:        "good",
 		Notifications: NotificationsConfig{
 			Events: NotificationEventsConfig{
 				EncodeComplete:  false,
@@ -291,11 +297,10 @@ func Load(path string) (*Config, error) {
 	// all platforms. filepath.Clean("ffmpeg") == "ffmpeg" (no-op for bare names).
 	cfg.FFmpegPath = filepath.Clean(cfg.FFmpegPath)
 	cfg.FFprobePath = filepath.Clean(cfg.FFprobePath)
+
 	if cfg.Workers < 1 {
 		cfg.Workers = 1
 	}
-	// Note: QualityHEVC/QualityAV1 of 0 means "use encoder-specific default"
-	// The API handler will determine the actual default based on detected encoder
 
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "info"
@@ -327,7 +332,10 @@ func Load(path string) (*Config, error) {
 	}
 
 	if cfg.DefaultPreset == "" {
-		cfg.DefaultPreset = "compress-hevc"
+		cfg.DefaultPreset = "smartshrink-hevc"
+	}
+	if cfg.DefaultQuality == "" {
+		cfg.DefaultQuality = "good"
 	}
 
 	// Intake defaults
