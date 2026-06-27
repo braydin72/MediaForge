@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/braydin72/mediaforge/internal/logger"
 )
 
 // HWAccel represents a hardware acceleration method
@@ -166,13 +168,17 @@ func DetectEncoders(ffmpegPath string) map[EncoderKey]*HWEncoder {
 		return copyEncoders(availableEncoders.encoders)
 	}
 
+	logger.Info("Detecting hardware encoders", "ffmpeg", ffmpegPath)
+
 	// Get list of available encoders from ffmpeg
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, ffmpegPath, "-encoders", "-hide_banner")
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
+		logger.Error("Failed to list ffmpeg encoders — falling back to software only",
+			"ffmpeg", ffmpegPath, "error", err, "output", hwaccelLastLines(string(output), 3))
 		// Fallback to software only
 		availableEncoders.encoders[EncoderKey{HWAccelNone, CodecHEVC}] = &HWEncoder{
 			Accel:       HWAccelNone,
@@ -193,8 +199,9 @@ func DetectEncoders(ffmpegPath string) map[EncoderKey]*HWEncoder {
 		encCopy := *enc
 		key := EncoderKey{enc.Accel, enc.Codec}
 
-		// First check if encoder exists in ffmpeg
+		// First check if encoder exists in ffmpeg's compiled-in list
 		if !strings.Contains(encoderList, enc.Encoder) {
+			logger.Debug("Encoder not compiled into ffmpeg", "encoder", enc.Encoder)
 			encCopy.Available = false
 			availableEncoders.encoders[key] = &encCopy
 			continue
@@ -202,10 +209,17 @@ func DetectEncoders(ffmpegPath string) map[EncoderKey]*HWEncoder {
 
 		if enc.Accel == HWAccelNone {
 			// Software encoders - just check if listed in ffmpeg
+			logger.Debug("Software encoder available", "encoder", enc.Encoder)
 			encCopy.Available = true
 		} else {
 			// Hardware encoders - actually test if they work
+			logger.Info("Testing hardware encoder", "encoder", enc.Encoder)
 			encCopy.Available = testEncoder(ffmpegPath, enc.Encoder)
+			if encCopy.Available {
+				logger.Info("Hardware encoder available", "encoder", enc.Encoder, "name", enc.Name)
+			} else {
+				logger.Warn("Hardware encoder not available", "encoder", enc.Encoder, "name", enc.Name)
+			}
 		}
 		availableEncoders.encoders[key] = &encCopy
 	}
@@ -240,12 +254,12 @@ func detectVAAPIDevice() string {
 	return ""
 }
 
-// testEncoder tries a quick test encode to verify hardware encoder actually works
+// testEncoder tries a quick test encode to verify hardware encoder actually works.
+// Each sub-attempt uses its own timeout context so a slow failure doesn't starve later probes.
 func testEncoder(ffmpegPath string, encoder string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	var args []string
+	newCtx := func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), 10*time.Second)
+	}
 
 	// QSV on Linux: try direct init first, fall back to VAAPI-derived if needed.
 	// Store which mode works so we use it consistently at runtime.
@@ -262,18 +276,24 @@ func testEncoder(ffmpegPath string, encoder string) bool {
 			"-f", "null",
 			"-",
 		}
-		if exec.CommandContext(ctx, ffmpegPath, directArgs...).Run() == nil {
+		ctx, cancel := newCtx()
+		out, err := exec.CommandContext(ctx, ffmpegPath, directArgs...).CombinedOutput()
+		cancel()
+		if err == nil {
 			availableEncoders.qsvInitMode = QSVInitDirect
 			return true
 		}
+		logger.Debug("QSV direct init failed, trying VAAPI-derived init",
+			"encoder", encoder, "error", err, "details", hwaccelLastLines(string(out), 3))
 
 		// Direct init failed, try VAAPI-derived (Jellyfin style)
 		device := detectVAAPIDevice()
 		if device == "" {
-			return false // No VAAPI device found - QSV won't work
+			logger.Warn("QSV test failed: no VAAPI render device found", "encoder", encoder)
+			return false
 		}
 		availableEncoders.vaapiDevice = device
-		args = []string{
+		vaapiArgs := []string{
 			"-init_hw_device", "vaapi=va:" + device,
 			"-init_hw_device", "qsv=qs@va",
 			"-filter_hw_device", "qs",
@@ -285,20 +305,27 @@ func testEncoder(ffmpegPath string, encoder string) bool {
 			"-f", "null",
 			"-",
 		}
-		if exec.CommandContext(ctx, ffmpegPath, args...).Run() == nil {
+		ctx, cancel = newCtx()
+		out, err = exec.CommandContext(ctx, ffmpegPath, vaapiArgs...).CombinedOutput()
+		cancel()
+		if err == nil {
 			availableEncoders.qsvInitMode = QSVInitVAAPI
 			return true
 		}
+		logger.Warn("QSV test failed: both init modes failed",
+			"encoder", encoder, "error", err, "details", hwaccelLastLines(string(out), 3))
 		return false
+
 	} else if strings.Contains(encoder, "vaapi") {
 		// VAAPI: Use modern init_hw_device style (matches presets.go)
 		device := detectVAAPIDevice()
 		if device == "" {
-			return false // No VAAPI device found
+			logger.Warn("VAAPI test failed: no render device found", "encoder", encoder)
+			return false
 		}
 		// Store the detected device for later use
 		availableEncoders.vaapiDevice = device
-		args = []string{
+		args := []string{
 			"-init_hw_device", "vaapi=va:" + device,
 			"-filter_hw_device", "va",
 			"-f", "lavfi",
@@ -309,9 +336,50 @@ func testEncoder(ffmpegPath string, encoder string) bool {
 			"-f", "null",
 			"-",
 		}
+		ctx, cancel := newCtx()
+		out, err := exec.CommandContext(ctx, ffmpegPath, args...).CombinedOutput()
+		cancel()
+		if err != nil {
+			logger.Warn("VAAPI test encode failed",
+				"encoder", encoder, "device", device, "error", err,
+				"details", hwaccelLastLines(string(out), 3))
+			return false
+		}
+		return true
+
 	} else if strings.Contains(encoder, "nvenc") {
-		// NVENC: try simple init first (works on most Docker setups)
-		// then fall back to explicit CUDA device init if needed
+		// NVENC test strategy (three attempts, each with its own timeout):
+		//
+		// 1. Bare encode — no hwaccel decode flags. This is the minimum test: can the GPU
+		//    accept frames from CPU memory and encode via NVENC? Works on Windows bare metal
+		//    and anywhere NVENC is present, regardless of CUDA decode support.
+		//
+		// 2. Simple CUDA init — adds -hwaccel cuda/-hwaccel_output_format cuda for hardware
+		//    decode. If this works, we can pipeline decode+encode fully on GPU (Docker, Linux).
+		//
+		// 3. Explicit CUDA device init — required on some bare-metal Linux setups.
+		//
+		// NVENCInitSimple is the zero value, so if only the bare test passes the mode stays
+		// Simple; getHwaccelInputArgs returns nil for softwareDecode=true which is correct.
+
+		bareArgs := []string{
+			"-f", "lavfi",
+			"-i", "color=c=black:s=256x256:d=0.1",
+			"-frames:v", "1",
+			"-c:v", encoder,
+			"-f", "null",
+			"-",
+		}
+		ctx, cancel := newCtx()
+		out, err := exec.CommandContext(ctx, ffmpegPath, bareArgs...).CombinedOutput()
+		cancel()
+		if err != nil {
+			logger.Warn("NVENC bare encode test failed — encoder not available",
+				"encoder", encoder, "error", err, "details", hwaccelLastLines(string(out), 5))
+			return false
+		}
+
+		// NVENC can encode. Now determine the best hardware-decode init mode (best-effort).
 		simpleArgs := []string{
 			"-hwaccel", "cuda",
 			"-hwaccel_output_format", "cuda",
@@ -322,12 +390,17 @@ func testEncoder(ffmpegPath string, encoder string) bool {
 			"-f", "null",
 			"-",
 		}
-		if exec.CommandContext(ctx, ffmpegPath, simpleArgs...).Run() == nil {
+		ctx, cancel = newCtx()
+		out, err = exec.CommandContext(ctx, ffmpegPath, simpleArgs...).CombinedOutput()
+		cancel()
+		if err == nil {
 			availableEncoders.nvencInitMode = NVENCInitSimple
+			logger.Debug("NVENC hardware decode: simple CUDA init works", "encoder", encoder)
 			return true
 		}
+		logger.Debug("NVENC simple CUDA init failed, trying explicit device init",
+			"encoder", encoder, "error", err, "details", hwaccelLastLines(string(out), 3))
 
-		// Simple init failed, try explicit CUDA device init
 		explicitArgs := []string{
 			"-init_hw_device", "cuda=cu:0",
 			"-filter_hw_device", "cu",
@@ -340,14 +413,23 @@ func testEncoder(ffmpegPath string, encoder string) bool {
 			"-f", "null",
 			"-",
 		}
-		if exec.CommandContext(ctx, ffmpegPath, explicitArgs...).Run() == nil {
+		ctx, cancel = newCtx()
+		out, err = exec.CommandContext(ctx, ffmpegPath, explicitArgs...).CombinedOutput()
+		cancel()
+		if err == nil {
 			availableEncoders.nvencInitMode = NVENCInitExplicit
+			logger.Debug("NVENC hardware decode: explicit CUDA init works", "encoder", encoder)
 			return true
 		}
-		return false
+		logger.Debug("NVENC hardware decode init failed — will use software decode for input",
+			"encoder", encoder, "error", err, "details", hwaccelLastLines(string(out), 3))
+		// Bare test passed so NVENC is available; nvencInitMode stays NVENCInitSimple.
+		// getHwaccelInputArgs returns nil when softwareDecode=true, which is safe.
+		return true
+
 	} else {
 		// Other encoders (VideoToolbox) can accept software frames directly
-		args = []string{
+		args := []string{
 			"-f", "lavfi",
 			"-i", "color=c=black:s=256x256:d=0.1",
 			"-frames:v", "1",
@@ -355,16 +437,16 @@ func testEncoder(ffmpegPath string, encoder string) bool {
 			"-f", "null",
 			"-",
 		}
+		ctx, cancel := newCtx()
+		out, err := exec.CommandContext(ctx, ffmpegPath, args...).CombinedOutput()
+		cancel()
+		if err != nil {
+			logger.Warn("Hardware encoder test failed",
+				"encoder", encoder, "error", err, "details", hwaccelLastLines(string(out), 3))
+			return false
+		}
+		return true
 	}
-
-	// Try to encode a single frame from a test pattern
-	// This will fail fast if the hardware doesn't actually support the encoder
-	// Note: Use 256x256 resolution - some hardware encoders (QSV) have minimum resolution requirements
-	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
-
-	// We don't care about output, just whether it succeeds
-	err := cmd.Run()
-	return err == nil
 }
 
 // GetVAAPIDevice returns the auto-detected VAAPI device path, or a default
@@ -527,6 +609,15 @@ func ListAvailableEncoders() []*HWEncoder {
 		}
 	}
 	return result
+}
+
+// hwaccelLastLines returns the last n lines of output for logging.
+func hwaccelLastLines(output string, n int) string {
+	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, " | ")
 }
 
 func copyEncoders(src map[EncoderKey]*HWEncoder) map[EncoderKey]*HWEncoder {
