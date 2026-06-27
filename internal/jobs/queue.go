@@ -759,6 +759,22 @@ func checkSkipReason(probe *ffmpeg.ProbeResult, meta *ffmpeg.BasePresetMeta, all
 	return "" // Proceed with transcode
 }
 
+// SetJobOverrides stores per-job encoder overrides for encode_only_custom jobs.
+// Only non-empty values are written; existing overrides are preserved for omitted fields.
+func (q *Queue) SetJobOverrides(id, speed, outputFormat string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if job, ok := q.jobs[id]; ok {
+		if speed != "" {
+			job.OverrideSpeed = speed
+		}
+		if outputFormat != "" {
+			job.OverrideOutputFormat = outputFormat
+		}
+		q.persist(job)
+	}
+}
+
 // SetLibraryPath sets the intended post-encode library destination on a job.
 // Called by the intake pipeline after creating a job but before it starts.
 func (q *Queue) SetLibraryPath(id, libraryPath string) {

@@ -49,6 +49,7 @@ type Handler struct {
 	notifyMu     sync.Mutex       // Protects notification sending to prevent duplicates
 	store        StatsStore       // For stats operations (may be nil)
 	reviewStore  ReviewQueueStore // For Review Queue operations (may be nil)
+	watcher      *intake.Watcher  // For full_pipeline mode (may be nil)
 }
 
 // NewHandler creates a new API handler
@@ -82,6 +83,11 @@ func (h *Handler) SetStore(store StatsStore) {
 // SetReviewStore sets the Review Queue store.
 func (h *Handler) SetReviewStore(s ReviewQueueStore) {
 	h.reviewStore = s
+}
+
+// SetIntakeWatcher sets the intake watcher used for full_pipeline job creation.
+func (h *Handler) SetIntakeWatcher(w *intake.Watcher) {
+	h.watcher = w
 }
 
 // response helpers
@@ -167,11 +173,18 @@ func (h *Handler) Encoders(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// CreateJobsRequest is the request body for creating jobs
+// CreateJobsRequest is the request body for creating jobs.
+// PipelineMode controls how the file is processed:
+//   - "" or "encode_only": direct to encode queue (default, preserves legacy behavior)
+//   - "encode_only_custom": encode queue with per-job speed and output container overrides
+//   - "full_pipeline": routed through the intake identification pipeline
 type CreateJobsRequest struct {
-	Paths              []string `json:"paths"`
-	PresetID           string   `json:"preset_id"`
-	SmartShrinkQuality string   `json:"smartshrink_quality,omitempty"`
+	Paths               []string `json:"paths"`
+	PresetID            string   `json:"preset_id"`
+	SmartShrinkQuality  string   `json:"smartshrink_quality,omitempty"`
+	PipelineMode        string   `json:"pipeline_mode,omitempty"`         // "full_pipeline" | "encode_only" | "encode_only_custom"
+	EncodeSpeed         string   `json:"encode_speed,omitempty"`          // encode_only_custom: override encoder speed preset
+	EncodeOutputFormat  string   `json:"encode_output_format,omitempty"`  // encode_only_custom: override output container
 }
 
 // CreateJobs handles POST /api/jobs
@@ -188,17 +201,46 @@ func (h *Handler) CreateJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	preset := ffmpeg.GetPreset(req.PresetID)
-	if preset == nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown preset: %s", req.PresetID))
+	// Validate pipeline_mode.
+	switch req.PipelineMode {
+	case "", "encode_only", "encode_only_custom", "full_pipeline":
+		// valid
+	default:
+		writeError(w, http.StatusBadRequest, "pipeline_mode must be 'encode_only', 'encode_only_custom', or 'full_pipeline'")
 		return
 	}
 
-	// Validate SmartShrink quality if provided
-	smartShrinkQuality := req.SmartShrinkQuality
-	if smartShrinkQuality != "" && !jobs.IsValidSmartShrinkQuality(smartShrinkQuality) {
-		writeError(w, http.StatusBadRequest, "smartshrink_quality must be 'acceptable', 'good', or 'excellent'")
+	// full_pipeline requires the intake watcher to be wired up.
+	if req.PipelineMode == "full_pipeline" && h.watcher == nil {
+		writeError(w, http.StatusServiceUnavailable, "intake pipeline not configured")
 		return
+	}
+
+	// encode_only_custom: validate output format override if provided.
+	if req.PipelineMode == "encode_only_custom" && req.EncodeOutputFormat != "" {
+		switch req.EncodeOutputFormat {
+		case "mkv", "mp4", "preserve":
+			// valid
+		default:
+			writeError(w, http.StatusBadRequest, "encode_output_format must be 'mkv', 'mp4', or 'preserve'")
+			return
+		}
+	}
+
+	// full_pipeline does not use a preset; encode_only modes require one.
+	var smartShrinkQuality string
+	if req.PipelineMode != "full_pipeline" {
+		preset := ffmpeg.GetPreset(req.PresetID)
+		if preset == nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown preset: %s", req.PresetID))
+			return
+		}
+
+		smartShrinkQuality = req.SmartShrinkQuality
+		if smartShrinkQuality != "" && !jobs.IsValidSmartShrinkQuality(smartShrinkQuality) {
+			writeError(w, http.StatusBadRequest, "smartshrink_quality must be 'acceptable', 'good', or 'excellent'")
+			return
+		}
 	}
 
 	// Respond immediately - jobs will be added in background and appear via SSE
@@ -210,18 +252,33 @@ func (h *Handler) CreateJobs(w http.ResponseWriter, r *http.Request) {
 	// Auto-unpause when adding new jobs (prevents accidental blocking)
 	h.workerPool.Unpause()
 
-	// Process in background goroutine
+	if req.PipelineMode == "full_pipeline" {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			// Resolve any directory paths to individual video file paths.
+			probes, err := h.browser.GetVideoFilesWithProgress(ctx, req.Paths, nil)
+			if err != nil {
+				logger.Error("full_pipeline: error resolving video files", "error", err)
+				return
+			}
+			for _, p := range probes {
+				h.watcher.ProcessFile(ctx, p.Path)
+			}
+		}()
+		return
+	}
+
+	// encode_only / encode_only_custom: probe files and add to encode queue.
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
 		// Progress callback broadcasts SSE events (throttled to max 10/sec).
-		// Uses atomic time to avoid race between concurrent probe goroutines.
 		var lastBroadcastNano int64
 		onProgress := func(probed, total int) {
 			now := time.Now()
 			last := time.Unix(0, atomic.LoadInt64(&lastBroadcastNano))
-			// Throttle broadcasts, but always send first (0/N) and last (N/N)
 			if probed > 0 && probed < total && now.Sub(last) < 100*time.Millisecond {
 				return
 			}
@@ -229,19 +286,23 @@ func (h *Handler) CreateJobs(w http.ResponseWriter, r *http.Request) {
 			h.queue.BroadcastProgress(probed, total)
 		}
 
-		// Get all video files with progress reporting
 		probes, err := h.browser.GetVideoFilesWithProgress(ctx, req.Paths, onProgress)
 		if err != nil {
 			logger.Error("Error getting video files", "error", err)
 			return
 		}
-
 		if len(probes) == 0 {
 			return
 		}
 
-		// Add jobs to queue - SSE will notify frontend of new jobs
-		_, _ = h.queue.AddMultiple(probes, req.PresetID, smartShrinkQuality)
+		addedJobs, _ := h.queue.AddMultiple(probes, req.PresetID, smartShrinkQuality)
+
+		// Apply per-job overrides for encode_only_custom.
+		if req.PipelineMode == "encode_only_custom" && (req.EncodeSpeed != "" || req.EncodeOutputFormat != "") {
+			for _, job := range addedJobs {
+				h.queue.SetJobOverrides(job.ID, req.EncodeSpeed, req.EncodeOutputFormat)
+			}
+		}
 	}()
 }
 

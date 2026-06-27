@@ -586,13 +586,21 @@ func (w *Worker) processJob(job *Job) {
 		return
 	}
 
-	// Apply speed preset from config
-	if w.cfg.EncoderSpeed != "" {
-		preset = preset.WithSpeedPreset(w.cfg.EncoderSpeed)
+	// Apply speed preset: per-job override takes precedence over global config.
+	speed := w.cfg.EncoderSpeed
+	if job.OverrideSpeed != "" {
+		speed = job.OverrideSpeed
+	}
+	if speed != "" {
+		preset = preset.WithSpeedPreset(speed)
 	}
 
-	// Resolve "preserve" to the actual container format for this source file
-	outputFmt := ffmpeg.ResolveOutputFormat(job.InputPath, w.cfg.OutputFormat)
+	// Resolve output container: per-job override takes precedence over global config.
+	cfgFmt := w.cfg.OutputFormat
+	if job.OverrideOutputFormat != "" {
+		cfgFmt = job.OverrideOutputFormat
+	}
+	outputFmt := ffmpeg.ResolveOutputFormat(job.InputPath, cfgFmt)
 
 	// Build temp output path
 	tempDir := w.cfg.GetTempDir()

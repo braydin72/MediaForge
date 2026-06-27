@@ -16,6 +16,10 @@ func TestIsFirstRun(t *testing.T) {
 				TVShows: "/media/TV Shows",
 			},
 		},
+		APIs: config.APIsConfig{
+			TMDBKey: "tmdb-key",
+			TVDBKey: "tvdb-key",
+		},
 	}
 
 	tests := []struct {
@@ -68,6 +72,42 @@ func TestIsFirstRun(t *testing.T) {
 						Movies:  "/media/Movies",
 						TVShows: "",
 					},
+				},
+			},
+			want: true,
+		},
+		{
+			name:           "missing TMDB key triggers first run",
+			cfgFileExisted: true,
+			cfg: &config.Config{
+				Intake: config.IntakeConfig{
+					WatchFolder: "/incoming",
+					Library: config.IntakeLibraryConfig{
+						Movies:  "/media/Movies",
+						TVShows: "/media/TV Shows",
+					},
+				},
+				APIs: config.APIsConfig{
+					TMDBKey: "",
+					TVDBKey: "tvdb-key",
+				},
+			},
+			want: true,
+		},
+		{
+			name:           "missing TVDB key triggers first run",
+			cfgFileExisted: true,
+			cfg: &config.Config{
+				Intake: config.IntakeConfig{
+					WatchFolder: "/incoming",
+					Library: config.IntakeLibraryConfig{
+						Movies:  "/media/Movies",
+						TVShows: "/media/TV Shows",
+					},
+				},
+				APIs: config.APIsConfig{
+					TMDBKey: "tmdb-key",
+					TVDBKey: "",
 				},
 			},
 			want: true,

@@ -26,6 +26,12 @@ func IsFirstRun(cfgFileExisted bool, cfg *config.Config) bool {
 	if cfg.Intake.Library.TVShows == "" {
 		return true
 	}
+	if cfg.APIs.TMDBKey == "" {
+		return true
+	}
+	if cfg.APIs.TVDBKey == "" {
+		return true
+	}
 	return false
 }
 
@@ -216,10 +222,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
       <div class="errmsg" id="e-watch_folder">Required</div>
     </div>
     <div class="field">
-      <label>Staging Folder <span class="req">*</span></label>
+      <label>Staging Folder <span class="opt">(optional)</span></label>
       <input type="text" id="staging_folder" placeholder="C:\Staging  or  /staging">
-      <div class="hint">AVC files are moved here before transcoding. Use a fast local disk.</div>
-      <div class="errmsg" id="e-staging_folder">Required</div>
+      <div class="hint">AVC files are moved here before transcoding. Use a fast local disk. Can be configured later.</div>
     </div>
     <div class="field">
       <label>Movies Library <span class="req">*</span></label>
@@ -342,7 +347,7 @@ function clrErr(id){
 function validate(){
   var ok=true;
   if(step===1){
-    ['watch_folder','staging_folder','movies_library','tvshows_library'].forEach(function(id){
+    ['watch_folder','movies_library','tvshows_library'].forEach(function(id){
       if(!v(id)){setErr(id);ok=false;}else clrErr(id);
     });
   }else if(step===2){

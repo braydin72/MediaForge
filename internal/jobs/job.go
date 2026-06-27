@@ -59,7 +59,9 @@ type Job struct {
 	QualityMod  float64 `json:"quality_mod,omitempty"`   // Bitrate modifier for VideoToolbox (0.0-1.0)
 	SkipReason         string `json:"skip_reason,omitempty"`          // Reason for skip status
 	SmartShrinkQuality string `json:"smartshrink_quality,omitempty"` // Quality tier: acceptable, good, excellent
-	LibraryPath        string `json:"library_path,omitempty"`        // Post-encode library destination (intake pipeline only)
+	LibraryPath         string `json:"library_path,omitempty"`          // Post-encode library destination (intake pipeline only)
+	OverrideSpeed       string `json:"override_speed,omitempty"`        // Per-job encoder speed preset (encode_only_custom)
+	OverrideOutputFormat string `json:"override_output_format,omitempty"` // Per-job output container (encode_only_custom)
 	CreatedAt          time.Time `json:"created_at"`
 	StartedAt   time.Time `json:"started_at,omitempty"`
 	CompletedAt time.Time `json:"completed_at,omitempty"`

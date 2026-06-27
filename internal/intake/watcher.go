@@ -168,6 +168,23 @@ func (w *Watcher) process(ctx context.Context, path string) {
 		return
 	}
 
+	w.runPipeline(ctx, path)
+}
+
+// ProcessFile runs the intake pipeline for a single file, skipping the
+// stability check. Intended for manually added files via the API where
+// the caller guarantees the file is already fully written.
+func (w *Watcher) ProcessFile(ctx context.Context, path string) {
+	w.mu.Lock()
+	w.known[path] = struct{}{}
+	w.mu.Unlock()
+	go w.runPipeline(ctx, path)
+}
+
+// runPipeline runs ffprobe and routes the file: HEVC to library, H264 to
+// staging/encode queue, anything else to the Review Queue.
+func (w *Watcher) runPipeline(ctx context.Context, path string) {
+	filename := filepath.Base(path)
 	logger.Info("Intake: file is stable, running codec detection", "file", filename)
 
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
