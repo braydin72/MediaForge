@@ -64,7 +64,7 @@ func applyNamingTemplate(tmpl string, parsed *ParsedFilename) string {
 		"{year}", yearStr,
 		"{season:02d}", fmt.Sprintf("%02d", parsed.Season),
 		"{episode:02d}", fmt.Sprintf("%02d", parsed.Episode),
-		"{episode_title}", "",
+		"{episode_title}", sanitizePathComponent(parsed.EpisodeTitle),
 	)
 	result := replacer.Replace(tmpl)
 

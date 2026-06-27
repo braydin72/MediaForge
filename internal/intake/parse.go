@@ -9,14 +9,15 @@ import (
 
 // ParsedFilename holds the result of parsing a media filename.
 type ParsedFilename struct {
-	Raw       string // filename stem without extension
-	Title     string // cleaned title guess
-	Year      int    // 0 if not found
-	IsTV      bool
-	Season    int    // 0 if not TV
-	Episode   int    // 0 if not TV
-	Episode2  int    // second episode for multi-episode files (S01E01E02); 0 if single
-	MediaType string // "movie" | "tv"
+	Raw          string // filename stem without extension
+	Title        string // cleaned title guess
+	Year         int    // 0 if not found
+	IsTV         bool
+	Season       int    // 0 if not TV
+	Episode      int    // 0 if not TV
+	Episode2     int    // second episode for multi-episode files (S01E01E02); 0 if single
+	MediaType    string // "movie" | "tv"
+	EpisodeTitle string // confirmed episode title from metadata lookup; empty if not yet resolved
 }
 
 // Compiled regexes are package-level to avoid recompilation on every call.

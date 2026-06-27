@@ -64,6 +64,16 @@ type Watcher struct {
 	// Defaults to "mkv" when empty.
 	OutputFormat string
 
+	// Orchestrator is the tiered metadata lookup chain (TVDB → TMDB → OMDb).
+	// When nil, the lookup step is skipped and the file is moved using parsed filename
+	// metadata only.
+	Orchestrator *Orchestrator
+
+	// LLMClient is the optional AI verification backend. When nil (or when its
+	// configured backend is disabled), files with confidence between review_threshold
+	// and confidence_threshold go directly to the Review Queue.
+	LLMClient *LLMClient
+
 	// known tracks files we have seen and are currently processing or have processed
 	// in this session. Files removed from the watch folder by later pipeline phases
 	// will simply not be present on the next scan.
@@ -204,6 +214,7 @@ func (w *Watcher) runPipeline(ctx context.Context, path string) {
 			"file", filename, "codec", probe.VideoCodec,
 			"resolution", fmt.Sprintf("%dx%d", probe.Width, probe.Height),
 		)
+		w.moveHEVCToLibrary(ctx, path, probe)
 	case "h264":
 		logger.Info("Intake: H264 — staging for encode",
 			"file", filename, "codec", probe.VideoCodec,
@@ -281,6 +292,101 @@ func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpe
 			"file", filename, "job_id", job.ID, "staging", stagingPath,
 		)
 	}
+}
+
+// moveHEVCToLibrary runs metadata lookup, applies confidence gating, and moves
+// the file to the library. Any failure routes the file to the Review Queue with
+// a specific reason; the source file is never left stranded.
+func (w *Watcher) moveHEVCToLibrary(ctx context.Context, path string, probe *ffmpeg.ProbeResult) {
+	filename := filepath.Base(path)
+	parsed := ParseFilename(filename)
+
+	if w.Orchestrator != nil {
+		confThreshold := w.cfg.ConfidenceThreshold
+		if confThreshold == 0 {
+			confThreshold = 0.85
+		}
+		reviewThreshold := w.cfg.ReviewThreshold
+		if reviewThreshold == 0 {
+			reviewThreshold = 0.60
+		}
+
+		var (
+			result *LookupResult
+			err    error
+		)
+		if parsed.IsTV {
+			result, err = w.Orchestrator.LookupTV(ctx, &parsed, reviewThreshold)
+		} else {
+			result, err = w.Orchestrator.LookupMovie(ctx, &parsed, probe.Duration, reviewThreshold)
+		}
+		if err != nil {
+			reason := "no metadata match found: " + err.Error()
+			logger.Warn("Intake: HEVC metadata lookup failed", "file", filename, "error", err)
+			w.sendToReviewQueue(path, reason, probe)
+			return
+		}
+
+		if result.Confidence < reviewThreshold {
+			reason := fmt.Sprintf("low confidence match (%.0f%%) for %q", result.Confidence*100, result.Title)
+			logger.Warn("Intake: HEVC confidence below review threshold", "file", filename, "confidence", result.Confidence)
+			w.sendToReviewQueue(path, reason, probe)
+			return
+		}
+
+		if result.Confidence < confThreshold {
+			// Confidence is between review_threshold and confidence_threshold — try LLM.
+			if w.LLMClient == nil {
+				reason := fmt.Sprintf("confidence %.0f%% requires LLM verification — LLM not configured", result.Confidence*100)
+				w.sendToReviewQueue(path, reason, probe)
+				return
+			}
+			llmResult, llmErr := w.LLMClient.Verify(ctx, &parsed, []*LookupResult{result})
+			if llmErr != nil {
+				reason := fmt.Sprintf("LLM verification failed: %v", llmErr)
+				logger.Warn("Intake: HEVC LLM verification error", "file", filename, "error", llmErr)
+				w.sendToReviewQueue(path, reason, probe)
+				return
+			}
+			if llmResult.Disabled {
+				reason := fmt.Sprintf("confidence %.0f%% requires LLM verification — LLM not configured", result.Confidence*100)
+				w.sendToReviewQueue(path, reason, probe)
+				return
+			}
+			if llmResult.CandidateID == "none" || llmResult.Confidence < reviewThreshold {
+				reason := fmt.Sprintf("LLM verification rejected match: %s", llmResult.Reasoning)
+				logger.Warn("Intake: HEVC LLM rejected match", "file", filename)
+				w.sendToReviewQueue(path, reason, probe)
+				return
+			}
+			result.Confidence = llmResult.Confidence
+		}
+
+		// Merge confirmed metadata into parsed for path resolution.
+		parsed.Title = result.Title
+		if result.Year > 0 {
+			parsed.Year = result.Year
+		}
+		parsed.EpisodeTitle = result.EpisodeTitle
+	}
+
+	ext := filepath.Ext(filename)
+	libraryPath := resolveLibraryPath(&w.cfg, &parsed, ext)
+	if libraryPath == "" {
+		reason := "could not resolve library destination path from metadata"
+		logger.Warn("Intake: HEVC library path resolution failed", "file", filename)
+		w.sendToReviewQueue(path, reason, probe)
+		return
+	}
+
+	logger.Info("Intake: HEVC moving to library", "file", filename, "destination", libraryPath)
+	if err := util.SafeMove(path, libraryPath); err != nil {
+		reason := fmt.Sprintf("library move failed: %v", err)
+		logger.Warn("Intake: HEVC move error", "file", filename, "error", err)
+		w.sendToReviewQueue(path, reason, probe)
+		return
+	}
+	logger.Info("Intake: HEVC successfully moved to library", "file", filename, "destination", libraryPath)
 }
 
 // waitForStability polls the file size every StabilityCheck.IntervalSeconds seconds
