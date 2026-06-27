@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/braydin72/mediaforge/internal/logger"
 )
 
 const (
@@ -85,11 +87,13 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBR
 		return nil, err
 	}
 
+	logger.Debug("TVDB: series search", "query", parsed.Title)
 	candidates, err := c.searchSeries(ctx, parsed.Title)
 	if err != nil {
 		return nil, err
 	}
 	if len(candidates) == 0 {
+		logger.Debug("TVDB: no series candidates returned", "query", parsed.Title)
 		return nil, &TVDBError{
 			Code:   "not_found",
 			Reason: fmt.Sprintf("no TVDB series found for %q", parsed.Title),
@@ -97,6 +101,10 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBR
 	}
 
 	best, baseScore := selectBestSeries(candidates, parsed)
+	logger.Debug("TVDB: best series candidate",
+		"name", best.Name, "year", best.Year,
+		"tvdb_id", best.TVDBIDStr, "base_confidence", fmt.Sprintf("%.2f", baseScore))
+
 	result := &TVDBResult{
 		SeriesID:       best.intID(),
 		SeriesName:     best.Name,
@@ -106,10 +114,14 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBR
 	}
 
 	if parsed.IsTV && parsed.Season > 0 && parsed.Episode > 0 {
+		logger.Debug("TVDB: fetching episode",
+			"tvdb_id", best.TVDBIDStr, "season", parsed.Season, "episode", parsed.Episode)
 		ep, err := c.fetchEpisode(ctx, best.intID(), parsed.Season, parsed.Episode)
 		if err != nil {
 			if isTVDBNotFound(err) {
 				result.Confidence = max(result.Confidence-0.10, 0)
+				logger.Debug("TVDB: episode not found — confidence reduced",
+					"error", err, "confidence", fmt.Sprintf("%.2f", result.Confidence))
 				return result, nil
 			}
 			return nil, err
@@ -117,6 +129,9 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBR
 		result.EpisodeTitle = ep.Name
 		result.EpisodeAirDate = ep.Aired
 		result.Confidence = min(result.Confidence+0.10, 1.0)
+		logger.Debug("TVDB: episode found",
+			"title", ep.Name, "aired", ep.Aired,
+			"confidence", fmt.Sprintf("%.2f", result.Confidence))
 	}
 
 	return result, nil
@@ -270,14 +285,18 @@ type tvdbEpisode struct {
 	Number       int    `json:"number"`
 }
 
-// fetchEpisode retrieves episode metadata from page 0 of the default episode order.
-// For series with more than 100 episodes, episodes beyond page 0 are not checked.
+// fetchEpisode retrieves a specific episode from TVDB using the default episode order.
+// It filters by season so only that season's episodes are returned (typically 10–24),
+// avoiding the page-0-only limit that would miss episodes in later seasons.
 func (c *TVDBClient) fetchEpisode(ctx context.Context, seriesID, season, episode int) (*tvdbEpisode, error) {
-	url := fmt.Sprintf("%s/v4/series/%d/episodes/default/page/0", tvdbBaseURL, seriesID)
+	url := fmt.Sprintf("%s/v4/series/%d/episodes/default", tvdbBaseURL, seriesID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, &TVDBError{Code: "api_error", Reason: "failed to build episode request", wrapped: err}
 	}
+	q := req.URL.Query()
+	q.Set("season", strconv.Itoa(season))
+	req.URL.RawQuery = q.Encode()
 	req.Header.Set("Authorization", "Bearer "+c.token)
 
 	resp, err := c.httpClient.Do(req)

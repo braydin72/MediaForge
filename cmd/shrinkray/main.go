@@ -217,8 +217,35 @@ func main() {
 			}
 			intakeWatcher.EncodeQueue = queue
 			intakeWatcher.EncodePresetID = cfg.DefaultPreset
-			intakeWatcher.SmartShrinkQuality = "good"
+			quality := cfg.DefaultQuality
+			if quality == "" {
+				quality = "good"
+			}
+			intakeWatcher.SmartShrinkQuality = quality
 			intakeWatcher.OutputFormat = cfg.OutputFormat
+
+			// Build the metadata lookup chain from configured API keys.
+			// Any client with an empty key is left nil; the Orchestrator skips nil sources.
+			var tvdbClient *intake.TVDBClient
+			var tmdbClient *intake.TMDBClient
+			var omdbClient *intake.OMDbClient
+			if cfg.APIs.TVDBKey != "" {
+				tvdbClient = intake.NewTVDBClient(cfg.APIs.TVDBKey, nil)
+			}
+			if cfg.APIs.TMDBKey != "" {
+				tmdbClient = intake.NewTMDBClient(cfg.APIs.TMDBKey, nil)
+			}
+			if cfg.APIs.OMDbKey != "" {
+				omdbClient = intake.NewOMDbClient(cfg.APIs.OMDbKey, nil)
+			}
+			if tvdbClient != nil || tmdbClient != nil || omdbClient != nil {
+				intakeWatcher.Orchestrator = intake.NewOrchestrator(tvdbClient, tmdbClient, omdbClient)
+				logger.Info("Intake: metadata lookup configured",
+					"tvdb", tvdbClient != nil, "tmdb", tmdbClient != nil, "omdb", omdbClient != nil)
+			} else {
+				logger.Info("Intake: no API keys configured — metadata lookup disabled; set tvdb_key/tmdb_key in config")
+			}
+
 			intakeWatcherMu.Unlock()
 			go intakeWatcher.Start(context.Background())
 		} else {

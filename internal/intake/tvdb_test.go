@@ -317,6 +317,44 @@ func TestSelectBestSeries_ExactMatchWins(t *testing.T) {
 	}
 }
 
+// TestTVDBLookup_EpisodeSeasonQueryParam verifies that fetchEpisode sends the
+// season number as a query parameter (not as a path segment) so episodes in
+// later seasons are reachable beyond page 0.
+func TestTVDBLookup_EpisodeSeasonQueryParam(t *testing.T) {
+	var capturedSeason string
+	client := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
+		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, breakingBadSearchBody) },
+		"/v4/series": func(r *http.Request) *http.Response {
+			capturedSeason = r.URL.Query().Get("season")
+			ep9Body := map[string]interface{}{
+				"data": map[string]interface{}{
+					"episodes": []map[string]interface{}{
+						{"id": 99901, "name": "Blood Money", "aired": "2013-08-11", "seasonNumber": 5, "number": 9},
+					},
+				},
+			}
+			return jsonResp(http.StatusOK, ep9Body)
+		},
+	}))
+
+	parsed := &ParsedFilename{
+		Title: "Breaking Bad", Year: 2008,
+		IsTV: true, Season: 5, Episode: 9,
+	}
+
+	result, err := client.Lookup(context.Background(), parsed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedSeason != "5" {
+		t.Errorf("season query param: want %q, got %q", "5", capturedSeason)
+	}
+	if result.EpisodeTitle != "Blood Money" {
+		t.Errorf("EpisodeTitle: want %q, got %q", "Blood Money", result.EpisodeTitle)
+	}
+}
+
 func TestTVDBError_ReviewQueueReason(t *testing.T) {
 	codes := []string{"no_api_key", "auth_failure", "rate_limit", "not_found", "api_error"}
 	for _, code := range codes {
