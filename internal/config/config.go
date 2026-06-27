@@ -233,7 +233,7 @@ func DefaultConfig() *Config {
 		ScheduleStartHour: 22, // 10 PM
 		ScheduleEndHour:   6,  // 6 AM
 		LogLevel:          "info",
-		OutputFormat:      "mkv",
+		OutputFormat:      "preserve",
 		TonemapHDR:            false,
 		TonemapAlgorithm:      "hable",
 		MaxConcurrentAnalyses: 1,
@@ -302,7 +302,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	if cfg.OutputFormat == "" {
-		cfg.OutputFormat = "mkv"
+		cfg.OutputFormat = "preserve"
 	}
 
 	if cfg.EncoderSpeed == "" {
