@@ -274,10 +274,43 @@ func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpe
 		return
 	}
 
-	// Resolve the library destination path from naming templates and parsed metadata.
+	// Parse filename then run metadata lookup to populate EpisodeTitle and confirmed
+	// title/year before resolving the library destination path.
 	parsed := ParseFilename(filename)
-	outFmt := w.OutputFormat
-	if outFmt == "" || outFmt == "preserve" {
+	if w.Orchestrator != nil {
+		reviewThreshold := w.cfg.ReviewThreshold
+		if reviewThreshold == 0 {
+			reviewThreshold = 0.60
+		}
+		var (
+			result    *LookupResult
+			lookupErr error
+		)
+		if parsed.IsTV {
+			result, lookupErr = w.Orchestrator.LookupTV(ctx, &parsed, reviewThreshold)
+		} else {
+			result, lookupErr = w.Orchestrator.LookupMovie(ctx, &parsed, probe.Duration, reviewThreshold)
+		}
+		if lookupErr != nil {
+			logger.Warn("Intake: AVC metadata lookup failed — library path will be set without episode title",
+				"file", filename, "error", lookupErr)
+		} else {
+			logger.Info("Intake: AVC metadata lookup succeeded",
+				"file", filename, "title", result.Title,
+				"episode_title", result.EpisodeTitle, "confidence", result.Confidence)
+			parsed.Title = result.Title
+			if result.Year > 0 {
+				parsed.Year = result.Year
+			}
+			parsed.EpisodeTitle = result.EpisodeTitle
+		}
+	}
+
+	// Resolve output extension: "preserve" inherits the source container; otherwise
+	// use the configured format. ffmpeg.ResolveOutputFormat handles "preserve" by
+	// inspecting the input file extension, matching what the worker does at encode time.
+	outFmt := ffmpeg.ResolveOutputFormat(filename, w.OutputFormat)
+	if outFmt == "" {
 		outFmt = "mkv"
 	}
 	libraryPath := resolveLibraryPath(&w.cfg, &parsed, "."+outFmt)
