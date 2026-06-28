@@ -40,6 +40,12 @@ type ReviewQueueWriter interface {
 	WriteReviewEntry(id, originalPath, filename, reason, ffprobeJSON string) error
 }
 
+// DuplicateReviewWriter is optionally implemented by stores that support duplicate
+// review queue entries with DuplicateInfo context.
+type DuplicateReviewWriter interface {
+	WriteDuplicateReviewEntry(id, originalPath, filename, reason, ffprobeJSON, duplicateInfoJSON string) error
+}
+
 // Queue manages the job queue with persistence
 type Queue struct {
 	mu    sync.RWMutex
@@ -797,6 +803,29 @@ func (q *Queue) SendToReviewQueue(jobID, originalPath, filename, reason, ffprobe
 	if rqw, ok := s.(ReviewQueueWriter); ok {
 		if err := rqw.WriteReviewEntry(jobID, originalPath, filename, reason, ffprobeJSON); err != nil {
 			logger.Warn("Failed to write review queue entry", "job_id", jobID, "error", err)
+		}
+	}
+}
+
+// SendDuplicateToReviewQueue persists a duplicate review queue entry with DuplicateInfo
+// context. Falls back to a plain review entry if the store does not implement DuplicateReviewWriter.
+func (q *Queue) SendDuplicateToReviewQueue(jobID, originalPath, filename, reason, ffprobeJSON, duplicateInfoJSON string) {
+	q.mu.RLock()
+	s := q.store
+	q.mu.RUnlock()
+	if s == nil {
+		return
+	}
+	if drw, ok := s.(DuplicateReviewWriter); ok {
+		if err := drw.WriteDuplicateReviewEntry(jobID, originalPath, filename, reason, ffprobeJSON, duplicateInfoJSON); err != nil {
+			logger.Warn("Failed to write duplicate review queue entry", "job_id", jobID, "error", err)
+		}
+		return
+	}
+	// Fall back to basic review entry if DuplicateReviewWriter is not supported.
+	if rqw, ok := s.(ReviewQueueWriter); ok {
+		if err := rqw.WriteReviewEntry(jobID, originalPath, filename, reason, ffprobeJSON); err != nil {
+			logger.Warn("Failed to write review queue entry (duplicate fallback)", "job_id", jobID, "error", err)
 		}
 	}
 }

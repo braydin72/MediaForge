@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -933,6 +934,16 @@ func (w *Worker) processJob(job *Job) {
 	// Post-encode library move for intake pipeline jobs.
 	// SafeMove uses a temp-name strategy so media servers never see a partial file.
 	if job.LibraryPath != "" {
+		// Check for a pre-existing file at the destination before moving.
+		if _, statErr := os.Stat(job.LibraryPath); statErr == nil {
+			reason := fmt.Sprintf("duplicate: file already exists at destination %s", job.LibraryPath)
+			logger.Warn("Post-encode library move: duplicate at destination, queuing for review",
+				"job_id", job.ID, "dst", job.LibraryPath)
+			dupInfoJSON := buildPostEncodeDuplicateJSON(jobCtx, w.prober, finalPath, job.LibraryPath)
+			_ = w.queue.FailJob(job.ID, reason)
+			w.queue.SendDuplicateToReviewQueue(job.ID, finalPath, filepath.Base(finalPath), reason, "", dupInfoJSON)
+			return
+		}
 		if moveErr := util.SafeMove(finalPath, job.LibraryPath); moveErr != nil {
 			reason := fmt.Sprintf("post-encode move failed: %v", moveErr)
 			logger.Error("Post-encode library move failed", "job_id", job.ID, "src", finalPath, "dst", job.LibraryPath, "error", moveErr)
@@ -1238,4 +1249,40 @@ func (wp *WorkerPool) runFixedReductionAnalysis(ctx context.Context, job *Job, p
 
 	logger.Info("Fixed reduction analysis complete", "job_id", job.ID, "crf", bestCRF, "target_pct", targetReductionPct)
 	return false, "", bestCRF, nil
+}
+
+// buildPostEncodeDuplicateJSON builds a DuplicateContext JSON string for a post-encode
+// library move conflict. Both probes are best-effort; failures leave codec/resolution empty.
+func buildPostEncodeDuplicateJSON(ctx context.Context, prober *ffmpeg.Prober, incomingPath, existingPath string) string {
+	type fileInfo struct {
+		Path       string `json:"path"`
+		Codec      string `json:"codec"`
+		Width      int    `json:"width"`
+		Height     int    `json:"height"`
+		BitrateBps int64  `json:"bitrate_bps"`
+		FileSizeB  int64  `json:"filesize_bytes"`
+	}
+	type dupCtx struct {
+		Incoming fileInfo `json:"incoming"`
+		Existing fileInfo `json:"existing"`
+	}
+
+	fill := func(path string) fileInfo {
+		fi := fileInfo{Path: path}
+		if info, err := os.Stat(path); err == nil {
+			fi.FileSizeB = info.Size()
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		if p, err := prober.Probe(probeCtx, path); err == nil {
+			fi.Codec = p.VideoCodec
+			fi.Width = p.Width
+			fi.Height = p.Height
+			fi.BitrateBps = p.Bitrate
+		}
+		return fi
+	}
+
+	b, _ := json.Marshal(dupCtx{Incoming: fill(incomingPath), Existing: fill(existingPath)})
+	return string(b)
 }

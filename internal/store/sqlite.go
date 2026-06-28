@@ -726,6 +726,22 @@ func (s *SQLiteStore) WriteReviewEntry(id, originalPath, filename, reason, ffpro
 	return s.AddToReviewQueue(entry)
 }
 
+// WriteDuplicateReviewEntry implements jobs.DuplicateReviewWriter. It persists a duplicate
+// review queue entry with DuplicateInfo context so the UI can offer Replace/Keep actions.
+func (s *SQLiteStore) WriteDuplicateReviewEntry(id, originalPath, filename, reason, ffprobeJSON, duplicateInfoJSON string) error {
+	entry := &ReviewEntry{
+		ID:            id,
+		OriginalPath:  originalPath,
+		Filename:      filename,
+		Reason:        reason,
+		FFProbeInfo:   ffprobeJSON,
+		DuplicateInfo: duplicateInfoJSON,
+		Status:        ReviewStatusPending,
+		CreatedAt:     time.Now().UTC(),
+	}
+	return s.AddToReviewQueue(entry)
+}
+
 // AddToReviewQueue inserts a new review queue entry.
 // Returns without error if an entry with the same original_path already exists and is pending.
 func (s *SQLiteStore) AddToReviewQueue(e *ReviewEntry) error {
