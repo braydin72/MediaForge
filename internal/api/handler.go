@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -149,6 +150,13 @@ func (h *Handler) Browse(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Normalize to forward slashes so the JS breadcrumb builder works on Windows.
+	result.Path = filepath.ToSlash(result.Path)
+	result.Parent = filepath.ToSlash(result.Parent)
+	for _, e := range result.Entries {
+		e.Path = filepath.ToSlash(e.Path)
 	}
 
 	writeJSON(w, http.StatusOK, result)

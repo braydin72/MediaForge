@@ -3516,6 +3516,11 @@
                 const resp = await fetch(url);
                 const data = await resp.json();
 
+                // Normalize all paths to forward slashes (Windows may return backslashes).
+                data.path = data.path.replace(/\\/g, '/');
+                if (data.parent) data.parent = data.parent.replace(/\\/g, '/');
+                if (data.entries) data.entries.forEach(e => { e.path = e.path.replace(/\\/g, '/'); });
+
                 currentPath = data.path;
                 selectedPaths.clear();
                 selectedFileCounts.clear();
@@ -3532,8 +3537,8 @@
                 let crumbs = `<a href="#" onclick="browse(''); return false;">Home</a>`;
 
                 if (data.path !== mediaRoot) {
-                    // Get the relative path from media root
-                    const relativePath = data.path.substring(mediaRoot.length);
+                    // Strip mediaRoot prefix; handle any residual separator mismatch.
+                    const relativePath = data.path.replace(/\\/g, '/').substring(mediaRoot.replace(/\\/g, '/').length);
                     const segments = relativePath.split('/').filter(s => s);
                     const MAX_VISIBLE_SEGMENTS = 3;
 
