@@ -381,6 +381,54 @@ func TestSelectBestMovie_ExactMatchWins(t *testing.T) {
 	}
 }
 
+// TestTMDBLookupMovie_YearRetry_AvatarFireAndAsh mirrors the real-world case:
+// "avatar fire and ash(2025)" parses to year=2025; TMDB returns no results when
+// year=2025 is sent, but finds the film when year is omitted.
+func TestTMDBLookupMovie_YearRetry_AvatarFireAndAsh(t *testing.T) {
+	searchCount := 0
+	client := newMockTMDBClient("validkey", func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/3/search/movie":
+			searchCount++
+			if r.URL.Query().Get("year") != "" {
+				// Year-filtered search returns nothing (TMDB behaviour confirmed manually).
+				return jsonResp(http.StatusOK, map[string]interface{}{"results": []interface{}{}}), nil
+			}
+			// No-year search finds the canonical entry.
+			return jsonResp(http.StatusOK, map[string]interface{}{
+				"results": []map[string]interface{}{
+					{"id": 83533, "title": "Avatar: Fire and Ash", "release_date": "2025-12-19", "poster_path": "/avatar3.jpg"},
+				},
+			}), nil
+		default:
+			// Detail fetch for movie 83533.
+			return jsonResp(http.StatusOK, map[string]interface{}{"id": 83533, "runtime": 145}), nil
+		}
+	})
+
+	parsed := &ParsedFilename{Title: "avatar fire and ash", Year: 2025, MediaType: "movie"}
+
+	result, err := client.LookupMovie(context.Background(), parsed, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if searchCount != 2 {
+		t.Errorf("expected 2 search requests (with year then without), got %d", searchCount)
+	}
+	if result.TMDBID != 83533 {
+		t.Errorf("TMDBID: want 83533, got %d", result.TMDBID)
+	}
+	if result.Title != "Avatar: Fire and Ash" {
+		t.Errorf("Title: want %q, got %q", "Avatar: Fire and Ash", result.Title)
+	}
+	if result.Year != 2025 {
+		t.Errorf("Year: want 2025, got %d", result.Year)
+	}
+	if result.RuntimeMinutes != 145 {
+		t.Errorf("RuntimeMinutes: want 145, got %d", result.RuntimeMinutes)
+	}
+}
+
 func TestAbsInt(t *testing.T) {
 	cases := [][2]int{{5, 5}, {-5, 5}, {0, 0}, {-142, 142}}
 	for _, c := range cases {
