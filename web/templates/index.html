@@ -2457,11 +2457,26 @@
                             </div>
                         </div>
                         <div class="preset-dropdown" id="pipeline-mode-dropdown" style="display:inline-block;vertical-align:middle;">
-                            <select id="pipeline-mode-select" style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;padding:6px 10px;cursor:pointer;outline:none;" title="Pipeline mode">
+                            <select id="pipeline-mode-select" style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;padding:6px 10px;cursor:pointer;outline:none;" title="Pipeline mode" onchange="onPipelineModeChange()">
                                 <option value="encode_only">Encode Only</option>
+                                <option value="encode_only_custom">Custom Encode</option>
                                 <option value="full_pipeline">Full Pipeline</option>
                             </select>
                         </div>
+                        <select id="custom-speed-select" style="display:none;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;padding:6px 10px;cursor:pointer;outline:none;" title="Encode speed">
+                            <option value="">Speed: default</option>
+                            <option value="slowest">Slowest</option>
+                            <option value="slower">Slower</option>
+                            <option value="slow">Slow</option>
+                            <option value="medium">Medium</option>
+                            <option value="fast">Fast</option>
+                        </select>
+                        <select id="custom-format-select" style="display:none;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;padding:6px 10px;cursor:pointer;outline:none;" title="Output format">
+                            <option value="">Format: default</option>
+                            <option value="mkv">MKV</option>
+                            <option value="mp4">MP4</option>
+                            <option value="preserve">Preserve</option>
+                        </select>
                         <button class="btn btn-primary" onclick="startJobs()" id="start-btn" disabled>Start Transcode</button>
                         <span class="selection-count" id="selection-summary"></span>
                         <span class="schedule-status" id="schedule-status"></span>
@@ -3730,6 +3745,28 @@
             updateButtons();
         }
 
+        function onPipelineModeChange() {
+            const mode = document.getElementById('pipeline-mode-select').value;
+            const isFullPipeline = mode === 'full_pipeline';
+            const isCustom = mode === 'encode_only_custom';
+            const isSmartShrink = selectedPresetId && selectedPresetId.startsWith('smartshrink-');
+
+            // Preset and quality dropdowns are irrelevant for full_pipeline.
+            document.getElementById('preset-dropdown').style.display = isFullPipeline ? 'none' : '';
+            document.getElementById('quality-dropdown').style.display =
+                (!isFullPipeline && isSmartShrink) ? 'inline-block' : 'none';
+            document.getElementById('smartshrink-hint').style.display =
+                (!isFullPipeline && isSmartShrink) ? 'block' : 'none';
+
+            // Custom encode speed and format overrides.
+            document.getElementById('custom-speed-select').style.display = isCustom ? '' : 'none';
+            document.getElementById('custom-format-select').style.display = isCustom ? '' : 'none';
+
+            // Button label reflects actual action.
+            document.getElementById('start-btn').textContent =
+                isFullPipeline ? 'Start Pipeline' : 'Start Transcode';
+        }
+
         function updateButtons() {
             const hasSelection = selectedPaths.size > 0;
             document.getElementById('start-btn').disabled = !hasSelection;
@@ -3772,15 +3809,24 @@
                 banner.classList.remove('hidden');
 
                 const pipelineMode = document.getElementById('pipeline-mode-select').value;
+                const jobBody = {
+                    paths: Array.from(selectedPaths),
+                    pipeline_mode: pipelineMode,
+                };
+                if (pipelineMode !== 'full_pipeline') {
+                    jobBody.preset_id = preset;
+                    jobBody.smartshrink_quality = smartshrinkQuality;
+                }
+                if (pipelineMode === 'encode_only_custom') {
+                    const speed = document.getElementById('custom-speed-select').value;
+                    const format = document.getElementById('custom-format-select').value;
+                    if (speed) jobBody.encode_speed = speed;
+                    if (format) jobBody.encode_output_format = format;
+                }
                 const resp = await fetch('/api/jobs', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        paths: Array.from(selectedPaths),
-                        preset_id: preset,
-                        smartshrink_quality: smartshrinkQuality,
-                        pipeline_mode: pipelineMode
-                    })
+                    body: JSON.stringify(jobBody)
                 });
                 const data = await resp.json();
 
