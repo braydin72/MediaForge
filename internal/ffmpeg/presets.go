@@ -742,13 +742,11 @@ func BuildPresetArgs(preset *Preset, sourceBitrate int64, sourceWidth, sourceHei
 			// Use per-output-stream codec specifiers to handle each independently.
 			outSubIdx := 0
 			for _, idx := range subtitleIndices {
-				outputArgs = append(outputArgs, "-map", fmt.Sprintf("0:%d?", idx))
-				outputArgs = append(outputArgs, fmt.Sprintf("-c:s:%d", outSubIdx), "copy")
+				outputArgs = append(outputArgs, "-map", fmt.Sprintf("0:%d?", idx), fmt.Sprintf("-c:s:%d", outSubIdx), "copy")
 				outSubIdx++
 			}
 			for _, idx := range subtitleConvertIndices {
-				outputArgs = append(outputArgs, "-map", fmt.Sprintf("0:%d?", idx))
-				outputArgs = append(outputArgs, fmt.Sprintf("-c:s:%d", outSubIdx), "srt")
+				outputArgs = append(outputArgs, "-map", fmt.Sprintf("0:%d?", idx), fmt.Sprintf("-c:s:%d", outSubIdx), "srt")
 				outSubIdx++
 			}
 		}
