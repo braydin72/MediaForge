@@ -246,6 +246,12 @@ func main() {
 				logger.Info("Intake: no API keys configured — metadata lookup disabled; set tvdb_key/tmdb_key in config")
 			}
 
+			// Wire the LLM verification client if a backend is configured.
+			if cfg.LLM.Backend != "" {
+				intakeWatcher.LLMClient = intake.NewLLMClient(cfg.LLM, nil)
+				logger.Info("Intake: LLM verification configured", "backend", cfg.LLM.Backend, "model", cfg.LLM.Model)
+			}
+
 			intakeWatcherMu.Unlock()
 			go intakeWatcher.Start(context.Background())
 		} else {
