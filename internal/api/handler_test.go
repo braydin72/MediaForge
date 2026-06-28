@@ -71,8 +71,8 @@ func TestBrowseEndpoint(t *testing.T) {
 		t.Fatalf("failed to parse response: %v", err)
 	}
 
-	if result.Path != tmpDir {
-		t.Errorf("expected path %s, got %s", tmpDir, result.Path)
+	if result.Path != filepath.ToSlash(tmpDir) {
+		t.Errorf("expected path %s, got %s", filepath.ToSlash(tmpDir), result.Path)
 	}
 
 	if len(result.Entries) == 0 {
@@ -99,12 +99,12 @@ func TestBrowseWithPath(t *testing.T) {
 	var result browse.BrowseResult
 	json.Unmarshal(w.Body.Bytes(), &result)
 
-	if result.Path != tvDir {
-		t.Errorf("expected path %s, got %s", tvDir, result.Path)
+	if result.Path != filepath.ToSlash(tvDir) {
+		t.Errorf("expected path %s, got %s", filepath.ToSlash(tvDir), result.Path)
 	}
 
-	if result.Parent != tmpDir {
-		t.Errorf("expected parent %s, got %s", tmpDir, result.Parent)
+	if result.Parent != filepath.ToSlash(tmpDir) {
+		t.Errorf("expected parent %s, got %s", filepath.ToSlash(tmpDir), result.Parent)
 	}
 }
 
