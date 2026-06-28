@@ -405,8 +405,8 @@ func selectBestTV(candidates []tmdbTVResult, parsed *ParsedFilename) (tmdbTVResu
 	return candidates[bestIdx], bestScore
 }
 
-// normTitle lowercases s and strips punctuation so that "Avatar: Fire and Ash"
-// and "avatar fire and ash" compare as equal.
+// normTitle lowercases s, strips punctuation, and collapses whitespace so that
+// "Avatar: Fire and Ash" and "avatar fire and ash" compare as equal.
 func normTitle(s string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(s) {
@@ -414,7 +414,7 @@ func normTitle(s string) string {
 			b.WriteRune(r)
 		}
 	}
-	return b.String()
+	return strings.Join(strings.Fields(b.String()), " ")
 }
 
 // absInt returns the absolute value of n.

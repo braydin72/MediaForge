@@ -192,6 +192,26 @@ func TestStringSimilarity_CompletelyDifferent(t *testing.T) {
 	}
 }
 
+func TestStringSimilarity_ColonStripped(t *testing.T) {
+	// TMDB returns "Avatar: Fire and Ash"; filename yields "avatar fire and ash".
+	// After punctuation normalization both are identical → exact match.
+	got := stringSimilarity("Avatar: Fire and Ash", "avatar fire and ash")
+	if got != 1.0 {
+		t.Errorf("colon stripped: want 1.0, got %f", got)
+	}
+}
+
+func TestScoreMovie_ColonInAPITitle(t *testing.T) {
+	// Full end-to-end score for the Avatar: Fire and Ash scenario.
+	// TMDB title has colon; parsed title (from filename) does not.
+	parsed := &ParsedFilename{Title: "avatar fire and ash", Year: 2025}
+	score := ScoreMovie(parsed, ScoreInput{Title: "Avatar: Fire and Ash", Year: 2025, RuntimeMin: 145}, 145*time.Minute)
+	// exact (after norm) + exact year + runtime≤5: 0.40 + 0.25 + 0.20 = 0.85
+	if !approxEqual(score, 0.85) {
+		t.Errorf("want ~0.85, got %f", score)
+	}
+}
+
 func TestStringSimilarity_EmptyString(t *testing.T) {
 	if got := stringSimilarity("", "Breaking Bad"); got != 0.0 {
 		t.Errorf("empty a: want 0.0, got %f", got)

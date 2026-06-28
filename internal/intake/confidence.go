@@ -1,7 +1,6 @@
 package intake
 
 import (
-	"strings"
 	"time"
 )
 
@@ -105,8 +104,8 @@ func RuntimeCrossCheck(probeDurationSecs float64, apiRuntimeMinutes int) (within
 // are, using normalised Levenshtein distance over Unicode runes. Both strings are
 // lowercased and trimmed before comparison.
 func stringSimilarity(a, b string) float64 {
-	a = strings.ToLower(strings.TrimSpace(a))
-	b = strings.ToLower(strings.TrimSpace(b))
+	a = normTitle(a)
+	b = normTitle(b)
 	if a == b {
 		return 1.0
 	}
