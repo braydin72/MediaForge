@@ -356,8 +356,12 @@ func selectBestMovie(candidates []tmdbMovieResult, parsed *ParsedFilename) (tmdb
 			score += 0.10
 		}
 
-		if parsed.Year > 0 && m.releaseYear() == parsed.Year {
-			score += 0.10
+		if parsed.Year > 0 {
+			if ry := m.releaseYear(); ry == parsed.Year {
+				score += 0.10
+			} else if absInt(ry-parsed.Year) == 1 {
+				score += 0.05
+			}
 		}
 
 		if score > bestScore {
@@ -383,8 +387,12 @@ func selectBestTV(candidates []tmdbTVResult, parsed *ParsedFilename) (tmdbTVResu
 			score += 0.10
 		}
 
-		if parsed.Year > 0 && s.firstAirYear() == parsed.Year {
-			score += 0.10
+		if parsed.Year > 0 {
+			if ay := s.firstAirYear(); ay == parsed.Year {
+				score += 0.10
+			} else if absInt(ay-parsed.Year) == 1 {
+				score += 0.05
+			}
 		}
 
 		if score > bestScore {

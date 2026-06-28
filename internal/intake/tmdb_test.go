@@ -429,6 +429,46 @@ func TestTMDBLookupMovie_YearRetry_AvatarFireAndAsh(t *testing.T) {
 	}
 }
 
+func TestSelectBestMovie_YearOffByOne(t *testing.T) {
+	// Filename says 1986, film released 1985 — common regional/marketing mismatch.
+	candidates := []tmdbMovieResult{
+		{ID: 105, Title: "Back to the Future", ReleaseDate: "1985-07-03"},
+	}
+	parsed := &ParsedFilename{Title: "Back to the Future", Year: 1986}
+
+	_, score := selectBestMovie(candidates, parsed)
+	// exact title + ±1 year: 0.50 + 0.30 + 0.05 = 0.85
+	if !approxEqual(score, 0.85) {
+		t.Errorf("score: want ~0.85 for ±1 year, got %f", score)
+	}
+}
+
+func TestSelectBestMovie_YearOffByTwo(t *testing.T) {
+	candidates := []tmdbMovieResult{
+		{ID: 105, Title: "Back to the Future", ReleaseDate: "1985-07-03"},
+	}
+	parsed := &ParsedFilename{Title: "Back to the Future", Year: 1987}
+
+	_, score := selectBestMovie(candidates, parsed)
+	// exact title, year off by 2 — no year bonus: 0.50 + 0.30 = 0.80
+	if !approxEqual(score, 0.80) {
+		t.Errorf("score: want ~0.80 for year off by 2, got %f", score)
+	}
+}
+
+func TestSelectBestTV_YearOffByOne(t *testing.T) {
+	candidates := []tmdbTVResult{
+		{ID: 1396, Name: "Breaking Bad", FirstAirDate: "2008-01-20"},
+	}
+	parsed := &ParsedFilename{Title: "Breaking Bad", Year: 2009}
+
+	_, score := selectBestTV(candidates, parsed)
+	// exact title + ±1 year: 0.50 + 0.30 + 0.05 = 0.85
+	if !approxEqual(score, 0.85) {
+		t.Errorf("score: want ~0.85 for ±1 year, got %f", score)
+	}
+}
+
 func TestAbsInt(t *testing.T) {
 	cases := [][2]int{{5, 5}, {-5, 5}, {0, 0}, {-142, 142}}
 	for _, c := range cases {
