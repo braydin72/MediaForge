@@ -96,32 +96,35 @@ MediaForge automatically detects and uses the best available hardware encoder. I
 Configuration is stored in `/config/mediaforge.yaml`. Most settings are available in the web UI.
 
 ```yaml
-mediaforge:
-  intake:
-    enabled: true
-    watch_folder: /incoming
-    staging_folder: /staging
-    library:
-      movies: /media/Movies
-      tv_shows: /media/TV Shows
+intake:
+  enabled: true
+  watch_folder: /incoming
+  staging_folder: /staging
+  library:
+    movies: /media/Movies
+    tv_shows: /media/TV Shows
+  stability_check:
+    interval_seconds: 10
+    passes_required: 6
+  confidence_threshold: 0.85
+  review_threshold: 0.60
 
-  apis:
-    tmdb_key: ""       # required — tmdb.org (free)
-    tvdb_key: ""       # required for TV — thetvdb.com (free account)
-    omdb_key: ""       # optional fallback — omdbapi.com (free tier)
+apis:
+  tmdb_key: ""       # required — tmdb.org (free)
+  tvdb_key: ""       # required for TV — thetvdb.com (free account)
+  omdb_key: ""       # optional fallback — omdbapi.com (free tier)
 
-  llm:
-    backend: ""        # "anthropic" | "openai" | "ollama" | "" (disabled)
-    api_key: ""
-    model: ""
-    ollama_host: "http://localhost:11434"
+llm:
+  backend: ""        # "anthropic" | "openai" | "ollama" | "" (disabled)
+  api_key: ""
+  model: ""
+  ollama_host: "http://localhost:11434"
 
-  transcode:
-    output_container: "mkv"         # "mkv" | "mp4" | "preserve"
-    mode: "smartshrink"             # "smartshrink" | "fixed_reduction"
-    quality_preset: "good"          # "excellent" | "good" | "acceptable"
-    encoder_speed: "medium"         # "slowest" | "slower" | "slow" | "medium" | "fast"
-    gpu: "nvidia"                   # "nvidia" | "amd" | "intel" | "cpu"
+output_format: "preserve"   # "mkv" | "mp4" | "preserve" (matches source)
+transcode_mode: "smartshrink"
+default_preset: "smartshrink-hevc"
+default_quality: "good"
+encoder_speed: "medium"
 ```
 
 ---
@@ -129,7 +132,7 @@ mediaforge:
 ## Encode modes
 
 **SmartShrink** (default)
-Select a quality target (Excellent / Good / Acceptable). MediaForge encodes at the corresponding CRF, measures VMAF and output size, and automatically adjusts CRF upward if the output is larger than the source — continuing until it finds the best size-to-quality ratio within your quality floor. Never gives up and leaves a file untouched.
+Select a quality target (Excellent / Good / Acceptable). MediaForge encodes at the corresponding CRF, measures VMAF and output size, and automatically finds the best size-to-quality ratio within your quality floor. If the binary search cannot meet the target threshold, it uses the best CRF found rather than skipping the file.
 
 **Fixed Reduction**
 Specify a target size reduction percentage (e.g. 40% = output should be ~60% of original size). MediaForge adjusts CRF until that target is reached regardless of VMAF score.
@@ -154,12 +157,12 @@ MediaForge handles cross-device moves (local staging → network share library) 
 
 ## Naming conventions
 
-Default templates match Plex, Jellyfin, and Emby out of the box:
+Default templates match Plex, Jellyfin, and Emby out of the box. The file extension matches your configured output format.
 
 ```
-Movies:   {Title} ({Year}) / {Title} ({Year}).mkv
-TV Shows: {Show} ({Year}) / Season 01 / {Show} - S01E01 - {Episode Title}.mkv
-Multi-ep: {Show} - S01E01-E02 - {Title 1} + {Title 2}.mkv
+Movies:   {Title} ({Year}) / {Title} ({Year}).{ext}
+TV Shows: {Show} ({Year}) / Season 01 / {Show} - S01E01 - {Episode Title}.{ext}
+Multi-ep: {Show} - S01E01-E02 - {Title 1} + {Title 2}.{ext}
 ```
 
 Templates are configurable in Settings. Supported tokens: `{title}`, `{show}`, `{year}`, `{season:02d}`, `{episode:02d}`, `{episode_title}`.
@@ -168,15 +171,15 @@ Templates are configurable in Settings. Supported tokens: `{title}`, `{show}`, `
 
 ## Review Queue
 
-Every file that can't be processed automatically lands in the Review Queue — never silently dropped, never stranded with no explanation. Each entry shows the specific reason (e.g. "No metadata match found after TVDB, TMDB, and OMDb lookups" or "Encode failed: output larger than source at all CRF values within quality constraints"), the top lookup candidates with poster thumbnails, and the LLM's best guess if one is configured.
+Every file that can't be processed automatically lands in the Review Queue — never silently dropped, never stranded with no explanation. Each entry shows the specific reason (e.g. "No metadata match found after TVDB, TMDB, and OMDb lookups" or "duplicate: file already exists at destination"), the top lookup candidates with poster thumbnails, and the LLM's best guess if one is configured.
 
-From the Review Queue you can pick a candidate, search manually, re-add with different settings, retry automatically, or discard.
+From the Review Queue you can pick a candidate, search manually, re-add with different settings, retry automatically, replace an existing library file, or discard.
 
 ---
 
 ## Notifications
 
-MediaForge supports push notifications (Pushover and others inherited from Shrinkray) plus email via SMTP.
+MediaForge supports push notifications via Pushover plus email via SMTP.
 
 **Gmail:** Use an App Password, not your account password. [Get one here](https://myaccount.google.com/apppasswords) (requires 2FA enabled).
 
@@ -188,7 +191,7 @@ Notification events (individually toggleable): encode complete, encode failed, f
 
 ## Stats
 
-The dashboard shows lifetime storage saved on a circular gauge, plus files processed, average size reduction, encode success rate, and a 30-day savings trend. Two independent reset counters: lifetime and since-last-reset.
+The dashboard shows files processed, storage saved, encode success rate, and queue status.
 
 ---
 
@@ -199,7 +202,7 @@ Requires Go 1.21+ and ffmpeg/ffprobe available on PATH.
 ```bash
 git clone https://github.com/braydin72/mediaforge.git
 cd mediaforge
-go build -o mediaforge .
+go build -o mediaforge ./cmd/mediaforge
 ./mediaforge
 ```
 
