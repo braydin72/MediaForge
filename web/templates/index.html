@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Shrinkray</title>
+    <title>MediaForge</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="icon" type="image/png" href="/favicon.png">
@@ -2159,7 +2159,8 @@
         }
 
         /* Toggle switch */
-        .toggle {
+        .toggle,
+        .toggle-switch {
             position: relative;
             display: inline-block;
             width: 44px;
@@ -2167,7 +2168,8 @@
             flex-shrink: 0;
         }
 
-        .toggle input {
+        .toggle input,
+        .toggle-switch input {
             opacity: 0;
             width: 0;
             height: 0;
@@ -2196,11 +2198,13 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.2);
         }
 
-        .toggle input:checked + .toggle-slider {
+        .toggle input:checked + .toggle-slider,
+        .toggle-switch input:checked + .toggle-slider {
             background: var(--accent);
         }
 
-        .toggle input:checked + .toggle-slider:before {
+        .toggle input:checked + .toggle-slider:before,
+        .toggle-switch input:checked + .toggle-slider:before {
             transform: translateX(20px);
         }
 
@@ -2505,7 +2509,6 @@
                 </div>
             </div>
         </main>
-    </div>
 
     <!-- Review Queue View -->
     <div class="review-view" id="review-view" style="display:none">
@@ -2529,6 +2532,7 @@
                 <div style="font-size:0.875rem;color:var(--text-tertiary)">Files that need attention will appear here</div>
             </div>
         </div>
+    </div>
     </div>
 
     <!-- Settings Panel -->
