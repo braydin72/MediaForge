@@ -38,7 +38,7 @@ SmartShrink presets require the `smartshrink_quality` field and only work with S
 }
 ```
 
-When directories are provided, Shrinkray recursively discovers video files and adds them to the queue. Progress is reported via SSE `discovery_progress` events.
+When directories are provided, MediaForge recursively discovers video files and adds them to the queue. Progress is reported via SSE `discovery_progress` events.
 
 ## List jobs
 

@@ -1,6 +1,6 @@
-# Shrinkray API reference
+# MediaForge API reference
 
-Shrinkray exposes a REST API for managing video transcoding jobs. All endpoints return JSON.
+MediaForge exposes a REST API for managing video transcoding jobs. All endpoints return JSON.
 
 **Base URL**: `http://localhost:8080/api`
 

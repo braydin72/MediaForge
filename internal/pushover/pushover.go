@@ -62,5 +62,5 @@ func (c *Client) Send(title, message string) error {
 
 // Test sends a test notification to verify credentials
 func (c *Client) Test() error {
-	return c.Send("Shrinkray", "Test notification - Pushover is configured correctly!")
+	return c.Send("MediaForge", "Test notification - Pushover is configured correctly!")
 }

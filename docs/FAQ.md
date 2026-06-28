@@ -15,9 +15,9 @@ Quick answers to common questions. Each section covers a topic in depth.
 
 ## Getting started
 
-### What is Shrinkray?
+### What is MediaForge?
 
-A simple video transcoding tool with a web UI. Point it at your media library, pick a preset, and compress your files using hardware acceleration when available.
+A video ingest, transcoding, and organization tool with a web UI. Point it at your media library, pick a preset, and compress your files using hardware acceleration when available.
 
 ### What are the requirements?
 
@@ -25,14 +25,14 @@ A simple video transcoding tool with a web UI. Point it at your media library, p
 - **FFmpeg** with HEVC/AV1 encoder support (included in Docker image)
 - Optional: GPU for hardware acceleration (NVIDIA, Intel, AMD, or Apple Silicon)
 
-### How do I run Shrinkray?
+### How do I run MediaForge?
 
 **Docker Compose** (recommended):
 
 ```yaml
 services:
-  shrinkray:
-    image: ghcr.io/gwlsn/shrinkray:latest
+  mediaforge:
+    image: ghcr.io/braydin72/mediaforge:latest
     ports:
       - 8080:8080
     volumes:
@@ -40,24 +40,24 @@ services:
       - /path/to/media:/media
 ```
 
-**Unraid**: Search "Shrinkray" in Community Applications and configure paths. For GPU setup see [Unraid GPU setup](#unraid-gpu-setup).
+**Unraid**: Search "MediaForge" in Community Applications and configure paths. For GPU setup see [Unraid GPU setup](#unraid-gpu-setup).
 
 **From source**:
 
 ```bash
-go build -o shrinkray ./cmd/shrinkray
-./shrinkray -media /path/to/media -port 8080
+go build -o mediaforge ./cmd/mediaforge
+./mediaforge -media /path/to/media -port 8080
 ```
 
 Open `http://localhost:8080` in your browser.
 
 ### Where are config and data stored?
 
-- **Config file**: `/config/shrinkray.yaml`
-- **Database**: `/config/shrinkray.db` (SQLite)
+- **Config file**: `/config/mediaforge.yaml`
+- **Database**: `/config/mediaforge.db` (SQLite)
 - **Temp files**: OS temp directory (configurable via `temp_path`)
 
-### Can I run Shrinkray in Docker on Mac?
+### Can I run MediaForge in Docker on Mac?
 
 Yes, the Docker image supports Apple Silicon (M1/M2/M3/M4). However, Docker containers run Linux and cannot access macOS VideoToolbox, so encoding uses software (CPU) only.
 
@@ -65,8 +65,8 @@ Yes, the Docker image supports Apple Silicon (M1/M2/M3/M4). However, Docker cont
 
 ```bash
 brew install ffmpeg
-go build -o shrinkray ./cmd/shrinkray
-./shrinkray -media /path/to/media
+go build -o mediaforge ./cmd/mediaforge
+./mediaforge -media /path/to/media
 ```
 
 Docker is still useful if you prefer containerization and don't mind slower software encoding.
@@ -77,7 +77,7 @@ Docker is still useful if you prefer containerization and don't mind slower soft
 
 ### Where is the config file?
 
-`/config/shrinkray.yaml` in Docker, or the path specified with `-config` flag when running from source.
+`/config/mediaforge.yaml` in Docker, or the path specified with `-config` flag when running from source.
 
 ### What settings are available?
 
@@ -113,7 +113,7 @@ A few paths can be set via environment variables:
 
 If `temp_path` is not set and `/temp` exists as a mount, it is used automatically.
 
-All other settings should be edited in `/config/shrinkray.yaml` or via the web UI.
+All other settings should be edited in `/config/mediaforge.yaml` or via the web UI.
 
 ### How do I set up Pushover notifications?
 
@@ -138,7 +138,7 @@ Yes. Enable scheduling in Settings and set start/end hours. Example: start at 22
 
 ## Hardware acceleration
 
-### Which encoders does Shrinkray support?
+### Which encoders does MediaForge support?
 
 | Platform | Encoder | HEVC | AV1 |
 |----------|---------|------|-----|
@@ -152,7 +152,7 @@ GPU setup varies by platform. See [Docker GPU setup](#docker-gpu-setup) or [Unra
 
 ### How does encoder detection work?
 
-At startup, Shrinkray:
+At startup, MediaForge:
 1. Queries FFmpeg for available encoders
 2. Tests each with a 1-frame encode
 3. Selects the first working encoder in priority order: VideoToolbox > NVENC > QSV > VAAPI > Software
@@ -161,7 +161,7 @@ Check the logs at startup to see which encoders were detected. The active encode
 
 ### What happens if hardware encoding fails mid-job?
 
-Shrinkray automatically tries the next available encoder. For example, if Quick Sync fails on a specific file, it falls back to VAAPI, then to software encoding. This fallback chain means jobs complete even when specific hardware encoders have issues with certain content.
+MediaForge automatically tries the next available encoder. For example, if Quick Sync fails on a specific file, it falls back to VAAPI, then to software encoding. This fallback chain means jobs complete even when specific hardware encoders have issues with certain content.
 
 The fallback happens per-job, not globally. Other jobs still try the preferred encoder first.
 
@@ -191,7 +191,7 @@ Standard Docker (not Unraid) setup for GPU passthrough:
 
 ```yaml
 services:
-  shrinkray:
+  mediaforge:
     runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
@@ -206,7 +206,7 @@ Requires the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud
 
 ```yaml
 services:
-  shrinkray:
+  mediaforge:
     devices:
       - /dev/dri:/dev/dri
     environment:
@@ -254,7 +254,7 @@ The LinuxServer base image automatically handles device permissions inside the c
 
 **Verify it's working:**
 
-After starting the container, open a terminal into it and run `ls -la /dev/dri`. If you see `renderD128` (Intel/AMD) or can run `nvidia-smi` (NVIDIA), the device is passed through. Then check the Shrinkray startup logs for encoder detection output. Set log level to `debug` in Settings > Advanced for full details.
+After starting the container, open a terminal into it and run `ls -la /dev/dri`. If you see `renderD128` (Intel/AMD) or can run `nvidia-smi` (NVIDIA), the device is passed through. Then check the MediaForge startup logs for encoder detection output. Set log level to `debug` in Settings > Advanced for full details.
 
 ### What hardware supports AV1 encoding?
 
@@ -304,18 +304,18 @@ SmartShrink uses VMAF (Video Multi-Method Assessment Fusion) to analyze video qu
 
 ### How do quality settings work?
 
-Shrinkray uses CRF (Constant Rate Factor) for quality control. Lower values = higher quality = larger files.
+MediaForge uses CRF (Constant Rate Factor) for quality control. Lower values = higher quality = larger files.
 
 | Codec | Default | Range | Recommendation |
 |-------|---------|-------|----------------|
 | HEVC | 26 (software) / encoder-specific | 15-40 | 22-28 for most content |
 | AV1 | 35 (software) / encoder-specific | 20-50 | 30-38 for most content |
 
-Hardware encoders use their own quality modes (CQ, QP, bitrate) but Shrinkray normalizes the interface.
+Hardware encoders use their own quality modes (CQ, QP, bitrate) but MediaForge normalizes the interface.
 
 ### What happens if the output is larger than the input?
 
-By default, Shrinkray rejects larger outputs and keeps the original unchanged.
+By default, MediaForge rejects larger outputs and keeps the original unchanged.
 
 To always keep outputs (for codec consistency across your library), set `keep_larger_files: true` in config.
 
@@ -328,7 +328,7 @@ To always keep outputs (for codec consistency across your library), set `keep_la
 
 *MKV preserves most subtitle formats (srt, ass, ssa, pgs, dvb). Some MP4/TS-specific formats (mov_text, eia_608) are automatically filtered with a warning since they're incompatible with MKV containers.
 
-### How does Shrinkray handle HDR content?
+### How does MediaForge handle HDR content?
 
 Two modes:
 
@@ -348,13 +348,13 @@ Tonemapping algorithms: `hable` (filmic, default), `bt2390`, `reinhard`, `mobius
 
 ### Can I create custom presets or FFmpeg settings?
 
-No. Shrinkray is intentionally simple. You can adjust quality via the CRF slider, but full FFmpeg customization is out of scope. Use FFmpeg directly for advanced workflows.
+No. MediaForge's transcode interface is intentionally simple. You can adjust quality via the CRF slider, but full FFmpeg customization is out of scope. Use FFmpeg directly for advanced workflows.
 
 ---
 
 ## Troubleshooting
 
-### Why did Shrinkray skip some files?
+### Why did MediaForge skip some files?
 
 Files are automatically skipped if:
 - Already encoded in the target codec (HEVC for HEVC preset, AV1 for AV1 preset)
@@ -392,16 +392,16 @@ Encoding still uses GPU when available. Check logs for details.
 
 ### Podman rootless is not supported
 
-Shrinkray's Docker image uses the LinuxServer.io base with s6-overlay for user management (PUID/PGID). **Rootless Podman is not supported.** Its user namespace UID/GID remapping is fundamentally incompatible with s6-overlay's privilege-dropping mechanism.
+MediaForge's Docker image uses the LinuxServer.io base with s6-overlay for user management (PUID/PGID). **Rootless Podman is not supported.** Its user namespace UID/GID remapping is fundamentally incompatible with s6-overlay's privilege-dropping mechanism.
 
 Specifically, rootless Podman's user namespaces prevent s6-overlay from calling `setgroups()` during its init sequence, causing the container to fail at startup with errors like `s6-applyuidgid: fatal: unable to set supplementary group list: Operation not permitted`. Even with workarounds like `userns_mode: keep-id`, the underlying incompatibility remains.
 
-This is a known limitation across all LinuxServer.io-based images ([Plex](https://github.com/linuxserver/docker-plex/issues/700), [Nextcloud](https://github.com/linuxserver/docker-nextcloud/issues/508), [Sonarr](https://github.com/linuxserver/docker-sonarr/issues/278)), not specific to Shrinkray.
+This is a known limitation across all LinuxServer.io-based images ([Plex](https://github.com/linuxserver/docker-plex/issues/700), [Nextcloud](https://github.com/linuxserver/docker-nextcloud/issues/508), [Sonarr](https://github.com/linuxserver/docker-sonarr/issues/278)), not specific to MediaForge.
 
 **Alternatives:**
 - **Docker** (recommended)
 - **Rootful Podman**: works the same as Docker
-- **Build from source**: run Shrinkray directly on the host, or package it in your own rootless-friendly container without the LinuxServer/s6-overlay base
+- **Build from source**: run MediaForge directly on the host, or package it in your own rootless-friendly container without the LinuxServer/s6-overlay base
 
 ### A job is stuck at 0% progress
 
@@ -431,7 +431,7 @@ Docker logs will include FFmpeg stderr output for each job.
 
 ### Jobs disappear after restart
 
-Jobs are persisted to `/config/shrinkray.db` (SQLite). Ensure:
+Jobs are persisted to `/config/mediaforge.db` (SQLite). Ensure:
 - The `/config` volume is mounted correctly
 - Container has write permission to the directory
 
@@ -439,7 +439,7 @@ Jobs are persisted to `/config/shrinkray.db` (SQLite). Ensure:
 
 ## API and integration
 
-### Does Shrinkray have an API?
+### Does MediaForge have an API?
 
 Yes. Full REST API for automation:
 

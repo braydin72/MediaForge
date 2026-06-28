@@ -1,6 +1,6 @@
 # Package responsibilities
 
-## cmd/shrinkray
+## cmd/mediaforge
 
 Application entry point. Handles:
 

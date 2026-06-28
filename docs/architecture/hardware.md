@@ -1,6 +1,6 @@
 # Hardware acceleration
 
-Shrinkray automatically detects and uses hardware encoders for faster transcoding.
+MediaForge automatically detects and uses hardware encoders for faster transcoding.
 
 ## Detection flow
 
@@ -44,7 +44,7 @@ Detection works by attempting a 1-frame test encode with each encoder. The first
 
 ## Encoder fallback
 
-If the primary encoder fails during a job (e.g., unsupported filter, driver issue), Shrinkray automatically retries with the next available encoder:
+If the primary encoder fails during a job (e.g., unsupported filter, driver issue), MediaForge automatically retries with the next available encoder:
 
 ```mermaid
 flowchart LR
@@ -80,7 +80,7 @@ This ensures jobs complete even when specific encoders fail on certain content. 
 
 ## Full GPU pipeline
 
-When hardware encoding is active, Shrinkray uses hardware decoding too:
+When hardware encoding is active, MediaForge uses hardware decoding too:
 
 ```mermaid
 flowchart LR
@@ -166,7 +166,7 @@ Each encoder uses different quality parameters:
 | Global Quality | `-global_quality` | 1-51 | Intel QSV |
 | Bitrate | `-b:v` | kbps | VideoToolbox (calculated) |
 
-Shrinkray normalizes these differences. When you set a CRF value in settings, it's translated to the appropriate parameter for your encoder.
+MediaForge normalizes these differences. When you set a CRF value in settings, it's translated to the appropriate parameter for your encoder.
 
 ### CRF to bitrate conversion (VideoToolbox)
 
@@ -187,7 +187,7 @@ Modifiers are clamped to 5%-80% to prevent extreme values.
 
 ## Hardware initialization
 
-Shrinkray auto-detects the best initialization method at startup. NVENC and QSV have two modes depending on the environment.
+MediaForge auto-detects the best initialization method at startup. NVENC and QSV have two modes depending on the environment.
 
 ### NVENC (NVIDIA)
 
@@ -319,7 +319,7 @@ Transcodes audio for web compatibility, strips subtitles (PGS breaks MP4):
 
 ## Software decode triggers
 
-Shrinkray proactively uses software decoding when hardware decode will fail:
+MediaForge proactively uses software decoding when hardware decode will fail:
 
 | Condition | Reason |
 |-----------|--------|
@@ -338,7 +338,7 @@ The `RequiresSoftwareDecode()` function detects these before encoding starts, av
 
 ```yaml
 services:
-  shrinkray:
+  mediaforge:
     runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
@@ -351,7 +351,7 @@ Or with `--runtime=nvidia --gpus all` flags. Requires the [NVIDIA Container Tool
 
 ```yaml
 services:
-  shrinkray:
+  mediaforge:
     devices:
       - /dev/dri:/dev/dri
     environment:
@@ -384,7 +384,7 @@ The LinuxServer base image automatically handles device permissions inside the c
 1. Check GPU is passed through to container (`ls /dev/dri` inside container for Intel/AMD, `nvidia-smi` for NVIDIA)
 2. Verify driver is installed on the host
 3. Check PGID matches the render device group
-4. Check Shrinkray logs at startup for detection output (set log level to `debug` in Settings > Advanced for full details)
+4. Check MediaForge logs at startup for detection output (set log level to `debug` in Settings > Advanced for full details)
 
 **Jobs show "SW" badge unexpectedly:**
 

@@ -1,6 +1,6 @@
 # Architecture overview
 
-Shrinkray is a video transcoding application with a Go backend, embedded web UI, and FFmpeg for video processing.
+MediaForge is a video transcoding application with a Go backend, embedded web UI, and FFmpeg for video processing.
 
 ## Core data flow
 
@@ -55,8 +55,8 @@ flowchart LR
 ## Package structure
 
 ```
-shrinkray/
-├── cmd/shrinkray/         # Entry point, CLI flags
+mediaforge/
+├── cmd/mediaforge/        # Entry point, CLI flags
 ├── internal/
 │   ├── api/               # HTTP handlers, SSE streaming
 │   ├── jobs/              # Job model, queue, worker pool

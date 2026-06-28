@@ -1,6 +1,6 @@
 # Config API
 
-Read and update Shrinkray configuration at runtime.
+Read and update MediaForge configuration at runtime.
 
 ## Get configuration
 
@@ -42,7 +42,7 @@ Returns current configuration with encoder defaults.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `version` | string | Shrinkray version |
+| `version` | string | MediaForge version |
 | `media_path` | string | Root media directory |
 | `original_handling` | string | `replace` or `keep` |
 | `workers` | int | Number of concurrent workers |
@@ -149,7 +149,7 @@ Send a test notification to verify Pushover credentials.
 
 ## Notes
 
-- Changes are persisted to `/config/shrinkray.yaml`
+- Changes are persisted to `/config/mediaforge.yaml`
 - Worker count changes take effect immediately (running jobs complete normally)
 - VMAF scoring uses frame subsampling (every 5th frame) and runs samples in parallel for faster analysis; thread allocation respects container CPU limits
 - SmartShrink is SDR-only. HDR files are skipped

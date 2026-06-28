@@ -5,4 +5,4 @@ umask "${UMASK:-000}"
 
 exec \
     s6-setuidgid abc \
-    /usr/local/bin/shrinkray -config /config/shrinkray.yaml -media /media
+    /usr/local/bin/mediaforge -config /config/mediaforge.yaml -media /media

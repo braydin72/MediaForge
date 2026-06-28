@@ -176,7 +176,7 @@ The `encoders` array contains one entry per accel+codec combination (e.g., separ
 
 ## Hardware encoder priority
 
-Shrinkray automatically selects the best available encoder in this order:
+MediaForge automatically selects the best available encoder in this order:
 
 1. **Apple VideoToolbox** - Native macOS hardware encoding
 2. **NVIDIA NVENC** - Best quality/speed balance, wide GPU support

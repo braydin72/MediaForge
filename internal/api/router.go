@@ -60,7 +60,7 @@ func NewRouter(h *Handler, staticFS embed.FS) *http.ServeMux {
 	if err != nil {
 		// Fall back to empty handler if no static files
 		mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("Shrinkray API - No UI available"))
+			w.Write([]byte("MediaForge API - No UI available"))
 		})
 	} else {
 		// Serve index.html at root
