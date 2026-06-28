@@ -264,16 +264,20 @@ func (h *Handler) CreateJobs(w http.ResponseWriter, r *http.Request) {
 
 	if req.PipelineMode == "full_pipeline" {
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-			// Resolve any directory paths to individual video file paths.
-			probes, err := h.browser.GetVideoFilesWithProgress(ctx, req.Paths, nil)
+			// resolveCtx bounds only the directory-scan + initial ffprobe step.
+			resolveCtx, resolveCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			probes, err := h.browser.GetVideoFilesWithProgress(resolveCtx, req.Paths, nil)
+			resolveCancel()
 			if err != nil {
 				logger.Error("full_pipeline: error resolving video files", "error", err)
 				return
 			}
 			for _, p := range probes {
-				h.watcher.ProcessFile(ctx, p.Path)
+				// ProcessFile spawns its own goroutine; pass a context that is
+				// not canceled when this goroutine exits so the pipeline's ffprobe
+				// (and subsequent identify/move steps) can run to completion.
+				// runPipeline creates its own probeCtx with a 2-minute timeout.
+				h.watcher.ProcessFile(context.WithoutCancel(resolveCtx), p.Path)
 			}
 		}()
 		return
