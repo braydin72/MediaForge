@@ -31,6 +31,10 @@ var (
 	// Fansub and quality bracket groups: [SubGroup], [1080p], etc.
 	reBracketed = regexp.MustCompile(`\[[^\]]*\]`)
 
+	// reAttachedParen matches a '(' that is directly glued to a preceding
+	// non-space character, e.g. "ash(2025)" → "ash (2025)".
+	reAttachedParen = regexp.MustCompile(`(\S)\(`)
+
 	// reSceneToken matches a single normalized (space-separated) token that is a
 	// known scene/release tag. Anchored at both ends so partial matches are rejected.
 	reSceneToken = buildSceneTokenRe()
@@ -71,6 +75,8 @@ func ParseFilename(filename string) ParsedFilename {
 
 	// Remove bracketed fansub/quality groups before any further processing.
 	work := reBracketed.ReplaceAllString(stem, " ")
+	// Ensure a space before '(' so "title(2025)" tokenizes as ["title", "(2025)"].
+	work = reAttachedParen.ReplaceAllString(work, "$1 (")
 
 	// 1. Detect TV episode pattern on the pre-normalization string so that
 	//    compact tokens like "S01E01" are not split by dot-normalization.

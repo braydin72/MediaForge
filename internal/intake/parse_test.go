@@ -119,6 +119,13 @@ func TestParseFilename(t *testing.T) {
 			wantYear:  2017,
 			wantType:  "movie",
 		},
+		{
+			name:      "year in parens directly attached to title (no space)",
+			input:     "avatar fire and ash(2025).mp4",
+			wantTitle: "avatar fire and ash",
+			wantYear:  2025,
+			wantType:  "movie",
+		},
 		// --- TV shows ---
 		{
 			name:      "TV single episode dot-separated",
