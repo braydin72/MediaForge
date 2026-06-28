@@ -427,6 +427,25 @@ func TestTMDBLookupMovie_YearRetry_AvatarFireAndAsh(t *testing.T) {
 	if result.RuntimeMinutes != 145 {
 		t.Errorf("RuntimeMinutes: want 145, got %d", result.RuntimeMinutes)
 	}
+	// exact title after punctuation stripping + exact year: 0.50 + 0.30 + 0.10 = 0.90
+	if !approxEqual(result.Confidence, 0.90) {
+		t.Errorf("Confidence: want ~0.90, got %f", result.Confidence)
+	}
+}
+
+func TestSelectBestMovie_ColonInTitle(t *testing.T) {
+	// TMDB canonical title has a colon; filename never does. After punctuation
+	// stripping both normalize to the same string and score as an exact match.
+	candidates := []tmdbMovieResult{
+		{ID: 83533, Title: "Avatar: Fire and Ash", ReleaseDate: "2025-12-19"},
+	}
+	parsed := &ParsedFilename{Title: "avatar fire and ash", Year: 2025}
+
+	_, score := selectBestMovie(candidates, parsed)
+	// exact (after norm) + exact year: 0.50 + 0.30 + 0.10 = 0.90
+	if !approxEqual(score, 0.90) {
+		t.Errorf("score: want ~0.90 (colon stripped), got %f", score)
+	}
 }
 
 func TestSelectBestMovie_YearOffByOne(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const tmdbBaseURL = "https://api.themoviedb.org/3"
@@ -343,16 +344,16 @@ func (c *TMDBClient) fetchTVEpisode(ctx context.Context, seriesID, season, episo
 // --- candidate scoring ---
 
 func selectBestMovie(candidates []tmdbMovieResult, parsed *ParsedFilename) (tmdbMovieResult, float64) {
-	queryLower := strings.ToLower(parsed.Title)
+	queryNorm := normTitle(parsed.Title)
 	bestIdx, bestScore := 0, -1.0
 
 	for i, m := range candidates {
 		score := 0.50
-		titleLower := strings.ToLower(m.Title)
+		titleLower := normTitle(m.Title)
 
-		if titleLower == queryLower {
+		if titleLower == queryNorm {
 			score += 0.30
-		} else if strings.Contains(titleLower, queryLower) || strings.Contains(queryLower, titleLower) {
+		} else if strings.Contains(titleLower, queryNorm) || strings.Contains(queryNorm, titleLower) {
 			score += 0.10
 		}
 
@@ -374,16 +375,16 @@ func selectBestMovie(candidates []tmdbMovieResult, parsed *ParsedFilename) (tmdb
 }
 
 func selectBestTV(candidates []tmdbTVResult, parsed *ParsedFilename) (tmdbTVResult, float64) {
-	queryLower := strings.ToLower(parsed.Title)
+	queryNorm := normTitle(parsed.Title)
 	bestIdx, bestScore := 0, -1.0
 
 	for i, s := range candidates {
 		score := 0.50
-		nameLower := strings.ToLower(s.Name)
+		nameLower := normTitle(s.Name)
 
-		if nameLower == queryLower {
+		if nameLower == queryNorm {
 			score += 0.30
-		} else if strings.Contains(nameLower, queryLower) || strings.Contains(queryLower, nameLower) {
+		} else if strings.Contains(nameLower, queryNorm) || strings.Contains(queryNorm, nameLower) {
 			score += 0.10
 		}
 
@@ -402,6 +403,18 @@ func selectBestTV(candidates []tmdbTVResult, parsed *ParsedFilename) (tmdbTVResu
 	}
 
 	return candidates[bestIdx], bestScore
+}
+
+// normTitle lowercases s and strips punctuation so that "Avatar: Fire and Ash"
+// and "avatar fire and ash" compare as equal.
+func normTitle(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // absInt returns the absolute value of n.
