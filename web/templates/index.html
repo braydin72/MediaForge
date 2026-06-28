@@ -1659,6 +1659,42 @@
             border-top: 1px solid var(--border);
         }
 
+        .review-dup-compare {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            margin: 10px 0;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 0.8125rem;
+        }
+        .review-dup-side { flex: 1; min-width: 0; }
+        .review-dup-label {
+            font-size: 0.6875rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        .review-dup-label--incoming { color: var(--accent); }
+        .review-dup-label--existing { color: var(--warning); }
+        .review-dup-filename {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            word-break: break-all;
+            color: var(--text-primary);
+            margin-bottom: 2px;
+        }
+        .review-dup-meta { color: var(--text-secondary); }
+        .review-dup-vs {
+            flex: 0 0 auto;
+            color: var(--text-tertiary);
+            font-weight: 600;
+            padding-top: 18px;
+        }
+
         .review-empty {
             display: flex;
             flex-direction: column;
@@ -5444,16 +5480,55 @@
             const probe = reviewParseProbe(e.ffprobe_info);
             const probeStr = reviewProbeString(probe);
             const timeAgo = reviewTimeAgo(e.created_at);
+            const isDuplicate = (e.reason || '').startsWith('duplicate:');
             const cands = (e.candidates || []);
             const llm = e.llm_guess || null;
-            const candHTML = cands.length
+            const candHTML = (!isDuplicate && cands.length)
                 ? cands.map((c, i) => reviewCandHTML(e.id, c, i)).join('')
                 : '';
-            const llmHTML = llm ? `
+            const llmHTML = (!isDuplicate && llm) ? `
                 <div class="review-llm">
                     <span class="review-llm-label">AI guess:</span>
                     <span class="review-llm-text">${escReview(llm.title||'')}${llm.year?' ('+llm.year+')':''} — ${escReview(llm.reasoning||'')}</span>
                 </div>` : '';
+
+            let dupCompareHTML = '';
+            if (isDuplicate && e.duplicate_info) {
+                let dup;
+                try { dup = JSON.parse(e.duplicate_info); } catch(_) {}
+                if (dup && dup.incoming && dup.existing) {
+                    const fmt = (info) => {
+                        const res = (info.width && info.height) ? `${info.width}×${info.height}` : '';
+                        const br = info.bitrate_bps ? `${(info.bitrate_bps/1000000).toFixed(1)} Mbps` : '';
+                        const sz = info.filesize_bytes ? reviewFmtBytes(info.filesize_bytes) : '';
+                        return [info.codec, res, br, sz].filter(Boolean).join(' · ');
+                    };
+                    dupCompareHTML = `
+                <div class="review-dup-compare">
+                  <div class="review-dup-side">
+                    <div class="review-dup-label review-dup-label--incoming">Incoming</div>
+                    <div class="review-dup-filename">${escReview(dup.incoming.path.split(/[/\\]/).pop())}</div>
+                    <div class="review-dup-meta">${escReview(fmt(dup.incoming))}</div>
+                  </div>
+                  <div class="review-dup-vs">vs</div>
+                  <div class="review-dup-side">
+                    <div class="review-dup-label review-dup-label--existing">Existing</div>
+                    <div class="review-dup-filename">${escReview(dup.existing.path.split(/[/\\]/).pop())}</div>
+                    <div class="review-dup-meta">${escReview(fmt(dup.existing))}</div>
+                  </div>
+                </div>`;
+                }
+            }
+
+            const actionsHTML = isDuplicate ? `
+                  <button class="btn btn-primary btn-sm" onclick="reviewReplace('${e.id}')">Replace</button>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewDiscard('${e.id}')">Keep Existing</button>` : `
+                  <button class="btn btn-primary btn-sm" onclick="reviewPick('${e.id}')">Pick Selected</button>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewToggleSearch('${e.id}')">Search Manually</button>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewRetry('${e.id}')">Retry</button>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewDiscard('${e.id}')">Discard</button>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewResubmit('${e.id}','${e.original_path.replace(/'/g,'\\x27')}')">Re-add</button>`;
+
             return `
             <div class="review-card" id="rcard-${e.id}">
               <div class="review-card-header">
@@ -5467,9 +5542,10 @@
                   ${escReview(e.reason)}
                 </div>
                 ${probeStr ? `<div class="review-probe">${probeStr}</div>` : ''}
+                ${dupCompareHTML}
                 <div class="review-candidates" id="rcands-${e.id}">${candHTML}</div>
                 ${llmHTML}
-                <div id="rsearch-${e.id}" style="display:none" class="review-search-form">
+                ${!isDuplicate ? `<div id="rsearch-${e.id}" style="display:none" class="review-search-form">
                   <input class="review-search-input" placeholder="Title..." id="rsq-${e.id}"
                          onkeydown="if(event.key==='Enter')reviewDoSearch('${e.id}')">
                   <input class="review-search-year" type="number" placeholder="Year" id="rsyear-${e.id}"
@@ -5481,16 +5557,24 @@
                   </select>
                   <button class="btn btn-secondary btn-sm" onclick="reviewDoSearch('${e.id}')">Search</button>
                   <button class="btn btn-secondary btn-sm" onclick="reviewCloseSearch('${e.id}')">Cancel</button>
-                </div>
-                <div class="review-actions">
-                  <button class="btn btn-primary btn-sm" onclick="reviewPick('${e.id}')">Pick Selected</button>
-                  <button class="btn btn-secondary btn-sm" onclick="reviewToggleSearch('${e.id}')">Search Manually</button>
-                  <button class="btn btn-secondary btn-sm" onclick="reviewRetry('${e.id}')">Retry</button>
-                  <button class="btn btn-secondary btn-sm" onclick="reviewDiscard('${e.id}')">Discard</button>
-                  <button class="btn btn-secondary btn-sm" onclick="reviewResubmit('${e.id}','${e.original_path.replace(/'/g,'\\x27')}')">Re-add</button>
+                </div>` : ''}
+                <div class="review-actions">${actionsHTML}
                 </div>
               </div>
             </div>`;
+        }
+
+        async function reviewReplace(id) {
+            if (!confirm('Replace the existing file with the incoming version? This cannot be undone.')) return;
+            const res = await fetch(`/api/review/${id}/replace`, {method:'PUT'});
+            if (res.ok) { reviewRemoveCard(id); reviewUpdateBadge(); }
+            else { const d = await res.json().catch(()=>{}); alert('Replace failed: ' + (d && d.error || res.status)); }
+        }
+
+        function reviewFmtBytes(n) {
+            if (n >= 1e9) return (n/1e9).toFixed(1) + ' GB';
+            if (n >= 1e6) return (n/1e6).toFixed(0) + ' MB';
+            return (n/1e3).toFixed(0) + ' KB';
         }
 
         function reviewCandHTML(entryId, c, idx) {
