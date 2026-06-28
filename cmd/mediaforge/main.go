@@ -205,57 +205,62 @@ func main() {
 	)
 
 	startIntake := func() {
+		intakeWatcherMu.Lock()
+		intakeWatcher = intake.NewWatcher(&cfg.Intake, cfg.FFprobePath, jobStore)
+		intakeWatcher.OnReviewQueueAdd = func(filename, reason string) {
+			handler.DispatchNotification(&notify.Event{
+				Type:     notify.EventReviewQueueItem,
+				Filename: filename,
+				Reason:   reason,
+			})
+		}
+		intakeWatcher.EncodeQueue = queue
+		intakeWatcher.EncodePresetID = cfg.DefaultPreset
+		quality := cfg.DefaultQuality
+		if quality == "" {
+			quality = "good"
+		}
+		intakeWatcher.SmartShrinkQuality = quality
+		intakeWatcher.OutputFormat = cfg.OutputFormat
+
+		// Build the metadata lookup chain from configured API keys.
+		// Any client with an empty key is left nil; the Orchestrator skips nil sources.
+		var tvdbClient *intake.TVDBClient
+		var tmdbClient *intake.TMDBClient
+		var omdbClient *intake.OMDbClient
+		if cfg.APIs.TVDBKey != "" {
+			tvdbClient = intake.NewTVDBClient(cfg.APIs.TVDBKey, nil)
+		}
+		if cfg.APIs.TMDBKey != "" {
+			tmdbClient = intake.NewTMDBClient(cfg.APIs.TMDBKey, nil)
+		}
+		if cfg.APIs.OMDbKey != "" {
+			omdbClient = intake.NewOMDbClient(cfg.APIs.OMDbKey, nil)
+		}
+		if tvdbClient != nil || tmdbClient != nil || omdbClient != nil {
+			intakeWatcher.Orchestrator = intake.NewOrchestrator(tvdbClient, tmdbClient, omdbClient)
+			logger.Info("Intake: metadata lookup configured",
+				"tvdb", tvdbClient != nil, "tmdb", tmdbClient != nil, "omdb", omdbClient != nil)
+		} else {
+			logger.Info("Intake: no API keys configured — metadata lookup disabled; set tvdb_key/tmdb_key in config")
+		}
+
+		// Wire the LLM verification client if a backend is configured.
+		if cfg.LLM.Backend != "" {
+			intakeWatcher.LLMClient = intake.NewLLMClient(cfg.LLM, nil)
+			logger.Info("Intake: LLM verification configured", "backend", cfg.LLM.Backend, "model", cfg.LLM.Model)
+		}
+
+		handler.SetIntakeWatcher(intakeWatcher)
+		intakeWatcherMu.Unlock()
+
+		// Only start the folder watcher when intake is enabled; the watcher is
+		// always created so that manual Full Pipeline runs (ProcessFile) work
+		// regardless of whether automatic folder watching is active.
 		if cfg.Intake.Enabled {
-			intakeWatcherMu.Lock()
-			intakeWatcher = intake.NewWatcher(&cfg.Intake, cfg.FFprobePath, jobStore)
-			intakeWatcher.OnReviewQueueAdd = func(filename, reason string) {
-				handler.DispatchNotification(&notify.Event{
-					Type:     notify.EventReviewQueueItem,
-					Filename: filename,
-					Reason:   reason,
-				})
-			}
-			intakeWatcher.EncodeQueue = queue
-			intakeWatcher.EncodePresetID = cfg.DefaultPreset
-			quality := cfg.DefaultQuality
-			if quality == "" {
-				quality = "good"
-			}
-			intakeWatcher.SmartShrinkQuality = quality
-			intakeWatcher.OutputFormat = cfg.OutputFormat
-
-			// Build the metadata lookup chain from configured API keys.
-			// Any client with an empty key is left nil; the Orchestrator skips nil sources.
-			var tvdbClient *intake.TVDBClient
-			var tmdbClient *intake.TMDBClient
-			var omdbClient *intake.OMDbClient
-			if cfg.APIs.TVDBKey != "" {
-				tvdbClient = intake.NewTVDBClient(cfg.APIs.TVDBKey, nil)
-			}
-			if cfg.APIs.TMDBKey != "" {
-				tmdbClient = intake.NewTMDBClient(cfg.APIs.TMDBKey, nil)
-			}
-			if cfg.APIs.OMDbKey != "" {
-				omdbClient = intake.NewOMDbClient(cfg.APIs.OMDbKey, nil)
-			}
-			if tvdbClient != nil || tmdbClient != nil || omdbClient != nil {
-				intakeWatcher.Orchestrator = intake.NewOrchestrator(tvdbClient, tmdbClient, omdbClient)
-				logger.Info("Intake: metadata lookup configured",
-					"tvdb", tvdbClient != nil, "tmdb", tmdbClient != nil, "omdb", omdbClient != nil)
-			} else {
-				logger.Info("Intake: no API keys configured — metadata lookup disabled; set tvdb_key/tmdb_key in config")
-			}
-
-			// Wire the LLM verification client if a backend is configured.
-			if cfg.LLM.Backend != "" {
-				intakeWatcher.LLMClient = intake.NewLLMClient(cfg.LLM, nil)
-				logger.Info("Intake: LLM verification configured", "backend", cfg.LLM.Backend, "model", cfg.LLM.Model)
-			}
-
-			intakeWatcherMu.Unlock()
 			go intakeWatcher.Start(context.Background())
 		} else {
-			logger.Info("Intake pipeline disabled (enable in Settings to activate)")
+			logger.Info("Intake pipeline disabled (enable in Settings to activate folder watching)")
 		}
 	}
 

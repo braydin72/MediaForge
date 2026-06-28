@@ -219,9 +219,10 @@ func (h *Handler) CreateJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// full_pipeline requires the intake watcher to be wired up.
-	if req.PipelineMode == "full_pipeline" && h.watcher == nil {
-		writeError(w, http.StatusServiceUnavailable, "intake pipeline not configured")
+	// full_pipeline requires library paths; intake watcher being enabled is not required
+	// (the watcher is always available for manual runs even when folder watching is off).
+	if req.PipelineMode == "full_pipeline" && h.cfg.Intake.Library.Movies == "" && h.cfg.Intake.Library.TVShows == "" {
+		writeError(w, http.StatusBadRequest, "Library paths not configured — set Movies and TV Shows library paths in Settings before using Full Pipeline mode.")
 		return
 	}
 
