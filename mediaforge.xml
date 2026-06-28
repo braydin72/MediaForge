@@ -18,7 +18,7 @@
   <Category>MediaApp:Video</Category>
   <Icon>https://raw.githubusercontent.com/braydin72/mediaforge/main/web/templates/logo.png</Icon>
   <WebUI>http://[IP]:[PORT:8080]</WebUI>
-  <ExtraSearchTerms>transcode ffmpeg compression video hevc av1 shrink encode</ExtraSearchTerms>
+  <ExtraSearchTerms>transcode ffmpeg compression video hevc av1 encode ingest organize mediaforge shrink shrinkray</ExtraSearchTerms>
   <Requires>For hardware acceleration, GPU passthrough is required. See Overview for setup instructions.</Requires>
   <ReadMe>https://github.com/braydin72/mediaforge#readme</ReadMe>
   <Beta>false</Beta>
