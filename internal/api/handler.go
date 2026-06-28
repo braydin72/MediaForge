@@ -941,9 +941,10 @@ func (h *Handler) ListReviewQueue(w http.ResponseWriter, r *http.Request) {
 
 	// Filter by status.
 	filtered := all[:0]
-	for _, e := range all {
+	for i := range all {
+		e := &all[i]
 		if e.Status == statusFilter {
-			filtered = append(filtered, e)
+			filtered = append(filtered, *e)
 		}
 	}
 	total := len(filtered)
