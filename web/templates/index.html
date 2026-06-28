@@ -2420,6 +2420,12 @@
                                 <div class="preset-dropdown-item" data-quality="excellent" onclick="selectQuality('excellent')">Excellent</div>
                             </div>
                         </div>
+                        <div class="preset-dropdown" id="pipeline-mode-dropdown" style="display:inline-block;vertical-align:middle;">
+                            <select id="pipeline-mode-select" style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;padding:6px 10px;cursor:pointer;outline:none;" title="Pipeline mode">
+                                <option value="encode_only">Encode Only</option>
+                                <option value="full_pipeline">Full Pipeline</option>
+                            </select>
+                        </div>
                         <button class="btn btn-primary" onclick="startJobs()" id="start-btn" disabled>Start Transcode</button>
                         <span class="selection-count" id="selection-summary"></span>
                         <span class="schedule-status" id="schedule-status"></span>
@@ -3729,13 +3735,15 @@
                     `Processing ${totalFiles} file${totalFiles !== 1 ? 's' : ''}...`;
                 banner.classList.remove('hidden');
 
+                const pipelineMode = document.getElementById('pipeline-mode-select').value;
                 const resp = await fetch('/api/jobs', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         paths: Array.from(selectedPaths),
                         preset_id: preset,
-                        smartshrink_quality: smartshrinkQuality
+                        smartshrink_quality: smartshrinkQuality,
+                        pipeline_mode: pipelineMode
                     })
                 });
                 const data = await resp.json();

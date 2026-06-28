@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"gopkg.in/yaml.v3"
 )
@@ -195,6 +196,18 @@ type Config struct {
 	DefaultQuality string `yaml:"default_quality"`
 }
 
+// defaultPosterCachePath returns a platform-appropriate poster cache directory.
+func defaultPosterCachePath() string {
+	if runtime.GOOS == "windows" {
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			appData = `C:\ProgramData`
+		}
+		return filepath.Join(appData, "mediaforge", "poster_cache")
+	}
+	return "/config/poster_cache"
+}
+
 // DefaultConfig returns a config with sensible defaults
 func DefaultConfig() *Config {
 	return &Config{
@@ -224,7 +237,7 @@ func DefaultConfig() *Config {
 		},
 		PosterCache: PosterCacheConfig{
 			Enabled: true,
-			Path:    "/config/poster_cache",
+			Path:    defaultPosterCachePath(),
 		},
 		MediaPath:         "/media",
 		TempPath:          "", // defaults to os.TempDir()

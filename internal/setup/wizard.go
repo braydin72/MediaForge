@@ -156,6 +156,8 @@ type setupRequest struct {
 	StagingFolder string `json:"staging_folder"`
 	MoviesLib     string `json:"movies_library"`
 	TVShowsLib    string `json:"tvshows_library"`
+	MediaPath     string `json:"media_path"`
+	TempPath      string `json:"temp_path"`
 	FFprobePath   string `json:"ffprobe_path"`
 	FFmpegPath    string `json:"ffmpeg_path"`
 	TMDBKey       string `json:"tmdb_key"`
@@ -187,6 +189,13 @@ func (w *WizardHandler) handleSetupSubmit(rw http.ResponseWriter, r *http.Reques
 	}
 	w.cfg.Intake.Library.Movies = filepath.FromSlash(req.MoviesLib)
 	w.cfg.Intake.Library.TVShows = filepath.FromSlash(req.TVShowsLib)
+
+	if req.MediaPath != "" {
+		w.cfg.MediaPath = filepath.FromSlash(req.MediaPath)
+	}
+	if req.TempPath != "" {
+		w.cfg.TempPath = filepath.FromSlash(req.TempPath)
+	}
 
 	// Tool paths: only override if user provided a non-empty value.
 	// Pass directly to exec.Command as the executable argument — spaces in the
@@ -312,6 +321,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
       <input type="text" id="tvshows_library" placeholder="\\server\share\TV Shows  or  /media/TV Shows">
       <div class="hint">Destination for identified TV episode files.</div>
       <div class="errmsg" id="e-tvshows_library">Required</div>
+    </div>
+    <div class="field">
+      <label>Media Browser Path <span class="opt">(optional)</span></label>
+      <input type="text" id="media_path" placeholder="C:\media  or  /media">
+      <div class="hint">Root folder for the manual file browser. Usually your main media library.</div>
+    </div>
+    <div class="field">
+      <label>Transcode Working Directory <span class="opt">(optional)</span></label>
+      <input type="text" id="temp_path" placeholder="C:\transcode\tmp  or  /transcode/tmp">
+      <div class="hint">Temporary files during encoding. Use fast storage (SSD).</div>
     </div>
   </div>
 
@@ -510,6 +529,8 @@ function submit(){
     staging_folder:v('staging_folder'),
     movies_library:v('movies_library'),
     tvshows_library:v('tvshows_library'),
+    media_path:v('media_path'),
+    temp_path:v('temp_path'),
     ffprobe_path:v('ffprobe_path'),
     ffmpeg_path:v('ffmpeg_path'),
     tmdb_key:v('tmdb_key'),
