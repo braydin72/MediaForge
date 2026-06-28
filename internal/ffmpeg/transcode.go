@@ -76,6 +76,7 @@ func NewTranscoder(ffmpegPath string) *Transcoder {
 // outputFormat: "mkv" or "mp4" - affects audio/subtitle handling
 // tonemap: optional HDR to SDR tonemapping parameters (nil = no tonemapping)
 // subtitleIndices: nil=map all, empty=none, populated=specific indices (for MKV compatibility filtering)
+// subtitleConvertIndices: mov_text streams to convert to subrip for MKV output (nil=no conversion)
 func (t *Transcoder) Transcode(
 	ctx context.Context,
 	inputPath string,
@@ -92,6 +93,7 @@ func (t *Transcoder) Transcode(
 	outputFormat string,
 	tonemap *TonemapParams,
 	subtitleIndices []int,
+	subtitleConvertIndices []int,
 ) (*TranscodeResult, error) {
 	startTime := time.Now()
 
@@ -112,7 +114,7 @@ func (t *Transcoder) Transcode(
 
 	// Build preset args with source bitrate for dynamic calculation
 	// inputArgs go before -i (hwaccel), outputArgs go after
-	inputArgs, outputArgs := BuildPresetArgs(preset, sourceBitrate, sourceWidth, sourceHeight, qualityHEVC, qualityAV1, qualityMod, softwareDecode, outputFormat, tonemap, subtitleIndices)
+	inputArgs, outputArgs := BuildPresetArgs(preset, sourceBitrate, sourceWidth, sourceHeight, qualityHEVC, qualityAV1, qualityMod, softwareDecode, outputFormat, tonemap, subtitleIndices, subtitleConvertIndices)
 
 	// Check if hardware decode is actually being used (presence of -hwaccel flag).
 	// This determines whether we need the first-frame watchdog to catch HW decode hangs.

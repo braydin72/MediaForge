@@ -511,8 +511,11 @@ type TonemapParams struct {
 //   - empty slice: map no subtitles (all incompatible)
 //   - populated slice: map specific stream indices (-map 0:2 -map 0:4)
 //
+// subtitleConvertIndices lists MKV streams that need mov_text→subrip conversion (-c:s srt).
+// Only used when outputFormat is "mkv". Nil or empty means no conversion needed.
+//
 // Returns (inputArgs, outputArgs) - inputArgs go before -i, outputArgs go after
-func BuildPresetArgs(preset *Preset, sourceBitrate int64, sourceWidth, sourceHeight int, qualityHEVC, qualityAV1 int, qualityMod float64, softwareDecode bool, outputFormat string, tonemap *TonemapParams, subtitleIndices []int) (inputArgs []string, outputArgs []string) {
+func BuildPresetArgs(preset *Preset, sourceBitrate int64, sourceWidth, sourceHeight int, qualityHEVC, qualityAV1 int, qualityMod float64, softwareDecode bool, outputFormat string, tonemap *TonemapParams, subtitleIndices []int, subtitleConvertIndices []int) (inputArgs []string, outputArgs []string) {
 	key := EncoderKey{preset.Encoder, preset.Codec}
 	config, ok := encoderConfigs[key]
 	if !ok {
@@ -725,17 +728,29 @@ func BuildPresetArgs(preset *Preset, sourceBitrate int64, sourceWidth, sourceHei
 				"-map", "0:s?", // All subtitle streams (optional)
 				"-c:s", "copy",
 			)
-		case len(subtitleIndices) == 0:
+		case len(subtitleIndices) == 0 && len(subtitleConvertIndices) == 0:
 			// empty = no subtitles to map (all were incompatible)
 			// Don't add any subtitle mapping
-		default:
-			// specific indices = map only compatible streams by absolute stream index
-			// (from ffprobe's stream.index field, not subtitle-relative ordinal)
-			// Use ? suffix for safety in case indices become stale
+		case len(subtitleConvertIndices) == 0:
+			// No conversion needed — blanket copy approach
 			for _, idx := range subtitleIndices {
 				outputArgs = append(outputArgs, "-map", fmt.Sprintf("0:%d?", idx))
 			}
 			outputArgs = append(outputArgs, "-c:s", "copy")
+		default:
+			// Mix of copy-compatible and mov_text→srt conversion streams.
+			// Use per-output-stream codec specifiers to handle each independently.
+			outSubIdx := 0
+			for _, idx := range subtitleIndices {
+				outputArgs = append(outputArgs, "-map", fmt.Sprintf("0:%d?", idx))
+				outputArgs = append(outputArgs, fmt.Sprintf("-c:s:%d", outSubIdx), "copy")
+				outSubIdx++
+			}
+			for _, idx := range subtitleConvertIndices {
+				outputArgs = append(outputArgs, "-map", fmt.Sprintf("0:%d?", idx))
+				outputArgs = append(outputArgs, fmt.Sprintf("-c:s:%d", outSubIdx), "srt")
+				outSubIdx++
+			}
 		}
 	}
 
@@ -756,7 +771,7 @@ func BuildSampleEncodeArgs(preset *Preset, sourceWidth, sourceHeight int,
 	// Pass nil for subtitleIndices (samples don't use subtitles anyway - we strip them below)
 	// Pass nil for tonemap - samples stay in native format (VMAF is SDR-only)
 	inputArgs, outputArgs = BuildPresetArgs(preset, 0, sourceWidth, sourceHeight,
-		qualityOverride, qualityOverride, modifierOverride, softwareDecode, "mkv", nil, nil)
+		qualityOverride, qualityOverride, modifierOverride, softwareDecode, "mkv", nil, nil, nil)
 
 	// Remove audio/subtitle mapping and replace with video-only
 	filteredArgs := make([]string, 0, len(outputArgs))

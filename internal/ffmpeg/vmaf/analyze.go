@@ -68,7 +68,6 @@ func (a *Analyzer) Analyze(ctx context.Context, inputPath string, videoDuration 
 		return nil, fmt.Errorf("binary search: %w", err)
 	}
 
-	// No acceptable quality found
 	if result == nil {
 		logger.Info("Binary search complete - no acceptable quality found", "duration", searchDuration.String())
 		return &AnalysisResult{
@@ -77,7 +76,17 @@ func (a *Analyzer) Analyze(ctx context.Context, inputPath string, videoDuration 
 		}, nil
 	}
 
-	logger.Info("Binary search complete", "duration", searchDuration.String(), "iterations", result.Iterations)
+	if result.BestEffort {
+		logger.Warn("Binary search complete - best-effort encode (below VMAF threshold)",
+			"crf", result.Quality,
+			"vmaf_score", fmt.Sprintf("%.2f", result.VMafScore),
+			"threshold", threshold,
+			"duration", searchDuration.String(),
+			"iterations", result.Iterations)
+		// Proceed with best-effort encode; worker skips if output is larger than source.
+	} else {
+		logger.Info("Binary search complete", "duration", searchDuration.String(), "iterations", result.Iterations)
+	}
 
 	return &AnalysisResult{
 		OptimalCRF:  result.Quality,

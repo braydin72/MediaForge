@@ -34,6 +34,7 @@ type SearchResult struct {
 	Modifier   float64 // Bitrate modifier (for VideoToolbox)
 	VMafScore  float64 // Achieved VMAF score
 	Iterations int     // Number of quality levels tested (each test encodes all samples)
+	BestEffort bool    // True if no CRF met the threshold; Quality/VMafScore reflect best found
 }
 
 // EncodeSampleFunc is a function that encodes a sample at the given quality
@@ -246,7 +247,10 @@ func interpolatedSearchCRF(s *sampleScorer, qRange QualityRange, threshold float
 		} else {
 			// Not good enough: score below threshold
 			if crf == minCRF {
-				// Even best quality fails - impossible
+				// Even best quality fails — use best-effort result
+				if best := findAbsoluteBestCRFAttempt(attempts); best != nil {
+					return &SearchResult{Quality: best.crf, VMafScore: best.score, Iterations: s.testCount, BestEffort: true}, nil
+				}
 				return nil, nil
 			}
 
@@ -262,7 +266,10 @@ func interpolatedSearchCRF(s *sampleScorer, qRange QualityRange, threshold float
 						Iterations: s.testCount,
 					}, nil
 				}
-				// Both adjacent points fail - impossible
+				// Both adjacent points fail — use best-effort result
+				if best := findAbsoluteBestCRFAttempt(attempts); best != nil {
+					return &SearchResult{Quality: best.crf, VMafScore: best.score, Iterations: s.testCount, BestEffort: true}, nil
+				}
 				return nil, nil
 			}
 
@@ -297,6 +304,10 @@ func interpolatedSearchCRF(s *sampleScorer, qRange QualityRange, threshold float
 					Iterations: s.testCount,
 				}, nil
 			}
+			// No threshold-meeting result — use best-effort
+			if absBest := findAbsoluteBestCRFAttempt(attempts); absBest != nil {
+				return &SearchResult{Quality: absBest.crf, VMafScore: absBest.score, Iterations: s.testCount, BestEffort: true}, nil
+			}
 			return nil, nil
 		}
 	}
@@ -309,6 +320,10 @@ func interpolatedSearchCRF(s *sampleScorer, qRange QualityRange, threshold float
 			VMafScore:  best.score,
 			Iterations: s.testCount,
 		}, nil
+	}
+	// No threshold-meeting result — use best-effort
+	if absBest := findAbsoluteBestCRFAttempt(attempts); absBest != nil {
+		return &SearchResult{Quality: absBest.crf, VMafScore: absBest.score, Iterations: s.testCount, BestEffort: true}, nil
 	}
 	return nil, nil
 }
@@ -353,6 +368,19 @@ func findBestAttempt(attempts []crfAttempt, threshold float64) *crfAttempt {
 	for i := range attempts {
 		a := &attempts[i]
 		if a.score >= threshold && (best == nil || a.crf > best.crf) {
+			best = a
+		}
+	}
+	return best
+}
+
+// findAbsoluteBestCRFAttempt returns the attempt with highest VMAF score regardless of threshold.
+// Ties broken by preferring higher CRF (more compression → smaller file).
+func findAbsoluteBestCRFAttempt(attempts []crfAttempt) *crfAttempt {
+	var best *crfAttempt
+	for i := range attempts {
+		a := &attempts[i]
+		if best == nil || a.score > best.score || (a.score == best.score && a.crf > best.crf) {
 			best = a
 		}
 	}
@@ -452,7 +480,10 @@ func interpolatedSearchBitrate(s *sampleScorer, qRange QualityRange, threshold f
 		} else {
 			// Not good enough
 			if math.Abs(mod-maxMod) <= minModRange {
-				// Even best quality fails
+				// Even best quality fails — use best-effort result
+				if best := findAbsoluteBestModAttempt(attempts); best != nil {
+					return &SearchResult{Modifier: best.mod, VMafScore: best.score, Iterations: s.testCount, BestEffort: true}, nil
+				}
 				return nil, nil
 			}
 
@@ -467,6 +498,10 @@ func interpolatedSearchBitrate(s *sampleScorer, qRange QualityRange, threshold f
 						VMafScore:  upperBound.score,
 						Iterations: s.testCount,
 					}, nil
+				}
+				// Both adjacent points fail — use best-effort result
+				if best := findAbsoluteBestModAttempt(attempts); best != nil {
+					return &SearchResult{Modifier: best.mod, VMafScore: best.score, Iterations: s.testCount, BestEffort: true}, nil
 				}
 				return nil, nil
 			}
@@ -500,6 +535,10 @@ func interpolatedSearchBitrate(s *sampleScorer, qRange QualityRange, threshold f
 					Iterations: s.testCount,
 				}, nil
 			}
+			// No threshold-meeting result — use best-effort
+			if absBest := findAbsoluteBestModAttempt(attempts); absBest != nil {
+				return &SearchResult{Modifier: absBest.mod, VMafScore: absBest.score, Iterations: s.testCount, BestEffort: true}, nil
+			}
 			return nil, nil
 		}
 	}
@@ -511,6 +550,10 @@ func interpolatedSearchBitrate(s *sampleScorer, qRange QualityRange, threshold f
 			VMafScore:  best.score,
 			Iterations: s.testCount,
 		}, nil
+	}
+	// No threshold-meeting result — use best-effort
+	if absBest := findAbsoluteBestModAttempt(attempts); absBest != nil {
+		return &SearchResult{Modifier: absBest.mod, VMafScore: absBest.score, Iterations: s.testCount, BestEffort: true}, nil
 	}
 	return nil, nil
 }
@@ -555,6 +598,19 @@ func findBestModAttempt(attempts []modAttempt, threshold float64) *modAttempt {
 	for i := range attempts {
 		a := &attempts[i]
 		if a.score >= threshold && (best == nil || a.mod < best.mod) {
+			best = a
+		}
+	}
+	return best
+}
+
+// findAbsoluteBestModAttempt returns the attempt with highest VMAF score regardless of threshold.
+// Ties broken by preferring lower modifier (more compression → smaller file).
+func findAbsoluteBestModAttempt(attempts []modAttempt) *modAttempt {
+	var best *modAttempt
+	for i := range attempts {
+		a := &attempts[i]
+		if best == nil || a.score > best.score || (a.score == best.score && a.mod < best.mod) {
 			best = a
 		}
 	}

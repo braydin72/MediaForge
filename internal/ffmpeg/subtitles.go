@@ -74,6 +74,49 @@ func FilterMP4Compatible(streams []SubtitleStream) (compatibleIndices []int, dro
 	return compatibleIndices, droppedCodecs
 }
 
+// isMovText returns true if the codec is the MP4-native text subtitle format
+// that requires conversion to subrip (srt) when muxing into MKV.
+func isMovText(codecName string) bool {
+	return strings.ToLower(strings.TrimSpace(codecName)) == "mov_text"
+}
+
+// FilterMKVSubtitles partitions subtitle streams into three groups:
+//   - copyIndices: streams that can be muxed into MKV with -c:s copy
+//   - convertIndices: mov_text streams that must be converted to subrip (-c:s srt)
+//   - droppedCodecs: unique codec names of streams that cannot be included at all
+//
+// mov_text is losslessly convertible to subrip (same content, MKV-compatible container).
+//
+// IMPORTANT: Return value semantics match FilterMKVCompatible:
+//   - nil input → nil, nil, nil (no subtitle streams exist)
+//   - non-nil input → non-nil copyIndices (possibly empty) even if all streams are dropped
+func FilterMKVSubtitles(streams []SubtitleStream) (copyIndices []int, convertIndices []int, droppedCodecs []string) {
+	if streams == nil {
+		return nil, nil, nil
+	}
+
+	copyIndices = make([]int, 0, len(streams))
+	convertIndices = make([]int, 0)
+	seenDropped := make(map[string]bool)
+
+	for _, s := range streams {
+		if IsMKVCompatible(s.CodecName) {
+			copyIndices = append(copyIndices, s.Index)
+			continue
+		}
+		if isMovText(s.CodecName) {
+			convertIndices = append(convertIndices, s.Index)
+			continue
+		}
+		norm := strings.ToLower(strings.TrimSpace(s.CodecName))
+		if !seenDropped[norm] {
+			seenDropped[norm] = true
+			droppedCodecs = append(droppedCodecs, s.CodecName)
+		}
+	}
+	return copyIndices, convertIndices, droppedCodecs
+}
+
 // FilterMKVCompatible partitions subtitle streams into compatible and incompatible.
 // Returns indices of compatible streams (for -map 0:N arguments) and unique codec names
 // of dropped streams (for logging warnings to the user, de-duplicated to avoid log spam).
