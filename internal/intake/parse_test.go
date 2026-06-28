@@ -192,6 +192,36 @@ func TestParseFilename(t *testing.T) {
 			wantE:     12,
 			wantType:  "tv",
 		},
+		{
+			name:      "TV with year in parentheses",
+			input:     "Smallville (2001) S01E01.mkv",
+			wantTitle: "Smallville",
+			wantYear:  2001,
+			wantIsTV:  true,
+			wantS:     1,
+			wantE:     1,
+			wantType:  "tv",
+		},
+		{
+			name:      "TV with ampersand and year in parentheses",
+			input:     "Mike & Molly (2010) S01E03.mkv",
+			wantTitle: "Mike & Molly",
+			wantYear:  2010,
+			wantIsTV:  true,
+			wantS:     1,
+			wantE:     3,
+			wantType:  "tv",
+		},
+		{
+			name:      "TV with year dot-separated",
+			input:     "Smallville.2001.S01E01.mkv",
+			wantTitle: "Smallville",
+			wantYear:  2001,
+			wantIsTV:  true,
+			wantS:     1,
+			wantE:     1,
+			wantType:  "tv",
+		},
 	}
 
 	for _, tt := range tests {

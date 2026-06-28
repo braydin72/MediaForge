@@ -82,7 +82,9 @@ func ParseFilename(filename string) ParsedFilename {
 	//    compact tokens like "S01E01" are not split by dot-normalization.
 	if titleEnd := detectTVPattern(work, &result); titleEnd >= 0 {
 		result.MediaType = "tv"
-		result.Title = normalizeTitle(work[:titleEnd])
+		title, year := stripYearSuffix(normalizeTitle(work[:titleEnd]))
+		result.Title = title
+		result.Year = year
 		return result
 	}
 
@@ -197,4 +199,19 @@ func cleanTitle(tokens []string) string {
 func mustAtoi(s string) int {
 	n, _ := strconv.Atoi(s)
 	return n
+}
+
+// stripYearSuffix removes a trailing year token ("(YYYY)" or bare "YYYY") from
+// s, returning the cleaned title and the year. Requires at least one non-year
+// token to remain so a title like "1984" is never stripped to empty. If no
+// year suffix is found, s is returned unchanged with year 0.
+func stripYearSuffix(s string) (string, int) {
+	tokens := strings.Fields(s)
+	if len(tokens) < 2 {
+		return s, 0
+	}
+	if y, ok := parseYearToken(tokens[len(tokens)-1]); ok {
+		return strings.Join(tokens[:len(tokens)-1], " "), y
+	}
+	return s, 0
 }
