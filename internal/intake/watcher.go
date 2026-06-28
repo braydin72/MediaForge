@@ -125,28 +125,24 @@ func (w *Watcher) Stop() {
 	close(w.stopCh)
 }
 
-// scan reads the top-level contents of the watch folder and spawns a pipeline
-// goroutine for each newly discovered video file.
+// scan recursively walks the watch folder and spawns a pipeline goroutine for
+// each newly discovered video file, regardless of subdirectory depth.
 func (w *Watcher) scan(ctx context.Context) {
-	entries, err := os.ReadDir(w.cfg.WatchFolder)
-	if err != nil {
-		if os.IsNotExist(err) {
-			logger.Warn("Intake: watch folder does not exist", "folder", w.cfg.WatchFolder)
-		} else {
-			logger.Warn("Intake: scan error", "folder", w.cfg.WatchFolder, "error", err)
+	err := filepath.WalkDir(w.cfg.WatchFolder, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) && path == w.cfg.WatchFolder {
+				logger.Warn("Intake: watch folder does not exist", "folder", w.cfg.WatchFolder)
+				return filepath.SkipAll
+			}
+			logger.Warn("Intake: scan error", "path", path, "error", err)
+			return nil
 		}
-		return
-	}
-
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
+		if d.IsDir() {
+			return nil
 		}
-		if !ffmpeg.IsVideoFile(e.Name()) {
-			continue
+		if !ffmpeg.IsVideoFile(d.Name()) {
+			return nil
 		}
-
-		path := filepath.Join(w.cfg.WatchFolder, e.Name())
 
 		w.mu.Lock()
 		_, seen := w.known[path]
@@ -155,11 +151,13 @@ func (w *Watcher) scan(ctx context.Context) {
 		}
 		w.mu.Unlock()
 
-		if seen {
-			continue
+		if !seen {
+			go w.process(ctx, path)
 		}
-
-		go w.process(ctx, path)
+		return nil
+	})
+	if err != nil {
+		logger.Warn("Intake: walk error", "folder", w.cfg.WatchFolder, "error", err)
 	}
 }
 
