@@ -410,6 +410,15 @@ func (w *Watcher) moveHEVCToLibrary(ctx context.Context, path string, probe *ffm
 		return
 	}
 
+	// Check for a pre-existing file at the destination before moving.
+	dupRes := checkDuplicate(ctx, w.prober, path, libraryPath, probe)
+	if dupRes.decision == dupSendReview {
+		logger.Warn("Intake: HEVC duplicate at destination, queuing for review",
+			"file", filename, "destination", libraryPath)
+		w.sendDuplicateToReviewQueue(path, dupRes.reason, probe, dupRes.ctx)
+		return
+	}
+
 	logger.Info("Intake: HEVC moving to library", "file", filename, "destination", libraryPath)
 	if err := util.SafeMove(path, libraryPath); err != nil {
 		reason := fmt.Sprintf("library move failed: %v", err)
@@ -500,6 +509,38 @@ func (w *Watcher) sendToReviewQueue(path, reason string, probe *ffmpeg.ProbeResu
 		logger.Error("Intake: failed to save review queue entry", "file", entry.Filename, "error", err)
 	} else {
 		logger.Info("Intake: added to review queue", "file", entry.Filename, "reason", reason)
+		if w.OnReviewQueueAdd != nil {
+			w.OnReviewQueueAdd(entry.Filename, reason)
+		}
+	}
+}
+
+// sendDuplicateToReviewQueue is like sendToReviewQueue but also persists a
+// DuplicateContext so the UI can show incoming/existing file details and offer
+// Replace or Keep Existing actions.
+func (w *Watcher) sendDuplicateToReviewQueue(path, reason string, probe *ffmpeg.ProbeResult, dupCtx *DuplicateContext) {
+	var ffprobeJSON string
+	if probe != nil {
+		if b, err := json.Marshal(probe); err == nil {
+			ffprobeJSON = string(b)
+		}
+	}
+
+	entry := store.ReviewEntry{
+		ID:            uuid.New().String(),
+		OriginalPath:  path,
+		Filename:      filepath.Base(path),
+		Reason:        reason,
+		FFProbeInfo:   ffprobeJSON,
+		DuplicateInfo: marshalDuplicateContext(dupCtx),
+		Status:        "pending",
+		CreatedAt:     time.Now().UTC(),
+	}
+
+	if err := w.st.AddToReviewQueue(&entry); err != nil {
+		logger.Error("Intake: failed to save duplicate review queue entry", "file", entry.Filename, "error", err)
+	} else {
+		logger.Info("Intake: duplicate added to review queue", "file", entry.Filename, "reason", reason)
 		if w.OnReviewQueueAdd != nil {
 			w.OnReviewQueueAdd(entry.Filename, reason)
 		}

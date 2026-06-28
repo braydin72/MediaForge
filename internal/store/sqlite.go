@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 9
+const schemaVersion = 10
 
 const schema = `
 CREATE TABLE IF NOT EXISTS jobs (
@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS review_queue (
 	filename TEXT NOT NULL,
 	reason TEXT NOT NULL,
 	ffprobe_info TEXT,
+	duplicate_info TEXT,
 	status TEXT NOT NULL DEFAULT 'pending',
 	created_at TEXT NOT NULL
 );
@@ -127,13 +128,14 @@ const (
 
 // ReviewEntry is a single item in the Review Queue.
 type ReviewEntry struct {
-	ID           string    `json:"id"`
-	OriginalPath string    `json:"original_path"`
-	Filename     string    `json:"filename"`
-	Reason       string    `json:"reason"`
-	FFProbeInfo  string    `json:"ffprobe_info"` // JSON blob from ffprobe
-	Status       string    `json:"status"`       // "pending" | "resolved" | "discarded"
-	CreatedAt    time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	OriginalPath  string    `json:"original_path"`
+	Filename      string    `json:"filename"`
+	Reason        string    `json:"reason"`
+	FFProbeInfo   string    `json:"ffprobe_info"`   // JSON blob from ffprobe
+	DuplicateInfo string    `json:"duplicate_info"` // JSON blob for duplicate conflicts
+	Status        string    `json:"status"`         // "pending" | "resolved" | "discarded"
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // jobColumns lists all job table columns for INSERT statements.
@@ -376,6 +378,30 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 			if err != nil {
 				db.Close()
 				return nil, fmt.Errorf("migration v8->v9 failed: %w", err)
+			}
+		}
+		if version < 10 {
+			// Migrate v9 -> v10: Add duplicate_info to review_queue.
+			// Guard against the column already existing when a fresh DB was initialized
+			// from the current schema constant (which includes the column) before reaching
+			// this migration path.
+			var dupInfoExists bool
+			if pragmaRows, pragmaErr := db.Query(`PRAGMA table_info(review_queue)`); pragmaErr == nil {
+				for pragmaRows.Next() {
+					var cid int
+					var colName, colType string
+					var notNull, dfltValue, pk interface{}
+					if scanErr := pragmaRows.Scan(&cid, &colName, &colType, &notNull, &dfltValue, &pk); scanErr == nil && colName == "duplicate_info" {
+						dupInfoExists = true
+					}
+				}
+				pragmaRows.Close()
+			}
+			if !dupInfoExists {
+				if _, err := db.Exec(`ALTER TABLE review_queue ADD COLUMN duplicate_info TEXT`); err != nil {
+					db.Close()
+					return nil, fmt.Errorf("migration v9->v10 failed: %w", err)
+				}
 			}
 		}
 		// Update version
@@ -716,10 +742,10 @@ func (s *SQLiteStore) AddToReviewQueue(e *ReviewEntry) error {
 	}
 
 	_, err = s.db.Exec(
-		`INSERT INTO review_queue (id, original_path, filename, reason, ffprobe_info, status, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO review_queue (id, original_path, filename, reason, ffprobe_info, duplicate_info, status, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID, e.OriginalPath, e.Filename, e.Reason,
-		nullString(e.FFProbeInfo), e.Status, formatTime(e.CreatedAt),
+		nullString(e.FFProbeInfo), nullString(e.DuplicateInfo), e.Status, formatTime(e.CreatedAt),
 	)
 	return err
 }
@@ -732,9 +758,9 @@ func (s *SQLiteStore) GetReviewEntry(id string) (*ReviewEntry, error) {
 	var e ReviewEntry
 	var createdAt string
 	err := s.db.QueryRow(
-		`SELECT id, original_path, filename, reason, COALESCE(ffprobe_info,''), status, created_at
+		`SELECT id, original_path, filename, reason, COALESCE(ffprobe_info,''), COALESCE(duplicate_info,''), status, created_at
 		 FROM review_queue WHERE id = ?`, id,
-	).Scan(&e.ID, &e.OriginalPath, &e.Filename, &e.Reason, &e.FFProbeInfo, &e.Status, &createdAt)
+	).Scan(&e.ID, &e.OriginalPath, &e.Filename, &e.Reason, &e.FFProbeInfo, &e.DuplicateInfo, &e.Status, &createdAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -751,7 +777,7 @@ func (s *SQLiteStore) GetReviewQueue() ([]ReviewEntry, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(
-		`SELECT id, original_path, filename, reason, COALESCE(ffprobe_info,''), status, created_at
+		`SELECT id, original_path, filename, reason, COALESCE(ffprobe_info,''), COALESCE(duplicate_info,''), status, created_at
 		 FROM review_queue ORDER BY created_at DESC`,
 	)
 	if err != nil {
@@ -763,7 +789,7 @@ func (s *SQLiteStore) GetReviewQueue() ([]ReviewEntry, error) {
 	for rows.Next() {
 		var e ReviewEntry
 		var createdAt string
-		if err := rows.Scan(&e.ID, &e.OriginalPath, &e.Filename, &e.Reason, &e.FFProbeInfo, &e.Status, &createdAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.OriginalPath, &e.Filename, &e.Reason, &e.FFProbeInfo, &e.DuplicateInfo, &e.Status, &createdAt); err != nil {
 			return nil, err
 		}
 		e.CreatedAt = parseTime(createdAt)

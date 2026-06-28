@@ -23,6 +23,7 @@ import (
 	"github.com/braydin72/mediaforge/internal/notify"
 	"github.com/braydin72/mediaforge/internal/pushover"
 	"github.com/braydin72/mediaforge/internal/store"
+	"github.com/braydin72/mediaforge/internal/util"
 )
 
 // StatsStore defines the interface for stats-related store operations.
@@ -1041,6 +1042,58 @@ func (h *Handler) DiscardReviewEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "discarded"})
+}
+
+// ReplaceReviewEntry handles PUT /api/review/{id}/replace
+// Moves the incoming file to the destination path, overwriting the existing file,
+// then removes the review queue entry. Only valid for duplicate conflict entries.
+func (h *Handler) ReplaceReviewEntry(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "entry ID required")
+		return
+	}
+	if h.reviewStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "review store not configured")
+		return
+	}
+
+	entry, err := h.reviewStore.GetReviewEntry(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if entry == nil {
+		writeError(w, http.StatusNotFound, "review entry not found")
+		return
+	}
+	if entry.DuplicateInfo == "" {
+		writeError(w, http.StatusBadRequest, "entry is not a duplicate conflict")
+		return
+	}
+
+	var dupCtx intake.DuplicateContext
+	if err := json.Unmarshal([]byte(entry.DuplicateInfo), &dupCtx); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to parse duplicate info")
+		return
+	}
+	if dupCtx.Incoming.Path == "" || dupCtx.Existing.Path == "" {
+		writeError(w, http.StatusBadRequest, "duplicate info is incomplete")
+		return
+	}
+
+	if err := util.SafeMove(dupCtx.Incoming.Path, dupCtx.Existing.Path); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("replace failed: %v", err))
+		return
+	}
+
+	if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	logger.Info("Review: replaced existing file with incoming", "dest", dupCtx.Existing.Path)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "replaced"})
 }
 
 // ResubmitReviewEntry handles PUT /api/review/{id}/resubmit
