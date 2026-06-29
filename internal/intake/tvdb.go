@@ -68,12 +68,15 @@ func NewTVDBClient(apiKey string, httpClient *http.Client) *TVDBClient {
 }
 
 // Lookup searches TVDB for the show, season, and episode encoded in parsed.
-// parsed.Year is used for confidence scoring when non-zero.
+// The search query is the show name only — year is never sent to the API because
+// the year in a TV filename is the episode/season year, not the series premiere year.
+// parsed.Year is used only as a secondary confidence signal after candidates are returned.
 //
 // Confidence scoring:
 //   - 0.50 base for any series match
 //   - +0.30 for exact (case-insensitive) name match, +0.10 for partial match
-//   - +0.10 when parsed.Year matches the series first aired year
+//   - +0.10 when parsed.Year is non-zero and the series premiere year <= parsed.Year
+//     (the series existed when this episode aired; exact premiere year is not required)
 //   - +0.10 when the requested episode is found; -0.10 when not found
 func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBResult, error) {
 	if c.apiKey == "" {
@@ -263,7 +266,10 @@ func selectBestSeries(candidates []tvdbSearchResult, parsed *ParsedFilename) (tv
 			score += 0.10
 		}
 
-		if parsed.Year > 0 && s.parsedYear() == parsed.Year {
+		// Award the year bonus when the series premiere year <= the filename year.
+		// The year in a TV filename is the episode/season year, not the premiere year,
+		// so an exact match is not expected — we only need the series to have existed.
+		if seriesYear := s.parsedYear(); parsed.Year > 0 && seriesYear > 0 && seriesYear <= parsed.Year {
 			score += 0.10
 		}
 
