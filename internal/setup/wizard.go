@@ -3,6 +3,7 @@ package setup
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -35,6 +36,12 @@ func IsFirstRun(cfgFileExisted bool, cfg *config.Config) bool {
 		return true
 	}
 	return false
+}
+
+// isDocker reports whether the process is running inside a Docker container.
+func isDocker() bool {
+	_, err := os.Stat("/.dockerenv")
+	return err == nil
 }
 
 // WizardHandler wraps an existing http.Handler, intercepting all non-API
@@ -83,6 +90,16 @@ func (w *WizardHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Environment context endpoint (GET /api/setup/env)
+	if r.URL.Path == "/api/setup/env" {
+		if r.Method == http.MethodGet {
+			w.handleSetupEnv(rw, r)
+		} else {
+			http.Error(rw, "method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
 	// After wizard completion, all traffic goes to the main handler.
 	if w.complete.Load() {
 		w.main.ServeHTTP(rw, r)
@@ -105,6 +122,13 @@ func (w *WizardHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	// Redirect everything else (including /) to /setup.
 	http.Redirect(rw, r, "/setup", http.StatusTemporaryRedirect)
+}
+
+// handleSetupEnv returns runtime context used by the wizard frontend.
+// Currently reports whether the server is running inside Docker.
+func (w *WizardHandler) handleSetupEnv(rw http.ResponseWriter, r *http.Request) {
+	rw.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(rw).Encode(map[string]bool{"docker": isDocker()}) //nolint:errcheck
 }
 
 // handleDetectTool runs `where` (Windows) or `which` (Unix) to find ffprobe or ffmpeg.
@@ -272,6 +296,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 .btn-secondary{background:#2d3250;color:#e2e8f0}
 .btn-secondary:hover:not(:disabled){background:#374170}
 .err-banner{display:none;background:#450a0a;border:1px solid #7f1d1d;border-radius:8px;padding:12px 16px;font-size:13px;color:#fca5a5;margin-bottom:20px}
+.docker-notice{display:none;background:#0c1a2e;border:1px solid #1e3a5f;border-radius:8px;padding:12px 16px;font-size:13px;color:#7dd3fc;margin-bottom:20px}
 #success{display:none;text-align:center;padding:20px 0}
 #success .icon{font-size:48px;color:#4ade80;margin-bottom:16px}
 #success h2{font-size:22px;color:#4ade80;margin-bottom:8px}
@@ -285,20 +310,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
     <p>First-Run Setup</p>
   </div>
 
-  <div class="bars">
-    <div class="bar active" id="b1"></div>
-    <div class="bar" id="b2"></div>
-    <div class="bar" id="b3"></div>
-    <div class="bar" id="b4"></div>
-  </div>
-  <div class="step-label" id="lbl">
-    <strong>Step 1 of 4: Folders</strong>
-    Configure where MediaForge watches for new files and stores your library.
-  </div>
+  <div class="bars" id="bars"></div>
+  <div class="step-label" id="lbl"></div>
 
+  <div class="docker-notice" id="docker-notice">
+    Running inside Docker &mdash; folder paths and tool names have been pre-configured with container defaults (/incoming, /media/Movies, /media/TV Shows). Enter your API keys to continue.
+  </div>
   <div class="err-banner" id="banner"></div>
 
-  <div id="s1">
+  <div id="s1" style="display:none">
     <div class="field">
       <label>Watch Folder <span class="req">*</span></label>
       <input type="text" id="watch_folder" placeholder="C:\Incoming  or  /incoming">
@@ -421,28 +441,55 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
   </div>
 </div>
 <script>
-var step=1,total=4;
-var labels=['Folders','Tool Paths','API Keys','AI Verification'];
-var descs=[
-  'Configure where MediaForge watches for new files and stores your library.',
-  'Set paths to ffprobe and ffmpeg. Use Detect to find them automatically.',
-  'API keys are used to identify movies and TV shows by title and year.',
-  'Optionally configure an AI backend to verify ambiguous metadata matches.'
+var cur=0,steps=[],dockerMode=false;
+var allSteps=[
+  {div:'s1',label:'Folders',desc:'Configure where MediaForge watches for new files and stores your library.'},
+  {div:'s2',label:'Tool Paths',desc:'Set paths to ffprobe and ffmpeg. Use Detect to find them automatically.'},
+  {div:'s3',label:'API Keys',desc:'API keys are used to identify movies and TV shows by title and year.'},
+  {div:'s4',label:'AI Verification',desc:'Optionally configure an AI backend to verify ambiguous metadata matches.'}
 ];
+var dockerDefaults={
+  watch_folder:'/incoming',
+  staging_folder:'/staging',
+  movies_library:'/media/Movies',
+  tvshows_library:'/media/TV Shows',
+  media_path:'/media',
+  temp_path:'/staging/tmp',
+  ffprobe_path:'ffprobe',
+  ffmpeg_path:'ffmpeg'
+};
 
 function g(id){return document.getElementById(id);}
 function v(id){return g(id).value.trim();}
 function show(id){g(id).style.display='';}
 function hide(id){g(id).style.display='none';}
 
-function updateUI(){
-  for(var i=1;i<=total;i++){
-    var b=g('b'+i);
-    b.className='bar'+(i<step?' done':i===step?' active':'');
+function init(docker){
+  dockerMode=docker;
+  steps=docker?allSteps.slice(2):allSteps;
+  if(docker){
+    for(var k in dockerDefaults){var el=g(k);if(el)el.value=dockerDefaults[k];}
+    show('docker-notice');
   }
-  g('lbl').innerHTML='<strong>Step '+step+' of '+total+': '+labels[step-1]+'</strong>'+descs[step-1];
-  step>1?show('btn-back'):hide('btn-back');
-  g('btn-next').textContent=step===total?'Finish':'Next';
+  var barsEl=g('bars');barsEl.innerHTML='';
+  for(var i=0;i<steps.length;i++){
+    var b=document.createElement('div');
+    b.className='bar'+(i===0?' active':'');
+    b.id='b'+i;
+    barsEl.appendChild(b);
+  }
+  show(steps[0].div);
+  updateUI();
+}
+
+function updateUI(){
+  for(var i=0;i<steps.length;i++){
+    var b=g('b'+i);
+    if(b)b.className='bar'+(i<cur?' done':i===cur?' active':'');
+  }
+  g('lbl').innerHTML='<strong>Step '+(cur+1)+' of '+steps.length+': '+steps[cur].label+'</strong>'+steps[cur].desc;
+  cur>0?show('btn-back'):hide('btn-back');
+  g('btn-next').textContent=cur===steps.length-1?'Finish':'Next';
 }
 
 function onLLM(){
@@ -464,7 +511,7 @@ function detect(tool){
       if(data.path){
         g(inputId).value=data.path;
         g(inputId).className=g(inputId).className.replace(/ *error/g,'');
-      } else {
+      }else{
         g(errId).textContent=(data.error||tool+' not found in PATH');
         g(errId).style.display='';
       }
@@ -489,17 +536,16 @@ function clrErr(id){
 
 function validate(){
   var ok=true;
-  if(step===1){
+  var div=steps[cur].div;
+  if(div==='s1'){
     ['watch_folder','movies_library','tvshows_library'].forEach(function(id){
       if(!v(id)){setErr(id);ok=false;}else clrErr(id);
     });
-  }else if(step===2){
-    // Tool paths are optional — no validation required
-  }else if(step===3){
+  }else if(div==='s3'){
     ['tmdb_key','tvdb_key'].forEach(function(id){
       if(!v(id)){setErr(id);ok=false;}else clrErr(id);
     });
-  }else if(step===4){
+  }else if(div==='s4'){
     var b=v('llm_backend');
     if((b==='anthropic'||b==='openai')&&!v('llm_api_key')){setErr('llm_api_key');ok=false;}
     else clrErr('llm_api_key');
@@ -509,15 +555,15 @@ function validate(){
 
 function next(){
   if(!validate())return;
-  if(step<total){
-    hide('s'+step);step++;show('s'+step);updateUI();
+  if(cur<steps.length-1){
+    hide(steps[cur].div);cur++;show(steps[cur].div);updateUI();
   }else{
     submit();
   }
 }
 
 function back(){
-  if(step>1){hide('s'+step);step--;show('s'+step);updateUI();}
+  if(cur>0){hide(steps[cur].div);cur--;show(steps[cur].div);updateUI();}
 }
 
 function submit(){
@@ -544,8 +590,8 @@ function submit(){
   fetch('/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
     .then(function(r){if(!r.ok)return r.text().then(function(t){throw new Error(t);});return r.json();})
     .then(function(){
-      hide('s4');hide('actions');show('success');
-      for(var i=1;i<=total;i++)g('b'+i).className='bar done';
+      hide(steps[cur].div);hide('actions');show('success');
+      for(var i=0;i<steps.length;i++)g('b'+i).className='bar done';
       setTimeout(function(){window.location.href='/';},2000);
     })
     .catch(function(e){
@@ -553,6 +599,11 @@ function submit(){
       banner.textContent='Setup failed: '+e.message;banner.style.display='';
     });
 }
+
+fetch('/api/setup/env')
+  .then(function(r){return r.json();})
+  .then(function(data){init(!!data.docker);})
+  .catch(function(){init(false);});
 </script>
 </body>
 </html>`

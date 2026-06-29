@@ -1,6 +1,9 @@
 package setup_test
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/braydin72/mediaforge/internal/config"
@@ -127,5 +130,34 @@ func TestIsFirstRun(t *testing.T) {
 				t.Errorf("IsFirstRun(%v, cfg) = %v, want %v", tc.cfgFileExisted, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSetupEnvEndpoint(t *testing.T) {
+	h := setup.NewWizardHandler(http.NotFoundHandler(), "", &config.Config{})
+	req := httptest.NewRequest(http.MethodGet, "/api/setup/env", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /api/setup/env: want 200, got %d", rr.Code)
+	}
+	var body map[string]bool
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if _, ok := body["docker"]; !ok {
+		t.Error("response missing 'docker' field")
+	}
+}
+
+func TestSetupEnvEndpoint_MethodNotAllowed(t *testing.T) {
+	h := setup.NewWizardHandler(http.NotFoundHandler(), "", &config.Config{})
+	req := httptest.NewRequest(http.MethodPost, "/api/setup/env", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST /api/setup/env: want 405, got %d", rr.Code)
 	}
 }
