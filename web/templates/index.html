@@ -2690,9 +2690,12 @@
                                 <select class="setting-select" id="setting-intake-stability-passes"
                                         onchange="updateSetting('intake_stability_passes', parseInt(this.value))">
                                     <option value="2">2</option>
-                                    <option value="3">3 (default)</option>
+                                    <option value="3">3</option>
                                     <option value="4">4</option>
                                     <option value="5">5</option>
+                                    <option value="6">6 (default)</option>
+                                    <option value="8">8</option>
+                                    <option value="10">10</option>
                                 </select>
                             </div>
                         </div>
@@ -4919,7 +4922,7 @@
                 document.getElementById('setting-intake-library-movies').value = config.intake_library_movies || '/media/Movies';
                 document.getElementById('setting-intake-library-tv').value = config.intake_library_tv_shows || '/media/TV Shows';
                 document.getElementById('setting-intake-stability-interval').value = config.intake_stability_interval || 5;
-                document.getElementById('setting-intake-stability-passes').value = config.intake_stability_passes || 3;
+                document.getElementById('setting-intake-stability-passes').value = config.intake_stability_passes || 6;
                 document.getElementById('setting-intake-confidence').value = config.intake_confidence_threshold ?? 0.85;
                 document.getElementById('setting-intake-review').value = config.intake_review_threshold ?? 0.60;
 
