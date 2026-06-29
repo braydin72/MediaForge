@@ -6,15 +6,16 @@ import (
 
 func TestParseFilename(t *testing.T) {
 	tests := []struct {
-		name      string
-		input     string
-		wantTitle string
-		wantYear  int
-		wantIsTV  bool
-		wantS     int
-		wantE     int
-		wantE2    int
-		wantType  string
+		name             string
+		input            string
+		wantTitle        string
+		wantYear         int
+		wantIsTV         bool
+		wantS            int
+		wantE            int
+		wantE2           int
+		wantType         string
+		wantEpisodeTitle string
 	}{
 		// --- Movies ---
 		{
@@ -175,13 +176,14 @@ func TestParseFilename(t *testing.T) {
 			wantType:  "tv",
 		},
 		{
-			name:      "TV with fansub bracket group stripped",
-			input:     "[SubGroup] Anime Show - S01E05 - Episode Title [1080p].mkv",
-			wantTitle: "Anime Show",
-			wantIsTV:  true,
-			wantS:     1,
-			wantE:     5,
-			wantType:  "tv",
+			name:             "TV with fansub bracket group stripped",
+			input:            "[SubGroup] Anime Show - S01E05 - Episode Title [1080p].mkv",
+			wantTitle:        "Anime Show",
+			wantIsTV:         true,
+			wantS:            1,
+			wantE:            5,
+			wantType:         "tv",
+			wantEpisodeTitle: "Episode Title",
 		},
 		{
 			name:      "TV single-digit season",
@@ -222,6 +224,47 @@ func TestParseFilename(t *testing.T) {
 			wantE:     1,
 			wantType:  "tv",
 		},
+		// Episode title extraction from Plex/Jellyfin-style "Show - SxxExx - Title"
+		{
+			name:             "TV Plex-style with year and episode title",
+			input:            "The Walking Dead (2015) - S06E04 - Here's Not Here.mp4",
+			wantTitle:        "The Walking Dead",
+			wantYear:         2015,
+			wantIsTV:         true,
+			wantS:            6,
+			wantE:            4,
+			wantType:         "tv",
+			wantEpisodeTitle: "Here's Not Here",
+		},
+		{
+			name:             "TV Plex-style premiere year in filename",
+			input:            "The Walking Dead (2010) - S06E04 - Here's Not Here.mp4",
+			wantTitle:        "The Walking Dead",
+			wantYear:         2010,
+			wantIsTV:         true,
+			wantS:            6,
+			wantE:            4,
+			wantType:         "tv",
+			wantEpisodeTitle: "Here's Not Here",
+		},
+		{
+			name:      "TV partial name no year no episode title",
+			input:     "Walking Dead - S06E04.mp4",
+			wantTitle: "Walking Dead",
+			wantIsTV:  true,
+			wantS:     6,
+			wantE:     4,
+			wantType:  "tv",
+		},
+		{
+			name:      "TV scene-tagged — no episode title extracted",
+			input:     "Breaking.Bad.S05E14.1080p.BluRay.x264.mkv",
+			wantTitle: "Breaking Bad",
+			wantIsTV:  true,
+			wantS:     5,
+			wantE:     14,
+			wantType:  "tv",
+		},
 	}
 
 	for _, tt := range tests {
@@ -248,6 +291,9 @@ func TestParseFilename(t *testing.T) {
 			}
 			if got.MediaType != tt.wantType {
 				t.Errorf("MediaType = %q, want %q", got.MediaType, tt.wantType)
+			}
+			if got.ParsedEpisodeTitle != tt.wantEpisodeTitle {
+				t.Errorf("ParsedEpisodeTitle = %q, want %q", got.ParsedEpisodeTitle, tt.wantEpisodeTitle)
 			}
 			// Raw is always the stem without extension.
 			if got.Raw == "" {

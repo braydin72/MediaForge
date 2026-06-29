@@ -9,15 +9,16 @@ import (
 
 // ParsedFilename holds the result of parsing a media filename.
 type ParsedFilename struct {
-	Raw          string // filename stem without extension
-	Title        string // cleaned title guess
-	Year         int    // 0 if not found
-	IsTV         bool
-	Season       int    // 0 if not TV
-	Episode      int    // 0 if not TV
-	Episode2     int    // second episode for multi-episode files (S01E01E02); 0 if single
-	MediaType    string // "movie" | "tv"
-	EpisodeTitle string // confirmed episode title from metadata lookup; empty if not yet resolved
+	Raw                string // filename stem without extension
+	Title              string // cleaned title guess
+	Year               int    // 0 if not found
+	IsTV               bool
+	Season             int    // 0 if not TV
+	Episode            int    // 0 if not TV
+	Episode2           int    // second episode for multi-episode files (S01E01E02); 0 if single
+	MediaType          string // "movie" | "tv"
+	ParsedEpisodeTitle string // episode title found in the filename (e.g. "Here's Not Here"); empty if absent
+	EpisodeTitle       string // confirmed episode title from metadata lookup; empty if not yet resolved
 }
 
 // Compiled regexes are package-level to avoid recompilation on every call.
@@ -147,6 +148,14 @@ func detectTVPattern(s string, r *ParsedFilename) int {
 		r.Episode = mustAtoi(s[m[4]:m[5]])
 		if p.multi {
 			r.Episode2 = mustAtoi(s[m[6]:m[7]])
+		}
+		// Extract episode title when the filename uses "SxxExx - Episode Title" style.
+		// Scene-tagged filenames ("S05E14.1080p.BluRay") have no " - " separator here.
+		after := strings.TrimLeft(s[m[1]:], " ")
+		if strings.HasPrefix(after, "- ") {
+			if t := strings.TrimSpace(normalizeTitle(after[2:])); t != "" {
+				r.ParsedEpisodeTitle = t
+			}
 		}
 		return m[0]
 	}

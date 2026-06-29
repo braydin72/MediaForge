@@ -67,6 +67,20 @@ var (
 			},
 		},
 	}
+
+	twdSearchBody = map[string]interface{}{
+		"data": []map[string]interface{}{
+			{"tvdb_id": "153021", "name": "The Walking Dead", "year": "2010", "network": "AMC"},
+		},
+	}
+
+	twdS6E4Body = map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 5652985, "name": "Here's Not Here", "aired": "2015-10-25", "seasonNumber": 6, "number": 4},
+			},
+		},
+	}
 )
 
 func TestTVDBLookup_Success(t *testing.T) {
@@ -104,9 +118,9 @@ func TestTVDBLookup_Success(t *testing.T) {
 	if result.EpisodeAirDate != "2008-01-20" {
 		t.Errorf("EpisodeAirDate: want %q, got %q", "2008-01-20", result.EpisodeAirDate)
 	}
-	// exact match + year + episode: 0.50 + 0.30 + 0.10 + 0.10 = 1.00
-	if !approxEqual(result.Confidence, 1.00) {
-		t.Errorf("Confidence: want ~1.00, got %f", result.Confidence)
+	// exact name + episode found, no episode title in parsed filename → override 0.90
+	if !approxEqual(result.Confidence, 0.90) {
+		t.Errorf("Confidence: want ~0.90, got %f", result.Confidence)
 	}
 }
 
@@ -137,9 +151,9 @@ func TestTVDBLookup_SeriesFoundEpisodeNotFound(t *testing.T) {
 	if result.EpisodeTitle != "" {
 		t.Errorf("EpisodeTitle: want empty, got %q", result.EpisodeTitle)
 	}
-	// exact match + year, then -0.10 for missing episode: 0.50 + 0.30 + 0.10 - 0.10 = 0.80
-	if !approxEqual(result.Confidence, 0.80) {
-		t.Errorf("Confidence: want ~0.80, got %f", result.Confidence)
+	// exact name (0.40) + year match 2008==2008 (0.05), no episode found (0): 0.45
+	if !approxEqual(result.Confidence, 0.45) {
+		t.Errorf("Confidence: want ~0.45, got %f", result.Confidence)
 	}
 }
 
@@ -311,7 +325,8 @@ func TestSelectBestSeries_ExactMatchWins(t *testing.T) {
 	if best.TVDBIDStr != "2" {
 		t.Errorf("expected exact match to win, got %q", best.Name)
 	}
-	// exact + year: 0.50 + 0.30 + 0.10 = 0.90
+	// selectBestSeries uses the old additive formula for candidate selection only:
+	// exact (0.50+0.30) + year (0.10) = 0.90
 	if !approxEqual(score, 0.90) {
 		t.Errorf("score: want ~0.90, got %f", score)
 	}
@@ -352,6 +367,76 @@ func TestTVDBLookup_EpisodeSeasonQueryParam(t *testing.T) {
 	}
 	if result.EpisodeTitle != "Blood Money" {
 		t.Errorf("EpisodeTitle: want %q, got %q", "Blood Money", result.EpisodeTitle)
+	}
+}
+
+func twdMockClient() *TVDBClient {
+	return newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
+		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, twdSearchBody) },
+		"/v4/series": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, twdS6E4Body) },
+	}))
+}
+
+// TestTVDBLookup_TWD_EpisodeYearMatch: year in filename matches episode air year (2015).
+// All four components match → confidence 1.0.
+func TestTVDBLookup_TWD_EpisodeYearMatch(t *testing.T) {
+	parsed := &ParsedFilename{
+		Title:              "The Walking Dead",
+		Year:               2015,
+		IsTV:               true,
+		Season:             6,
+		Episode:            4,
+		ParsedEpisodeTitle: "Here's Not Here",
+	}
+
+	result, err := twdMockClient().Lookup(context.Background(), parsed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !approxEqual(result.Confidence, 1.0) {
+		t.Errorf("Confidence: want 1.0, got %f", result.Confidence)
+	}
+}
+
+// TestTVDBLookup_TWD_PremiereYearMatch: year in filename matches series premiere year (2010),
+// not the episode air year (2015). Year scoring checks EITHER, so this still scores 1.0.
+func TestTVDBLookup_TWD_PremiereYearMatch(t *testing.T) {
+	parsed := &ParsedFilename{
+		Title:              "The Walking Dead",
+		Year:               2010,
+		IsTV:               true,
+		Season:             6,
+		Episode:            4,
+		ParsedEpisodeTitle: "Here's Not Here",
+	}
+
+	result, err := twdMockClient().Lookup(context.Background(), parsed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !approxEqual(result.Confidence, 1.0) {
+		t.Errorf("Confidence: want 1.0, got %f (year mismatch must not drop a full name+episode+title match)", result.Confidence)
+	}
+}
+
+// TestTVDBLookup_TWD_NoYearNoTitle: "Walking Dead - S06E04.mp4" — partial name (substring
+// of "The Walking Dead"), no year, no episode title in filename → ~0.80.
+func TestTVDBLookup_TWD_NoYearNoTitle(t *testing.T) {
+	parsed := &ParsedFilename{
+		Title:   "Walking Dead",
+		Year:    0,
+		IsTV:    true,
+		Season:  6,
+		Episode: 4,
+	}
+
+	result, err := twdMockClient().Lookup(context.Background(), parsed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !approxEqual(result.Confidence, 0.80) {
+		t.Errorf("Confidence: want ~0.80, got %f", result.Confidence)
 	}
 }
 

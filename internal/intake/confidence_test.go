@@ -319,7 +319,7 @@ func TestOrchestrator_TVDBSuccessStopsChain(t *testing.T) {
 	if omdbCalls != 0 {
 		t.Errorf("OMDb should not be called when TVDB succeeds, called %d times", omdbCalls)
 	}
-	// exact + year + episode: 0.40 + 0.20 + 0.25 = 0.85
+	// ScoreTVDB: exact name + episode found, no title in filename → 0.90 override
 	if result.Confidence < 0.60 {
 		t.Errorf("confidence %f should be >= reviewThreshold 0.60", result.Confidence)
 	}

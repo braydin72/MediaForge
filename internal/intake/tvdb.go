@@ -24,6 +24,7 @@ type TVDBResult struct {
 	SeriesName     string
 	FirstAiredYear int
 	Network        string
+	EpisodeFound   bool
 	EpisodeTitle   string
 	EpisodeAirDate string
 	Confidence     float64
@@ -68,16 +69,17 @@ func NewTVDBClient(apiKey string, httpClient *http.Client) *TVDBClient {
 }
 
 // Lookup searches TVDB for the show, season, and episode encoded in parsed.
-// The search query is the show name only — year is never sent to the API because
-// the year in a TV filename is the episode/season year, not the series premiere year.
-// parsed.Year is used only as a secondary confidence signal after candidates are returned.
+// The search query is the show name only — year is never sent to the API.
 //
-// Confidence scoring:
-//   - 0.50 base for any series match
-//   - +0.30 for exact (case-insensitive) name match, +0.10 for partial match
-//   - +0.10 when parsed.Year is non-zero and the series premiere year <= parsed.Year
-//     (the series existed when this episode aired; exact premiere year is not required)
-//   - +0.10 when the requested episode is found; -0.10 when not found
+// Confidence is computed from four weighted components:
+//   - Show name match (fuzzy):             40%
+//   - Season + episode exact match:        40%
+//   - Episode title match (fuzzy):         15%  (0 when no title in filename)
+//   - Year match ±1, premiere or air year:  5%
+//
+// Override shortcuts (applied after the weighted sum):
+//   - Exact name + episode found + title match in filename → 1.0
+//   - Exact name + episode found + no title in filename   → 0.90
 func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBResult, error) {
 	if c.apiKey == "" {
 		return nil, &TVDBError{
@@ -103,17 +105,16 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBR
 		}
 	}
 
-	best, baseScore := selectBestSeries(candidates, parsed)
+	best, selScore := selectBestSeries(candidates, parsed)
 	logger.Debug("TVDB: best series candidate",
 		"name", best.Name, "year", best.Year,
-		"tvdb_id", best.TVDBIDStr, "base_confidence", fmt.Sprintf("%.2f", baseScore))
+		"tvdb_id", best.TVDBIDStr, "selection_score", fmt.Sprintf("%.2f", selScore))
 
 	result := &TVDBResult{
 		SeriesID:       best.intID(),
 		SeriesName:     best.Name,
 		FirstAiredYear: best.parsedYear(),
 		Network:        best.Network,
-		Confidence:     baseScore,
 	}
 
 	if parsed.IsTV && parsed.Season > 0 && parsed.Episode > 0 {
@@ -122,22 +123,85 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBR
 		ep, err := c.fetchEpisode(ctx, best.intID(), parsed.Season, parsed.Episode)
 		if err != nil {
 			if isTVDBNotFound(err) {
-				result.Confidence = max(result.Confidence-0.10, 0)
-				logger.Debug("TVDB: episode not found — confidence reduced",
-					"error", err, "confidence", fmt.Sprintf("%.2f", result.Confidence))
-				return result, nil
+				logger.Debug("TVDB: episode not found", "error", err)
+			} else {
+				return nil, err
 			}
-			return nil, err
+		} else {
+			result.EpisodeFound = true
+			result.EpisodeTitle = ep.Name
+			result.EpisodeAirDate = ep.Aired
+			logger.Debug("TVDB: episode found", "title", ep.Name, "aired", ep.Aired)
 		}
-		result.EpisodeTitle = ep.Name
-		result.EpisodeAirDate = ep.Aired
-		result.Confidence = min(result.Confidence+0.10, 1.0)
-		logger.Debug("TVDB: episode found",
-			"title", ep.Name, "aired", ep.Aired,
-			"confidence", fmt.Sprintf("%.2f", result.Confidence))
 	}
 
+	result.Confidence = computeTVDBConfidence(parsed, result)
+	logger.Debug("TVDB: confidence", "score", fmt.Sprintf("%.2f", result.Confidence))
 	return result, nil
+}
+
+// computeTVDBConfidence scores a TVDB result against the parsed filename using a
+// 4-component weighted formula.  See Lookup for the component weights and override rules.
+func computeTVDBConfidence(parsed *ParsedFilename, r *TVDBResult) float64 {
+	// Component 1: show name match (40%)
+	nameSim := stringSimilarity(r.SeriesName, parsed.Title)
+	var nameScore float64
+	switch {
+	case nameSim == 1.0:
+		nameScore = 0.40
+	case nameSim >= 0.80:
+		nameScore = 0.30
+	default:
+		// Substring containment is a strong signal even when edit-distance similarity
+		// is below 0.80 (e.g. "Walking Dead" ⊂ "The Walking Dead", sim ≈ 0.75).
+		a := strings.ToLower(r.SeriesName)
+		b := strings.ToLower(parsed.Title)
+		if strings.Contains(a, b) || strings.Contains(b, a) {
+			nameScore = 0.40
+		}
+	}
+
+	// Component 2: season + episode exact match (40%)
+	var seScore float64
+	if r.EpisodeFound {
+		seScore = 0.40
+	}
+
+	// Component 3: episode title match (15%) — only when filename carries a title
+	var titleScore float64
+	if parsed.ParsedEpisodeTitle != "" && r.EpisodeTitle != "" {
+		titleScore = stringSimilarity(r.EpisodeTitle, parsed.ParsedEpisodeTitle) * 0.15
+	}
+
+	// Component 4: year match — premiere year OR episode air year, ±1 tolerance (5%)
+	var yearScore float64
+	if parsed.Year > 0 {
+		var airYear int
+		if len(r.EpisodeAirDate) >= 4 {
+			airYear, _ = strconv.Atoi(r.EpisodeAirDate[:4])
+		}
+		if (r.FirstAiredYear > 0 && absInt(r.FirstAiredYear-parsed.Year) <= 1) ||
+			(airYear > 0 && absInt(airYear-parsed.Year) <= 1) {
+			yearScore = 0.05
+		}
+	}
+
+	confidence := nameScore + seScore + titleScore + yearScore
+
+	// Override shortcuts: exact name + episode found → shortcut based on title presence.
+	if nameSim == 1.0 && r.EpisodeFound {
+		if parsed.ParsedEpisodeTitle != "" {
+			if stringSimilarity(r.EpisodeTitle, parsed.ParsedEpisodeTitle) >= 0.90 {
+				return 1.0
+			}
+		} else {
+			if confidence < 0.90 {
+				confidence = 0.90
+			}
+		}
+	}
+
+	return min(confidence, 1.0)
 }
 
 func isTVDBNotFound(err error) bool {

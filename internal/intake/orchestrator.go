@@ -152,11 +152,6 @@ func (o *Orchestrator) LookupTV(ctx context.Context, parsed *ParsedFilename, rev
 // recomputes confidence using the unified scorer.
 
 func fromTVDB(r *TVDBResult, parsed *ParsedFilename) *LookupResult {
-	score := ScoreTV(parsed, ScoreInput{
-		Title:        r.SeriesName,
-		Year:         r.FirstAiredYear,
-		EpisodeFound: r.EpisodeTitle != "",
-	})
 	return &LookupResult{
 		Source:         "tvdb",
 		MediaType:      "tv",
@@ -166,7 +161,7 @@ func fromTVDB(r *TVDBResult, parsed *ParsedFilename) *LookupResult {
 		TVDBNetwork:    r.Network,
 		EpisodeTitle:   r.EpisodeTitle,
 		EpisodeAirDate: r.EpisodeAirDate,
-		Confidence:     score,
+		Confidence:     r.Confidence,
 	}
 }
 
