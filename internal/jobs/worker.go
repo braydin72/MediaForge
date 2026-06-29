@@ -948,7 +948,7 @@ func (w *Worker) processJob(job *Job) {
 			reason := fmt.Sprintf("post-encode move failed: %v", moveErr)
 			logger.Error("Post-encode library move failed", "job_id", job.ID, "src", finalPath, "dst", job.LibraryPath, "error", moveErr)
 			_ = w.queue.FailJob(job.ID, reason)
-			w.queue.SendToReviewQueue(job.ID, job.InputPath, filepath.Base(job.InputPath), reason, "")
+			w.queue.SendToReviewQueue(job.ID, finalPath, filepath.Base(finalPath), reason, "")
 			return
 		}
 		logger.Info("Post-encode library move complete", "job_id", job.ID, "dst", job.LibraryPath)

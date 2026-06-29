@@ -833,6 +833,16 @@ func (s *SQLiteStore) UpdateReviewQueueStatus(id, status string) error {
 	return err
 }
 
+// UpdateReviewEntryReason updates the reason field on a review queue entry.
+// Used when a retry fails so the entry reflects the latest failure message.
+func (s *SQLiteStore) UpdateReviewEntryReason(id, reason string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`UPDATE review_queue SET reason = ? WHERE id = ?`, reason, id)
+	return err
+}
+
 // Close closes the database connection.
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()

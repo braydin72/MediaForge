@@ -37,6 +37,7 @@ type ReviewQueueStore interface {
 	GetReviewEntry(id string) (*store.ReviewEntry, error)
 	GetReviewQueueCount() (int, error)
 	UpdateReviewQueueStatus(id, status string) error
+	UpdateReviewEntryReason(id, reason string) error
 }
 
 // Handler provides HTTP API handlers
@@ -1024,7 +1025,43 @@ func (h *Handler) RetryReviewEntry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "review store not configured")
 		return
 	}
-	// Mark resolved; full pipeline re-run wired in a future phase.
+
+	entry, err := h.reviewStore.GetReviewEntry(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if entry == nil {
+		writeError(w, http.StatusNotFound, "review entry not found")
+		return
+	}
+
+	// Post-encode retry: the entry ID matches a job that has a library destination.
+	// The staged file is already HEVC; skip re-identification and re-encoding and
+	// simply re-attempt the SafeMove from the staged path to the stored library path.
+	if h.queue != nil {
+		if job := h.queue.Get(id); job != nil && job.LibraryPath != "" {
+			if moveErr := util.SafeMove(entry.OriginalPath, job.LibraryPath); moveErr != nil {
+				newReason := fmt.Sprintf("post-encode move failed: %v", moveErr)
+				logger.Warn("Retry: post-encode move failed",
+					"entry_id", id, "src", entry.OriginalPath, "dst", job.LibraryPath, "error", moveErr)
+				if updateErr := h.reviewStore.UpdateReviewEntryReason(id, newReason); updateErr != nil {
+					logger.Warn("Retry: failed to update review entry reason", "entry_id", id, "error", updateErr)
+				}
+				writeError(w, http.StatusInternalServerError, newReason)
+				return
+			}
+			logger.Info("Retry: post-encode move succeeded", "entry_id", id, "dst", job.LibraryPath)
+			if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"status": "retried"})
+			return
+		}
+	}
+
+	// Default: mark resolved; full pipeline re-run wired in a future phase.
 	if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
