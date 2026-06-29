@@ -32,7 +32,15 @@ func main() {
 	configPath := flag.String("config", "", "Path to config file (default: ./config/mediaforge.yaml)")
 	port := flag.Int("port", 8080, "Port to listen on")
 	mediaPath := flag.String("media", "", "Override media path from config")
+	installSvc := flag.Bool("install", false, "Install MediaForge as a Windows service (Windows only)")
+	uninstallSvc := flag.Bool("uninstall", false, "Remove the MediaForge Windows service (Windows only)")
+	serviceSvc := flag.Bool("service", false, "Run as a Windows service (called by the service manager, not users directly)")
 	flag.Parse()
+
+	// Handle Windows service management flags before any other startup.
+	if handleServiceCLI(*installSvc, *uninstallSvc, *serviceSvc, *configPath, *port) {
+		return
+	}
 
 	// Determine config path
 	cfgPath := *configPath

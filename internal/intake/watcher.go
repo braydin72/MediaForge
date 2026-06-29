@@ -48,6 +48,8 @@ type Watcher struct {
 	// May be nil.
 	OnReviewQueueAdd ReviewQueueNotifyFn
 
+	paused bool // protected by mu
+
 	// EncodeQueue is the job queue used to schedule H264/AVC files for encoding.
 	// If nil, AVC files are detected but not queued (logged only).
 	EncodeQueue *jobs.Queue
@@ -125,9 +127,32 @@ func (w *Watcher) Stop() {
 	close(w.stopCh)
 }
 
+// Pause suspends the periodic scan; files currently being processed continue uninterrupted.
+func (w *Watcher) Pause() {
+	w.mu.Lock()
+	w.paused = true
+	w.mu.Unlock()
+	logger.Info("Intake watcher paused")
+}
+
+// Resume resumes the periodic scan after a Pause.
+func (w *Watcher) Resume() {
+	w.mu.Lock()
+	w.paused = false
+	w.mu.Unlock()
+	logger.Info("Intake watcher resumed")
+}
+
 // scan recursively walks the watch folder and spawns a pipeline goroutine for
 // each newly discovered video file, regardless of subdirectory depth.
 func (w *Watcher) scan(ctx context.Context) {
+	w.mu.Lock()
+	paused := w.paused
+	w.mu.Unlock()
+	if paused {
+		return
+	}
+
 	err := filepath.WalkDir(w.cfg.WatchFolder, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) && path == w.cfg.WatchFolder {
