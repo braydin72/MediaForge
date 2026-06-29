@@ -12,7 +12,10 @@ import (
 	"github.com/braydin72/mediaforge/internal/config"
 )
 
-const llmTimeout = 30 * time.Second
+const (
+	llmTimeout       = 30 * time.Second
+	ollamaLLMTimeout = 120 * time.Second // Ollama may need time to load the model from disk on first call
+)
 
 // LLMVerificationResult holds the outcome of an LLM verification pass.
 type LLMVerificationResult struct {
@@ -60,7 +63,11 @@ func (c *LLMClient) Verify(ctx context.Context, parsed *ParsedFilename, candidat
 
 	prompt := buildVerificationPrompt(parsed, candidates)
 
-	ctx, cancel := context.WithTimeout(ctx, llmTimeout)
+	timeout := llmTimeout
+	if c.cfg.Backend == "ollama" {
+		timeout = ollamaLLMTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	var text string
