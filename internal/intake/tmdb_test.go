@@ -78,9 +78,9 @@ func TestTMDBLookupMovie_ExactMatch(t *testing.T) {
 	if result.MediaType != "movie" {
 		t.Errorf("MediaType: want %q, got %q", "movie", result.MediaType)
 	}
-	// exact + year, no runtime check: 0.50 + 0.30 + 0.10 = 0.90
-	if !approxEqual(result.Confidence, 0.90) {
-		t.Errorf("Confidence: want ~0.90, got %f", result.Confidence)
+	// exact title + exact year → override 0.95
+	if !approxEqual(result.Confidence, 0.95) {
+		t.Errorf("Confidence: want ~0.95, got %f", result.Confidence)
 	}
 }
 
@@ -98,7 +98,7 @@ func TestTMDBLookupMovie_RuntimeCheckPass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// exact + year + runtime: 0.50 + 0.30 + 0.10 + 0.10 = 1.00
+	// exact title + exact year (0.95) + runtime ±5 min (+0.10) → capped at 1.00
 	if !approxEqual(result.Confidence, 1.00) {
 		t.Errorf("Confidence: want ~1.00, got %f", result.Confidence)
 	}
@@ -118,9 +118,9 @@ func TestTMDBLookupMovie_RuntimeCheckFail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// exact + year, no runtime bonus: 0.50 + 0.30 + 0.10 = 0.90
-	if !approxEqual(result.Confidence, 0.90) {
-		t.Errorf("Confidence: want ~0.90 (no runtime bonus), got %f", result.Confidence)
+	// exact title + exact year → override 0.95 (runtime miss does not reduce)
+	if !approxEqual(result.Confidence, 0.95) {
+		t.Errorf("Confidence: want ~0.95 (no runtime bonus), got %f", result.Confidence)
 	}
 }
 
@@ -140,7 +140,7 @@ func TestTMDBLookupMovie_FuzzyMatch(t *testing.T) {
 	if result.Title != "Forrest Gump" {
 		t.Errorf("Title: want %q, got %q", "Forrest Gump", result.Title)
 	}
-	// fuzzy + year: 0.50 + 0.10 + 0.10 = 0.70
+	// partial title (0.40) + exact year (0.30) = 0.70
 	if !approxEqual(result.Confidence, 0.70) {
 		t.Errorf("Confidence: want ~0.70, got %f", result.Confidence)
 	}
@@ -168,17 +168,15 @@ func TestTMDBLookupMovie_NotFound(t *testing.T) {
 	}
 }
 
-func TestTMDBLookupMovie_YearRetry(t *testing.T) {
+func TestTMDBLookupMovie_TitleOnlySearch(t *testing.T) {
+	// LookupMovie must search by title only — no year param in the API request.
 	searchCount := 0
+	var lastQuery string
 	client := newMockTMDBClient("validkey", func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Path {
 		case "/3/search/movie":
 			searchCount++
-			if r.URL.Query().Get("year") != "" {
-				// With year: no results
-				return jsonResp(http.StatusOK, map[string]interface{}{"results": []interface{}{}}), nil
-			}
-			// Without year: result found
+			lastQuery = r.URL.Query().Get("year")
 			return jsonResp(http.StatusOK, map[string]interface{}{
 				"results": []map[string]interface{}{
 					{"id": 680, "title": "Pulp Fiction", "release_date": "1994-10-14", "poster_path": "/d5iIlFn5s0XqsBEmoDe.jpg"},
@@ -197,8 +195,11 @@ func TestTMDBLookupMovie_YearRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if searchCount != 2 {
-		t.Errorf("expected 2 search requests (with year then without), got %d", searchCount)
+	if searchCount != 1 {
+		t.Errorf("expected 1 search request (title-only), got %d", searchCount)
+	}
+	if lastQuery != "" {
+		t.Errorf("year param should not be sent in search request, got %q", lastQuery)
 	}
 	if result.Title != "Pulp Fiction" {
 		t.Errorf("Title: want %q, got %q", "Pulp Fiction", result.Title)
@@ -375,45 +376,40 @@ func TestSelectBestMovie_ExactMatchWins(t *testing.T) {
 	if best.ID != 2 {
 		t.Errorf("expected exact match (id=2) to win, got id=%d (%s)", best.ID, best.Title)
 	}
-	// exact + year: 0.50 + 0.30 + 0.10 = 0.90
-	if !approxEqual(score, 0.90) {
-		t.Errorf("score: want ~0.90, got %f", score)
+	// exact title + exact year → override 0.95
+	if !approxEqual(score, 0.95) {
+		t.Errorf("score: want ~0.95, got %f", score)
 	}
 }
 
-// TestTMDBLookupMovie_YearRetry_AvatarFireAndAsh mirrors the real-world case:
-// "avatar fire and ash(2025)" parses to year=2025; TMDB returns no results when
-// year=2025 is sent, but finds the film when year is omitted.
-func TestTMDBLookupMovie_YearRetry_AvatarFireAndAsh(t *testing.T) {
+// TestTMDBLookupMovie_AvatarFireAndAsh verifies the real-world case:
+// "Avatar Fire and Ash (2025).mp4" — TMDB title has a colon the filename doesn't.
+// Title-only search finds the film; year is used in scoring, not as a filter.
+// Expected confidence: 0.95 (exact title after colon-strip + exact year).
+func TestTMDBLookupMovie_AvatarFireAndAsh(t *testing.T) {
 	searchCount := 0
 	client := newMockTMDBClient("validkey", func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Path {
 		case "/3/search/movie":
 			searchCount++
-			if r.URL.Query().Get("year") != "" {
-				// Year-filtered search returns nothing (TMDB behaviour confirmed manually).
-				return jsonResp(http.StatusOK, map[string]interface{}{"results": []interface{}{}}), nil
-			}
-			// No-year search finds the canonical entry.
 			return jsonResp(http.StatusOK, map[string]interface{}{
 				"results": []map[string]interface{}{
 					{"id": 83533, "title": "Avatar: Fire and Ash", "release_date": "2025-12-19", "poster_path": "/avatar3.jpg"},
 				},
 			}), nil
 		default:
-			// Detail fetch for movie 83533.
 			return jsonResp(http.StatusOK, map[string]interface{}{"id": 83533, "runtime": 145}), nil
 		}
 	})
 
-	parsed := &ParsedFilename{Title: "avatar fire and ash", Year: 2025, MediaType: "movie"}
+	parsed := &ParsedFilename{Title: "Avatar Fire and Ash", Year: 2025, MediaType: "movie"}
 
 	result, err := client.LookupMovie(context.Background(), parsed, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if searchCount != 2 {
-		t.Errorf("expected 2 search requests (with year then without), got %d", searchCount)
+	if searchCount != 1 {
+		t.Errorf("expected 1 search request (title-only), got %d", searchCount)
 	}
 	if result.TMDBID != 83533 {
 		t.Errorf("TMDBID: want 83533, got %d", result.TMDBID)
@@ -427,9 +423,9 @@ func TestTMDBLookupMovie_YearRetry_AvatarFireAndAsh(t *testing.T) {
 	if result.RuntimeMinutes != 145 {
 		t.Errorf("RuntimeMinutes: want 145, got %d", result.RuntimeMinutes)
 	}
-	// exact title after punctuation stripping + exact year: 0.50 + 0.30 + 0.10 = 0.90
-	if !approxEqual(result.Confidence, 0.90) {
-		t.Errorf("Confidence: want ~0.90, got %f", result.Confidence)
+	// exact title (colon stripped by normTitle) + exact year → override 0.95
+	if !approxEqual(result.Confidence, 0.95) {
+		t.Errorf("Confidence: want ~0.95, got %f", result.Confidence)
 	}
 }
 
@@ -442,9 +438,9 @@ func TestSelectBestMovie_ColonInTitle(t *testing.T) {
 	parsed := &ParsedFilename{Title: "avatar fire and ash", Year: 2025}
 
 	_, score := selectBestMovie(candidates, parsed)
-	// exact (after norm) + exact year: 0.50 + 0.30 + 0.10 = 0.90
-	if !approxEqual(score, 0.90) {
-		t.Errorf("score: want ~0.90 (colon stripped), got %f", score)
+	// exact title (colon stripped by normTitle) + exact year → override 0.95
+	if !approxEqual(score, 0.95) {
+		t.Errorf("score: want ~0.95 (colon stripped), got %f", score)
 	}
 }
 
@@ -456,9 +452,9 @@ func TestSelectBestMovie_YearOffByOne(t *testing.T) {
 	parsed := &ParsedFilename{Title: "Back to the Future", Year: 1986}
 
 	_, score := selectBestMovie(candidates, parsed)
-	// exact title + ±1 year: 0.50 + 0.30 + 0.05 = 0.85
-	if !approxEqual(score, 0.85) {
-		t.Errorf("score: want ~0.85 for ±1 year, got %f", score)
+	// exact title (0.60) + ±1 year (0.15) = 0.75
+	if !approxEqual(score, 0.75) {
+		t.Errorf("score: want ~0.75 for ±1 year, got %f", score)
 	}
 }
 
@@ -469,9 +465,9 @@ func TestSelectBestMovie_YearOffByTwo(t *testing.T) {
 	parsed := &ParsedFilename{Title: "Back to the Future", Year: 1987}
 
 	_, score := selectBestMovie(candidates, parsed)
-	// exact title, year off by 2 — no year bonus: 0.50 + 0.30 = 0.80
-	if !approxEqual(score, 0.80) {
-		t.Errorf("score: want ~0.80 for year off by 2, got %f", score)
+	// exact title + year off by 2 → override 0.70 (LLM-verify threshold)
+	if !approxEqual(score, 0.70) {
+		t.Errorf("score: want ~0.70 for year off by 2 (override), got %f", score)
 	}
 }
 
@@ -485,6 +481,43 @@ func TestSelectBestTV_YearOffByOne(t *testing.T) {
 	// exact title + ±1 year: 0.50 + 0.30 + 0.05 = 0.85
 	if !approxEqual(score, 0.85) {
 		t.Errorf("score: want ~0.85 for ±1 year, got %f", score)
+	}
+}
+
+func TestTMDBLookupMovie_Sergeants3(t *testing.T) {
+	// "Sergeants 3 (1962).mp4" — classic film; title + year both match exactly.
+	// Expected confidence: 0.95 (auto-proceed).
+	client := newMockTMDBClient("validkey", func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/3/search/movie":
+			return jsonResp(http.StatusOK, map[string]interface{}{
+				"results": []map[string]interface{}{
+					{"id": 28489, "title": "Sergeants 3", "release_date": "1962-02-10", "poster_path": "/sgt3.jpg"},
+				},
+			}), nil
+		default:
+			return jsonResp(http.StatusOK, map[string]interface{}{"id": 28489, "runtime": 112}), nil
+		}
+	})
+
+	parsed := &ParsedFilename{Title: "Sergeants 3", Year: 1962, MediaType: "movie"}
+
+	result, err := client.LookupMovie(context.Background(), parsed, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TMDBID != 28489 {
+		t.Errorf("TMDBID: want 28489, got %d", result.TMDBID)
+	}
+	if result.Title != "Sergeants 3" {
+		t.Errorf("Title: want %q, got %q", "Sergeants 3", result.Title)
+	}
+	if result.Year != 1962 {
+		t.Errorf("Year: want 1962, got %d", result.Year)
+	}
+	// exact title + exact year → override 0.95
+	if !approxEqual(result.Confidence, 0.95) {
+		t.Errorf("Confidence: want ~0.95, got %f", result.Confidence)
 	}
 }
 

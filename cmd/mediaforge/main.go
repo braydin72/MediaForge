@@ -25,6 +25,7 @@ import (
 	"github.com/braydin72/mediaforge/internal/notify"
 	"github.com/braydin72/mediaforge/internal/setup"
 	"github.com/braydin72/mediaforge/internal/store"
+	"github.com/braydin72/mediaforge/internal/version"
 )
 
 func main() {
@@ -130,7 +131,7 @@ func main() {
 	fmt.Println("╔═══════════════════════════════════════════════════════════╗")
 	fmt.Println("║                        MEDIAFORGE                         ║")
 	fmt.Println("║             Ingest, Transcode, Organize                   ║")
-	versionLine := fmt.Sprintf("v%s", mediaforge.Version)
+	versionLine := version.String()
 	padding := 59 - len(versionLine)
 	fmt.Printf("║%*s%s%*s║\n", padding/2, "", versionLine, (padding+1)/2, "")
 	fmt.Println("╚═══════════════════════════════════════════════════════════╝")
@@ -299,7 +300,7 @@ func main() {
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Printf("  Logging started (level: %s)\n", cfg.LogLevel)
 	fmt.Println("─────────────────────────────────────────────────────────────")
-	logger.Info("MediaForge started", "version", mediaforge.Version, "encoder", best.Name, "workers", cfg.Workers, "port", *port)
+	logger.Info("MediaForge started", "version", version.String(), "encoder", best.Name, "workers", cfg.Workers, "port", *port)
 	go browser.WarmCountCache(context.Background())
 	if vmaf.IsAvailable() {
 		logger.Info("VMAF support detected", "models", vmaf.GetModels())

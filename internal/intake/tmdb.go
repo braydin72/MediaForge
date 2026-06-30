@@ -61,31 +61,25 @@ func NewTMDBClient(apiKey string, httpClient *http.Client) *TMDBClient {
 	return &TMDBClient{apiKey: apiKey, httpClient: httpClient}
 }
 
-// LookupMovie searches TMDB for a movie matching parsed.Title and parsed.Year.
-// probeDuration is the file duration from ffprobe; pass 0 to skip the runtime
-// cross-check. When a year-filtered search returns no results it retries without year.
+// LookupMovie searches TMDB for a movie matching parsed.Title, then scores
+// results using year and runtime. Year is not passed as a search filter so that
+// regional/marketing release-year mismatches do not suppress valid results.
 //
-// Confidence scoring:
-//   - 0.50 base for any match
-//   - +0.30 exact (case-insensitive) title match, +0.10 partial match
-//   - +0.10 when parsed.Year matches the release year
-//   - +0.10 when probeDuration is within 5 minutes of the TMDB runtime
+// Confidence scoring (selectBestMovie):
+//   - Exact title + exact year → 0.95
+//   - Exact title + year off by more than 1 → 0.70
+//   - Otherwise: title (60% weight) + year ±0/±1 (30%/15% weight)
+//
+// Runtime cross-check (±5 min) adds +0.10, capped at 1.0.
 func (c *TMDBClient) LookupMovie(ctx context.Context, parsed *ParsedFilename, probeDuration time.Duration) (*TMDBResult, error) {
 	if c.apiKey == "" {
 		return nil, &TMDBError{Code: "no_api_key", Reason: "TMDB API key is not configured"}
 	}
 
-	candidates, err := c.searchMovies(ctx, parsed.Title, parsed.Year)
+	// Search by title only — year filtering is done in scoring, not in the API call.
+	candidates, err := c.searchMovies(ctx, parsed.Title, 0)
 	if err != nil {
 		return nil, err
-	}
-
-	// When a year-constrained search returns nothing, retry without year.
-	if len(candidates) == 0 && parsed.Year > 0 {
-		candidates, err = c.searchMovies(ctx, parsed.Title, 0)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	if len(candidates) == 0 {
@@ -343,25 +337,50 @@ func (c *TMDBClient) fetchTVEpisode(ctx context.Context, seriesID, season, episo
 
 // --- candidate scoring ---
 
+// selectBestMovie picks the highest-scoring candidate from a TMDB movie search
+// and returns it along with a confidence score.
+//
+// Scoring rules (applied in order):
+//  1. Exact title + exact year        → 0.95 (auto-proceed threshold)
+//  2. Exact title + year off by > 1   → 0.70 (LLM-verify threshold)
+//  3. Otherwise weighted:
+//     title exact 0.60 / partial 0.40 / none 0.00
+//     year exact  0.30 / ±1    0.15 / none 0.00
 func selectBestMovie(candidates []tmdbMovieResult, parsed *ParsedFilename) (tmdbMovieResult, float64) {
 	queryNorm := normTitle(parsed.Title)
 	bestIdx, bestScore := 0, -1.0
 
 	for i, m := range candidates {
-		score := 0.50
-		titleLower := normTitle(m.Title)
+		titleNorm := normTitle(m.Title)
+		titleExact := titleNorm == queryNorm
+		titlePartial := !titleExact && (strings.Contains(titleNorm, queryNorm) || strings.Contains(queryNorm, titleNorm))
 
-		if titleLower == queryNorm {
-			score += 0.30
-		} else if strings.Contains(titleLower, queryNorm) || strings.Contains(queryNorm, titleLower) {
-			score += 0.10
+		ry := m.releaseYear()
+		hasYear := parsed.Year > 0 && ry > 0
+		yearDelta := 0
+		if hasYear {
+			yearDelta = absInt(ry - parsed.Year)
 		}
 
-		if parsed.Year > 0 {
-			if ry := m.releaseYear(); ry == parsed.Year {
-				score += 0.10
-			} else if absInt(ry-parsed.Year) == 1 {
-				score += 0.05
+		var score float64
+		switch {
+		case titleExact && hasYear && yearDelta == 0:
+			score = 0.95
+		case titleExact && hasYear && yearDelta > 1:
+			score = 0.70
+		default:
+			if titleExact {
+				score += 0.60
+			} else if titlePartial {
+				score += 0.40
+			}
+			if hasYear {
+				switch yearDelta {
+				case 0:
+					score += 0.30
+				case 1:
+					score += 0.15
+				}
 			}
 		}
 

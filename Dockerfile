@@ -5,7 +5,8 @@ RUN apk add --no-cache git
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o mediaforge ./cmd/mediaforge
+ARG BUILD_NUMBER=dev
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=${BUILD_NUMBER}" -o mediaforge ./cmd/mediaforge
 
 # Runtime stage - linuxserver/ffmpeg already has s6-overlay + hardware accel
 FROM linuxserver/ffmpeg:latest
