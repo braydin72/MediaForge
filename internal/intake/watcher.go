@@ -233,13 +233,13 @@ func (w *Watcher) runPipeline(ctx context.Context, path string) {
 
 	switch classifyCodec(probe.VideoCodec) {
 	case "hevc":
-		logger.Info("Intake: HEVC — ready for library move",
+		logger.Info("Intake: modern codec — routing to library",
 			"file", filename, "codec", probe.VideoCodec,
 			"resolution", fmt.Sprintf("%dx%d", probe.Width, probe.Height),
 		)
 		w.moveHEVCToLibrary(ctx, path, probe)
-	case "h264":
-		logger.Info("Intake: H264 — staging for encode",
+	case "encode":
+		logger.Info("Intake: routing to encode queue for HEVC transcode",
 			"file", filename, "codec", probe.VideoCodec,
 			"resolution", fmt.Sprintf("%dx%d", probe.Width, probe.Height),
 		)
@@ -249,9 +249,9 @@ func (w *Watcher) runPipeline(ctx context.Context, path string) {
 		if probe.VideoCodec == "" {
 			reason = "codec detection failed: no video stream found"
 		} else {
-			reason = fmt.Sprintf("codec detection failed: unrecognized codec %q", probe.VideoCodec)
+			reason = fmt.Sprintf("unrecognized codec: %s", probe.VideoCodec)
 		}
-		logger.Warn("Intake: unknown codec, queuing for review", "file", filename, "codec", probe.VideoCodec)
+		logger.Warn("Intake: unrecognized codec, queuing for review", "file", filename, "codec", probe.VideoCodec)
 		w.sendToReviewQueue(path, reason, probe)
 	}
 }
@@ -572,14 +572,44 @@ func (w *Watcher) sendDuplicateToReviewQueue(path, reason string, probe *ffmpeg.
 	}
 }
 
-// classifyCodec maps a raw ffprobe codec_name to one of "hevc", "h264", or "unknown".
+// knownVideoCodecs is the set of codec_name values ffprobe reports for standard video
+// codecs. Any codec in this set that is not hevc/av1 routes to the encode queue.
+// Codecs absent from this set route to the Review Queue as "unrecognized codec".
+var knownVideoCodecs = map[string]struct{}{
+	// H.265 / HEVC
+	"hevc": {}, "h265": {}, "x265": {},
+	// AV1
+	"av1": {}, "libaom-av1": {}, "libsvtav1": {},
+	// H.264 / AVC
+	"h264": {}, "avc": {}, "x264": {},
+	// MPEG-1 / MPEG-2
+	"mpeg1video": {}, "mpeg2video": {},
+	// MPEG-4 ASP (DivX, XviD)
+	"mpeg4": {}, "divx": {}, "xvid": {},
+	// Microsoft VC-1 / WMV
+	"vc1": {}, "wmv1": {}, "wmv2": {}, "wmv3": {},
+	// VP family
+	"vp6": {}, "vp6f": {}, "vp6a": {}, "vp8": {}, "vp9": {},
+	// Other common video codecs
+	"theora": {}, "mjpeg": {}, "flv1": {}, "prores": {}, "dnxhd": {}, "dnxhr": {},
+	"h263": {}, "h261": {}, "rv10": {}, "rv20": {}, "rv30": {}, "rv40": {},
+	"svq1": {}, "svq3": {}, "cinepak": {}, "msvideo1": {},
+	"indeo2": {}, "indeo3": {}, "indeo4": {}, "indeo5": {},
+}
+
+// classifyCodec maps a raw ffprobe codec_name to one of "hevc", "encode", or "unknown".
+//
+//   - "hevc"    — already a modern codec; move directly to library (HEVC and AV1).
+//   - "encode"  — known video codec that needs transcoding to HEVC.
+//   - "unknown" — not a recognized video codec; route to Review Queue.
 func classifyCodec(codec string) string {
-	switch strings.ToLower(codec) {
-	case "hevc", "h265", "x265":
+	lower := strings.ToLower(codec)
+	switch lower {
+	case "hevc", "h265", "x265", "av1", "libaom-av1", "libsvtav1":
 		return "hevc"
-	case "h264", "avc", "x264":
-		return "h264"
-	default:
-		return "unknown"
 	}
+	if _, ok := knownVideoCodecs[lower]; ok {
+		return "encode"
+	}
+	return "unknown"
 }

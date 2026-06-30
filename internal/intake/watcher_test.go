@@ -16,18 +16,33 @@ func TestClassifyCodec(t *testing.T) {
 		raw  string
 		want string
 	}{
+		// Modern codecs — route to library
 		{"hevc", "hevc"},
 		{"HEVC", "hevc"},
 		{"h265", "hevc"},
 		{"x265", "hevc"},
-		{"h264", "h264"},
-		{"H264", "h264"},
-		{"avc", "h264"},
-		{"x264", "h264"},
-		{"av1", "unknown"},
-		{"vp9", "unknown"},
-		{"mpeg4", "unknown"},
+		{"av1", "hevc"},
+		{"libaom-av1", "hevc"},
+		{"libsvtav1", "hevc"},
+		// H.264 family — encode queue
+		{"h264", "encode"},
+		{"H264", "encode"},
+		{"avc", "encode"},
+		{"x264", "encode"},
+		// Explicitly requested codecs — encode queue
+		{"mpeg2video", "encode"},
+		{"mpeg4", "encode"},
+		{"vc1", "encode"},
+		{"vp9", "encode"},
+		// Other known video codecs — encode queue
+		{"vp8", "encode"},
+		{"wmv3", "encode"},
+		{"theora", "encode"},
+		{"flv1", "encode"},
+		// Unrecognized — review queue
 		{"", "unknown"},
+		{"somethingweird", "unknown"},
+		{"data", "unknown"},
 	}
 
 	for _, c := range cases {

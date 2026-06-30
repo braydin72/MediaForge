@@ -69,8 +69,16 @@ func main() {
 
 	firstRun := setup.IsFirstRun(cfgFileExisted, cfg)
 
-	// Initialize logger with configured level
-	logger.Init(cfg.LogLevel)
+	// Determine config directory before logger init so the log file lands there.
+	// (configDir is re-derived below after config load; this early derivation is
+	// only for logger bootstrap — the canonical assignment below still applies.)
+	earlyConfigDir := filepath.Dir(cfgPath)
+	if earlyConfigDir == "." {
+		earlyConfigDir = "config"
+	}
+
+	// Initialize logger: write to stdout and a rotating session log file.
+	logger.InitWithFile(cfg.LogLevel, earlyConfigDir)
 
 	// Override with environment variables
 	if envMedia := os.Getenv("MEDIA_PATH"); envMedia != "" {
