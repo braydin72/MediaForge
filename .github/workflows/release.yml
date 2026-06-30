@@ -30,11 +30,36 @@ jobs:
         with:
           go-version: '1.21'
       - name: Build Windows binary
-        run: go build -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=${{ github.run_number }}" -o mediaforge.exe ./cmd/mediaforge
+        run: go build -o mediaforge.exe ./cmd/mediaforge
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
           files: mediaforge.exe
+
+  windows-installer:
+    runs-on: windows-latest
+    needs: windows
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      - name: Build Windows binaries
+        run: |
+          go build -o mediaforge.exe ./cmd/mediaforge
+          go build -o mediaforge-tray.exe ./cmd/tray
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup -y
+      - name: Compile installer
+        run: |
+          iscc installer\mediaforge.iss
+      - name: Upload installer to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer-output\MediaForge-Setup-*.exe
 
   docker:
     runs-on: ubuntu-latest
@@ -46,9 +71,9 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@v3
       - name: Log in to Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -69,6 +94,5 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest
             ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}', env.REGISTRY, steps.image.outputs.name, steps.version.outputs.tag) || '' }}
-          build-args: BUILD_NUMBER=${{ github.run_number }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
