@@ -1,4 +1,4 @@
-# Binaries
+# Go binaries
 /mediaforge
 *.exe
 *.exe~
@@ -6,44 +6,47 @@
 *.so
 *.dylib
 
-# Test binary, built with `go test -c`
+# Tests & Coverage
 *.test
-
-# Output of the go coverage tool
 *.out
+coverage.out
+coverage.html
 
-# Go workspace file
+# Go workspace
 go.work
+
+# Build output
+build/
+dist/
+release/
+bin/
+
+# Runtime
+queue.json
+config/mediaforge.yaml
+config/*.db*
+config/logs/
+
+# Installer output
+installer/installer-output/
 
 # IDE
 .idea/
 .vscode/
-*.swp
-*.swo
+.claude/settings.local.json
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Config and state (generated at runtime)
-queue.json
-config/mediaforge.yaml
-config/*.db*
-
-# Test data
-testdata/
-
-# Integration tests (requires Docker environment)
-test/integration/
-
-# Logs
-*.log
+# Temporary
+.cache/
+tmp/
 
 # Worktrees
 .worktrees/
 
-# Housekeeping
+# Personal scripts/files
 ghcr.sh
-CLAUDE.md
 HANDOFF.md
 **/plans/
