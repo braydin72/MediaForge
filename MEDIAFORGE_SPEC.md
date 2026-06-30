@@ -453,6 +453,7 @@ Confirmed working end-to-end during v1.0 development and testing:
 - **Windows native** — path separators handled correctly throughout; breadcrumb API normalizes to forward slashes for the frontend
 - **Settings UI** — all config fields round-trip correctly; live save to mediaforge.yaml confirmed
 - **First-run wizard** — triggers on missing config, guides through folder setup and API key entry; auto-populates standard paths when running inside Docker container
+- **Recursive subfolder watching** — watch folder scan uses `filepath.WalkDir`; video files in subdirectories at any depth are picked up and processed automatically
 - **Extended codec routing** — mpeg2video, mpeg4, vc1, vp9, and av1 all handled; mpeg2/mpeg4/vc1 route to encode queue, vp9/av1 pass through as HEVC-equivalent
 - **DVD subtitle passthrough** — subtitle streams passed through to MKV output; dropped with a warning log entry when output container is MP4
 - **Session log rotation** — structured log written to `config/logs/mediaforge.log`; rotates with 2 backups so log history survives restarts
@@ -523,7 +524,6 @@ intake:
 - Multi-file episode detection (single file containing multiple episodes)
 - Webhook outbound notifications
 - Mobile-friendly UI polish
-- Recursive watch folder subfolder support (process files in subdirectories of the watch folder)
 - Stats circular gauge with 30-day trend line (speedometer-style radial gauge on the dashboard)
 - Configurable VMAF sample count per-job
 
