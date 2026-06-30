@@ -452,7 +452,30 @@ Confirmed working end-to-end during v1.0 development and testing:
 - **SMTP notifications** — Gmail App Password and self-hosted SMTP confirmed; per-event toggles and batched digest working
 - **Windows native** — path separators handled correctly throughout; breadcrumb API normalizes to forward slashes for the frontend
 - **Settings UI** — all config fields round-trip correctly; live save to mediaforge.yaml confirmed
-- **First-run wizard** — triggers on missing config, guides through folder setup and API key entry
+- **First-run wizard** — triggers on missing config, guides through folder setup and API key entry; auto-populates standard paths when running inside Docker container
+- **Extended codec routing** — mpeg2video, mpeg4, vc1, vp9, and av1 all handled; mpeg2/mpeg4/vc1 route to encode queue, vp9/av1 pass through as HEVC-equivalent
+- **DVD subtitle passthrough** — subtitle streams passed through to MKV output; dropped with a warning log entry when output container is MP4
+- **Session log rotation** — structured log written to `config/logs/mediaforge.log`; rotates with 2 backups so log history survives restarts
+- **TVDB confidence scoring** — rewrote to 4-component weighted formula (series name, premiere year, episode record, network); eliminates false high-confidence matches
+- **Windows service** — `--install`, `--uninstall`, and `--service` flags; service runs under the invoking user account so network share credentials are inherited
+- **Post-encode move retry** — transient move failures after encode are retried without re-running codec detection or re-encoding
+- **Ollama timeout** — LLM request timeout raised to 120 s to accommodate Ollama cold-start model load
+- **Build number injection** — `internal/version` package; `version.Build` overridden at compile time via `-ldflags`; banner and startup log show `v1.0.0+build.<N>`
+
+---
+
+## In Progress / Next Sessions
+
+Work that has started or is queued for the next development sessions:
+
+- **Browse path fix** — Windows drive letters (`C:\`) and UNC paths (`\\server\share`) not resolving correctly in the file picker; breadcrumb generation needs special-casing for both forms
+- **Nil pointer panic on network share walk** — directory walker dereferences a nil pointer when a network share becomes unavailable mid-walk; needs a nil guard and Review Queue entry
+- **TMDB movie confidence scoring** — year removed as a search-API filter; scoring now uses title (60%), year ±0/±1 (30%/15%), runtime ±5 min (10%); override rules: exact title + exact year → 0.95, title match + year off >1 → 0.70 *(landed in build 8cf6a69)*
+- **SmartShrink quality cascade** — when Excellent quality preset produces no result within size bounds, automatically fall back to Good, then Acceptable, before sending to Review Queue
+- **CRF search range expansion** — lower CRF floor from 28 to 16 to give SmartShrink more headroom on high-motion content
+- **VMAF sample count configurable** — expose VMAF sample count as a config field (default 5); higher values increase accuracy at the cost of analysis time
+- **Windows tray app** — system-tray icon using `systray`; actions: pause/resume queue, open browser, show notification count badge
+- **Inno Setup installer** — Windows `.exe` installer that registers the service, creates start-menu shortcuts, and sets default config paths
 
 ---
 
@@ -500,6 +523,9 @@ intake:
 - Multi-file episode detection (single file containing multiple episodes)
 - Webhook outbound notifications
 - Mobile-friendly UI polish
+- Recursive watch folder subfolder support (process files in subdirectories of the watch folder)
+- Stats circular gauge with 30-day trend line (speedometer-style radial gauge on the dashboard)
+- Configurable VMAF sample count per-job
 
 ---
 
