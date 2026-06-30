@@ -150,6 +150,64 @@ func TestBrowser(t *testing.T) {
 		len(result.Entries), result.VideoCount, result.TotalSize)
 }
 
+// TestIsUnderRoot_TrailingSeparator verifies that a mediaRoot that already ends
+// with a path separator (as Windows drive roots do, e.g. "M:\") correctly accepts
+// subdirectory paths.  The old code appended an extra separator, producing a
+// double-backslash prefix that never matched anything.
+func TestIsUnderRoot_TrailingSeparator(t *testing.T) {
+	tmpDir := t.TempDir()
+	subDir := filepath.Join(tmpDir, "Movies")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	prober := ffmpeg.NewProber("ffprobe")
+	b := NewBrowser(prober, tmpDir)
+
+	// Simulate a drive-root mediaRoot by appending a trailing separator.
+	b.mediaRoot = tmpDir + string(filepath.Separator)
+
+	if !b.isUnderRoot(subDir) {
+		t.Errorf("isUnderRoot(%q) = false with trailing-separator root %q; want true", subDir, b.mediaRoot)
+	}
+	if !b.isUnderRoot(tmpDir) {
+		t.Errorf("isUnderRoot(%q) = false for root itself; want true", tmpDir)
+	}
+	// A sibling path must still be rejected (security: no path-traversal bypass).
+	siblingDir := tmpDir + "2"
+	if b.isUnderRoot(siblingDir) {
+		t.Errorf("isUnderRoot(%q) = true for sibling of root; want false (would be a security bypass)", siblingDir)
+	}
+}
+
+// TestNormalizePath_ForwardSlash verifies that paths using forward slashes
+// (as sent by the JS frontend) are accepted and resolve to the correct directory
+// rather than falling back to mediaRoot.  This covers mapped drive paths like
+// "M:/Movies" as well as forward-slash UNC-style paths on Windows.
+func TestNormalizePath_ForwardSlash(t *testing.T) {
+	tmpDir := t.TempDir()
+	subDir := filepath.Join(tmpDir, "Movies")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	prober := ffmpeg.NewProber("ffprobe")
+	b := NewBrowser(prober, tmpDir)
+
+	// filepath.ToSlash converts the OS path to a forward-slash path, as the
+	// frontend would send it (e.g. "C:/Users/..." on Windows, "/tmp/..." on Linux).
+	fwdSlash := filepath.ToSlash(subDir)
+
+	got := b.normalizePath(fwdSlash)
+	if got == b.mediaRoot {
+		t.Errorf("normalizePath(%q) fell back to mediaRoot %q — path was incorrectly rejected", fwdSlash, b.mediaRoot)
+	}
+	// The resolved path must be the expected subdirectory (OS-native separators).
+	if got != subDir {
+		t.Errorf("normalizePath(%q) = %q, want %q", fwdSlash, got, subDir)
+	}
+}
+
 func TestBrowserSecurity(t *testing.T) {
 	tmpDir := t.TempDir()
 

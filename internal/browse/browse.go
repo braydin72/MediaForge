@@ -80,10 +80,12 @@ type Browser struct {
 
 // NewBrowser creates a new Browser with the given prober and media root
 func NewBrowser(prober *ffmpeg.Prober, mediaRoot string) *Browser {
-	// Convert to absolute path for consistent comparisons
-	absRoot, err := filepath.Abs(mediaRoot)
+	// Normalize separators before Abs so that configs using forward slashes
+	// (e.g. "//server/Media" or "M:/Movies" from config edits or Docker)
+	// are canonicalized the same way as native OS paths on Windows.
+	absRoot, err := filepath.Abs(filepath.FromSlash(mediaRoot))
 	if err != nil {
-		absRoot = mediaRoot
+		absRoot = filepath.Clean(filepath.FromSlash(mediaRoot))
 	}
 	return &Browser{
 		prober:     prober,
@@ -97,13 +99,34 @@ func NewBrowser(prober *ffmpeg.Prober, mediaRoot string) *Browser {
 
 // isUnderRoot reports whether absPath is equal to or nested under the media root.
 // Uses prefix + separator to avoid /media matching /media2.
+//
+// filepath.Clean strips trailing separators from non-root paths, so cleaning
+// both sides before comparing normalizes drive-root mediaRoots like "M:\" that
+// carry a trailing separator.  filepath.Clean preserves the separator on true
+// volume roots ("M:\"), so those still work correctly for the prefix check.
 func (b *Browser) isUnderRoot(absPath string) bool {
-	return absPath == b.mediaRoot || strings.HasPrefix(absPath, b.mediaRoot+string(os.PathSeparator))
+	cleanRoot := filepath.Clean(b.mediaRoot)
+	clean := filepath.Clean(absPath)
+	if clean == cleanRoot {
+		return true
+	}
+	sep := string(os.PathSeparator)
+	// If cleanRoot already ends with sep (true volume root like "M:\"), use it
+	// as-is for the prefix check; otherwise append sep to avoid /media matching /media2.
+	if strings.HasSuffix(cleanRoot, sep) {
+		return strings.HasPrefix(clean, cleanRoot)
+	}
+	return strings.HasPrefix(clean, cleanRoot+sep)
 }
 
 // normalizePath converts a path to an absolute path and ensures it's within the media root.
 // If the path is outside the media root, it returns the media root instead.
+// Forward-slash paths from the frontend (e.g. "M:/Movies", "//server/share/Movies")
+// are normalized to OS-native separators before the security check.
 func (b *Browser) normalizePath(path string) string {
+	// Convert forward slashes to the OS separator so that frontend paths
+	// (always forward-slash) and native backslash paths are treated identically.
+	path = filepath.FromSlash(path)
 	cleanPath, err := filepath.Abs(path)
 	if err != nil {
 		cleanPath = filepath.Clean(path)
@@ -285,7 +308,15 @@ func (b *Browser) countVideos(ctx context.Context, dirPath string) (int, int64) 
 			if ctx.Err() != nil {
 				return filepath.SkipAll
 			}
-			if err != nil || d.IsDir() {
+			if err != nil {
+				return nil
+			}
+			// SMB shares can deliver nil DirEntry even with err==nil on Windows.
+			if d == nil {
+				logger.Debug("browse: countVideos: nil DirEntry, skipping", "path", path)
+				return nil
+			}
+			if d.IsDir() {
 				return nil
 			}
 			if ffmpeg.IsVideoFile(d.Name()) {
@@ -382,7 +413,15 @@ func (b *Browser) GetVideoFilesWithProgress(ctx context.Context, paths []string,
 
 		if info.IsDir() {
 			_ = filepath.Walk(cleanPath, func(filePath string, info os.FileInfo, err error) error {
-				if err != nil || info.IsDir() {
+				if err != nil {
+					return nil
+				}
+				// SMB shares can deliver nil FileInfo even with err==nil on Windows.
+				if info == nil {
+					logger.Debug("browse: walk: nil FileInfo, skipping", "path", filePath)
+					return nil
+				}
+				if info.IsDir() {
 					return nil
 				}
 				if ffmpeg.IsVideoFile(filePath) {
@@ -604,6 +643,11 @@ func (b *Browser) WarmCountCache(ctx context.Context) {
 			return filepath.SkipAll
 		}
 		if err != nil {
+			return nil
+		}
+		// SMB shares can deliver nil DirEntry even with err==nil on Windows.
+		if d == nil {
+			logger.Debug("browse: WarmCountCache: nil DirEntry, skipping", "path", path)
 			return nil
 		}
 		// Skip hidden entries
