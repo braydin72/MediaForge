@@ -43,17 +43,17 @@ func main() {
 		return
 	}
 
-	// Determine config path
+	// Determine config path: explicit flag > CONFIG_PATH env > platform default.
+	// On Windows, EnsureWindowsDirs creates %APPDATA%\MediaForge\{,logs} so that
+	// the config lookup and log rotation have a home regardless of working dir.
 	cfgPath := *configPath
 	if cfgPath == "" {
-		// Check environment variable
 		if envPath := os.Getenv("CONFIG_PATH"); envPath != "" {
 			cfgPath = envPath
-		} else {
-			// Default to ./config/mediaforge.yaml
-			cfgPath = "config/mediaforge.yaml"
 		}
 	}
+	config.EnsureWindowsDirs()
+	cfgPath = config.ResolveConfigPath(cfgPath)
 
 	// Record whether config existed before Load (Load creates the file when absent).
 	_, statErr := os.Stat(cfgPath)

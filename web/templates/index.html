@@ -2670,6 +2670,17 @@
                                        onchange="updateSetting('intake_library_tv_shows', this.value)">
                             </div>
                         </div>
+                        <div class="setting-item setting-item-stacked">
+                            <div class="setting-info">
+                                <div class="setting-name">Media browser root</div>
+                                <div class="setting-desc">Root folder for the file browser. Accepts local paths (D:\Media), UNC paths (\\server\share), or /media for Docker.</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="text" class="setting-input-wide" id="setting-media-path"
+                                       placeholder="/media  or  \\server\share"
+                                       onchange="updateSetting('media_path', this.value)">
+                            </div>
+                        </div>
                         <div class="setting-item">
                             <div class="setting-info">
                                 <div class="setting-name">Stability check interval</div>
@@ -4917,6 +4928,7 @@
 
                 // Intake settings
                 document.getElementById('setting-intake-enabled').checked = config.intake_enabled === true;
+                document.getElementById('setting-media-path').value = config.media_path || '';
                 document.getElementById('setting-intake-watch-folder').value = config.intake_watch_folder || '/incoming';
                 document.getElementById('setting-intake-staging-folder').value = config.intake_staging_folder || '/staging';
                 document.getElementById('setting-intake-library-movies').value = config.intake_library_movies || '/media/Movies';

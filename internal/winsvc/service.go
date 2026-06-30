@@ -42,10 +42,8 @@ type WindowsService struct {
 func (s *WindowsService) Execute(args []string, r <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
 	status <- svc.Status{State: svc.StartPending}
 
-	cfgPath := s.ConfigPath
-	if cfgPath == "" {
-		cfgPath = "config/mediaforge.yaml"
-	}
+	config.EnsureWindowsDirs()
+	cfgPath := config.ResolveConfigPath(s.ConfigPath)
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {

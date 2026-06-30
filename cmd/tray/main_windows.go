@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/braydin72/mediaforge/internal/config"
 	"github.com/getlantern/systray"
 )
 
@@ -38,12 +39,18 @@ type trayState struct {
 var state trayState
 
 func main() {
-	configFlag := flag.String("config", "config/mediaforge.yaml", "Path to MediaForge config file")
+	configFlag := flag.String("config", "", "Path to MediaForge config file (default: %APPDATA%\\MediaForge\\mediaforge.yaml)")
 	flag.Parse()
 
-	configDir := filepath.Dir(*configFlag)
+	cfgPath := config.ResolveConfigPath(*configFlag)
+	configDir := filepath.Dir(cfgPath)
 	if configDir == "." {
-		configDir = "config"
+		// Fallback: use APPDATA dir or "config" if APPDATA is unset.
+		if base := config.EnsureWindowsDirs(); base != "" {
+			configDir = base
+		} else {
+			configDir = "config"
+		}
 	}
 	logFile = filepath.Join(configDir, "logs", "mediaforge.log")
 

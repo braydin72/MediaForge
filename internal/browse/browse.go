@@ -724,6 +724,22 @@ func (b *Browser) WarmCountCache(ctx context.Context) {
 	}
 }
 
+// SetRoot updates the browser's media root. Both caches are cleared because
+// existing entries may lie outside the new root boundary.
+func (b *Browser) SetRoot(root string) {
+	absRoot, err := filepath.Abs(filepath.FromSlash(root))
+	if err != nil {
+		absRoot = filepath.Clean(filepath.FromSlash(root))
+	}
+	b.cacheMu.Lock()
+	b.mediaRoot = absRoot
+	b.cache = make(map[string]*ffmpeg.ProbeResult)
+	b.cacheMu.Unlock()
+	b.countCacheMu.Lock()
+	b.countCache = make(map[string]*dirCount)
+	b.countCacheMu.Unlock()
+}
+
 // ProbeFile probes a single file and returns its metadata
 func (b *Browser) ProbeFile(ctx context.Context, path string) (*ffmpeg.ProbeResult, error) {
 	result, err := b.prober.Probe(ctx, path)

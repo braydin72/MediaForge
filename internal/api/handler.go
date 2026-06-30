@@ -500,6 +500,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 
 // UpdateConfigRequest is the request body for updating config
 type UpdateConfigRequest struct {
+	MediaPath             *string `json:"media_path,omitempty"`
 	OriginalHandling      *string `json:"original_handling,omitempty"`
 	UseCompletedDir       *bool   `json:"use_completed_dir,omitempty"`
 	Workers               *int    `json:"workers,omitempty"`
@@ -568,6 +569,20 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+
+	// Handle media browser root path.
+	// Accepts local paths (D:\Media), UNC paths (\\server\share), and relative
+	// paths (./media or /media for Docker). No existence check at save time —
+	// the path may be a network share not yet accessible.
+	if req.MediaPath != nil {
+		p := strings.TrimSpace(*req.MediaPath)
+		if p == "" {
+			writeError(w, http.StatusBadRequest, "media_path cannot be empty")
+			return
+		}
+		h.cfg.MediaPath = p
+		h.browser.SetRoot(p)
 	}
 
 	// Only allow updating certain fields

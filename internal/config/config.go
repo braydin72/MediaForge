@@ -419,3 +419,44 @@ func (c *Config) GetTempDir() string {
 	}
 	return os.TempDir()
 }
+
+// ResolveConfigPath returns the effective config file path.
+// If explicit is non-empty (user flag or CONFIG_PATH env var), it is returned
+// unchanged. On Windows, checks %APPDATA%\MediaForge\mediaforge.yaml before
+// falling back to ./config/mediaforge.yaml so the process finds its config
+// regardless of working directory (e.g. when launched as a Windows service).
+func ResolveConfigPath(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if runtime.GOOS == "windows" {
+		if appData := os.Getenv("APPDATA"); appData != "" {
+			candidate := filepath.Join(appData, "MediaForge", "mediaforge.yaml")
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+		}
+	}
+	return "config/mediaforge.yaml"
+}
+
+// EnsureWindowsDirs creates %APPDATA%\MediaForge and a logs subdirectory on
+// Windows. On non-Windows systems this is a no-op. Returns the MediaForge
+// AppData base directory (used for log/DB path derivation), or "" if not
+// applicable.
+func EnsureWindowsDirs() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	appData := os.Getenv("APPDATA")
+	if appData == "" {
+		return ""
+	}
+	base := filepath.Join(appData, "MediaForge")
+	for _, dir := range []string{base, filepath.Join(base, "logs")} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "mediaforge: could not create %s: %v\n", dir, err)
+		}
+	}
+	return base
+}
