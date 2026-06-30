@@ -1327,6 +1327,38 @@ func (h *Handler) TestNotifications(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "test notification sent"})
 }
 
+// PauseIntake handles POST /api/intake/pause
+func (h *Handler) PauseIntake(w http.ResponseWriter, r *http.Request) {
+	if h.watcher == nil {
+		writeError(w, http.StatusServiceUnavailable, "intake watcher not configured")
+		return
+	}
+	h.watcher.Pause()
+	writeJSON(w, http.StatusOK, map[string]interface{}{"paused": true})
+}
+
+// ResumeIntake handles POST /api/intake/resume
+func (h *Handler) ResumeIntake(w http.ResponseWriter, r *http.Request) {
+	if h.watcher == nil {
+		writeError(w, http.StatusServiceUnavailable, "intake watcher not configured")
+		return
+	}
+	h.watcher.Resume()
+	writeJSON(w, http.StatusOK, map[string]interface{}{"paused": false})
+}
+
+// IntakeStatus handles GET /api/intake/status
+func (h *Handler) IntakeStatus(w http.ResponseWriter, r *http.Request) {
+	if h.watcher == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": false, "paused": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"enabled": true,
+		"paused":  h.watcher.Paused(),
+	})
+}
+
 // DispatchNotification dispatches a notification event from outside the handler
 // (e.g. from the SSE handler or intake watcher).
 func (h *Handler) DispatchNotification(e *notify.Event) {

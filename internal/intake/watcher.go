@@ -143,6 +143,13 @@ func (w *Watcher) Resume() {
 	logger.Info("Intake watcher resumed")
 }
 
+// Paused reports whether the watcher is currently paused.
+func (w *Watcher) Paused() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.paused
+}
+
 // scan recursively walks the watch folder and spawns a pipeline goroutine for
 // each newly discovered video file, regardless of subdirectory depth.
 func (w *Watcher) scan(ctx context.Context) {

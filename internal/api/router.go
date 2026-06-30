@@ -26,6 +26,11 @@ func registerAPIRoutes(mux *http.ServeMux, h *Handler) {
 	mux.HandleFunc("POST /api/queue/pause", h.PauseQueue)
 	mux.HandleFunc("POST /api/queue/resume", h.ResumeQueue)
 
+	// Intake watcher control
+	mux.HandleFunc("POST /api/intake/pause", h.PauseIntake)
+	mux.HandleFunc("POST /api/intake/resume", h.ResumeIntake)
+	mux.HandleFunc("GET /api/intake/status", h.IntakeStatus)
+
 	// Configuration
 	mux.HandleFunc("GET /api/config", h.GetConfig)
 	mux.HandleFunc("PUT /api/config", h.UpdateConfig)
