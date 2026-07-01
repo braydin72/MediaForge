@@ -32,8 +32,15 @@ NOT yet started / still pending:
 - SmartShrink quality cascade (Excellent -> Good -> Acceptable fallback)
 - CRF search range expansion (28 down to 16)
 - VMAF sample count configurable
-- Inno Setup installer (installer/mediaforge.iss written, NOT yet tested or wired
-  into CI)
+- Inno Setup installer (installer/mediaforge.iss + installer/default-config.yaml
+  written, NOT yet tested or wired into CI)
+
+Verified this session (no code changes):
+- Ran mediaforge.exe on Windows: config auto-created at
+  %APPDATA%\MediaForge\mediaforge.yaml, logs at
+  %APPDATA%\MediaForge\logs\mediaforge.log, SQLite store at
+  %APPDATA%\MediaForge\mediaforge.db — all as expected from commits
+  ee5ff4f and f44e935.
 
 Key files changed this session:
 - internal/config/config.go         (ResolveConfigPath, EnsureWindowsDirs)
