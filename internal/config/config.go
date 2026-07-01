@@ -422,19 +422,16 @@ func (c *Config) GetTempDir() string {
 
 // ResolveConfigPath returns the effective config file path.
 // If explicit is non-empty (user flag or CONFIG_PATH env var), it is returned
-// unchanged. On Windows, checks %APPDATA%\MediaForge\mediaforge.yaml before
-// falling back to ./config/mediaforge.yaml so the process finds its config
-// regardless of working directory (e.g. when launched as a Windows service).
+// unchanged. On Windows, always resolves to %APPDATA%\MediaForge\mediaforge.yaml
+// so the process finds its config regardless of working directory (e.g. when
+// launched as a Windows service); Load() creates the file there if missing.
 func ResolveConfigPath(explicit string) string {
 	if explicit != "" {
 		return explicit
 	}
 	if runtime.GOOS == "windows" {
 		if appData := os.Getenv("APPDATA"); appData != "" {
-			candidate := filepath.Join(appData, "MediaForge", "mediaforge.yaml")
-			if _, err := os.Stat(candidate); err == nil {
-				return candidate
-			}
+			return filepath.Join(appData, "MediaForge", "mediaforge.yaml")
 		}
 	}
 	return "config/mediaforge.yaml"
