@@ -3961,7 +3961,7 @@
 
         async function resumeQueue() {
             try {
-                await fetch('/api/queue/resume', { method: 'POST' });
+                await fetch('/api/queue/start', { method: 'POST' });
                 queuePaused = false;
                 updateStopResumeButton();
                 refreshJobs();

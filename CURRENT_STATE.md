@@ -54,3 +54,30 @@ Key files changed this session:
 ALWAYS run "git log --oneline -10" at the start of a new session to see
 what actually landed vs what was requested, before assuming anything is
 done or not done.
+
+## Update: queue control API (Start/Pause/Stop) for tray app
+
+This session added the three queue-control endpoints the tray app menu will
+call. The tray app itself was not modified — wiring the menu items is the
+next step.
+
+Changes:
+- internal/api/handler.go: renamed PauseQueue→PausePipeline,
+  ResumeQueue→StartPipeline. Added new StopPipeline handler that calls
+  h.workerPool.StopAll().
+- internal/api/router.go: routes are now
+  POST /api/queue/start  → StartPipeline (workerPool.Unpause)
+  POST /api/queue/pause  → PausePipeline (workerPool.Pause)
+  POST /api/queue/stop   → StopPipeline  (workerPool.StopAll)
+- internal/jobs/worker.go: added WorkerPool.StopAll() as a no-op stub.
+  Final semantics to be decided — options listed in the source comment
+  (requeue vs fail vs clear).
+- web/templates/index.html: web UI resume button now calls
+  /api/queue/start (was /api/queue/resume). Pause button unchanged.
+
+WorkerPool method status:
+- Pause()     — existed, unchanged.
+- Unpause()   — existed, unchanged.
+- StopAll()   — ADDED as a no-op stub.
+
+Verified: go build ./... and go test ./... both clean.

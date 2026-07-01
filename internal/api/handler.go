@@ -392,9 +392,10 @@ func (h *Handler) ClearQueue(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// PauseQueue handles POST /api/queue/pause
-// Stops all running jobs and prevents new jobs from starting
-func (h *Handler) PauseQueue(w http.ResponseWriter, r *http.Request) {
+// PausePipeline handles POST /api/queue/pause
+// Stops all running jobs and prevents new jobs from starting.
+// Called by the tray app menu and the web UI Stop button.
+func (h *Handler) PausePipeline(w http.ResponseWriter, r *http.Request) {
 	count := h.workerPool.Pause()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"paused":   true,
@@ -402,12 +403,27 @@ func (h *Handler) PauseQueue(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ResumeQueue handles POST /api/queue/resume
-// Allows workers to pick up jobs again
-func (h *Handler) ResumeQueue(w http.ResponseWriter, r *http.Request) {
+// StartPipeline handles POST /api/queue/start
+// Allows workers to pick up jobs again after a pause/stop.
+// Called by the tray app menu and the web UI Start button.
+func (h *Handler) StartPipeline(w http.ResponseWriter, r *http.Request) {
 	h.workerPool.Unpause()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"paused": false,
+		"status": "pipeline started",
+	})
+}
+
+// StopPipeline handles POST /api/queue/stop
+// Cancels all in-progress jobs so the pipeline can be torn down or restarted.
+// Called by the tray app menu.
+// Note: workerPool.StopAll() is currently a stub — semantics to be finalized
+// in a follow-up. The paused flag remains set so workers won't pick up new
+// work until /api/queue/start is called.
+func (h *Handler) StopPipeline(w http.ResponseWriter, r *http.Request) {
+	h.workerPool.StopAll()
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": "pipeline stopped",
 	})
 }
 

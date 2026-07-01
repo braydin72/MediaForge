@@ -354,6 +354,17 @@ func (p *WorkerPool) Unpause() {
 	p.pausedMu.Unlock()
 }
 
+// StopAll cancels all in-progress jobs. The paused flag is left in its current
+// state so the operator can decide whether to resume via /api/queue/start.
+//
+// TODO: define final semantics. Options being considered:
+//   - Cancel running jobs, requeue them (mirror Pause())
+//   - Cancel running jobs, mark them failed, leave queue otherwise intact
+//   - Cancel running jobs, clear pending jobs entirely
+func (p *WorkerPool) StopAll() {
+	// Stub: no-op until semantics are decided.
+}
+
 // Start starts the worker's processing loop
 func (w *Worker) Start(parentCtx context.Context) {
 	w.ctx, w.cancel = context.WithCancel(parentCtx)

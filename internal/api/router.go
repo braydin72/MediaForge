@@ -22,9 +22,10 @@ func registerAPIRoutes(mux *http.ServeMux, h *Handler) {
 	mux.HandleFunc("DELETE /api/jobs/{id}", h.CancelJob)
 	mux.HandleFunc("POST /api/jobs/{id}/retry", h.RetryJob)
 
-	// Queue control (stop/resume)
-	mux.HandleFunc("POST /api/queue/pause", h.PauseQueue)
-	mux.HandleFunc("POST /api/queue/resume", h.ResumeQueue)
+	// Queue control (start/pause/stop) — called by the web UI and the tray app menu.
+	mux.HandleFunc("POST /api/queue/start", h.StartPipeline)
+	mux.HandleFunc("POST /api/queue/pause", h.PausePipeline)
+	mux.HandleFunc("POST /api/queue/stop", h.StopPipeline)
 
 	// Intake watcher control
 	mux.HandleFunc("POST /api/intake/pause", h.PauseIntake)
