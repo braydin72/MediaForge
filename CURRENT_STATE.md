@@ -1,6 +1,32 @@
 CURRENT STATE NOTE
 
-=== Latest session: build number injection + tray rewrite ===
+=== Latest session: first-run setup wizard (tray, Windows) ===
+
+- Implemented setupConfig() for the tray (Windows). Chose a native Windows Forms
+  dialog driven via PowerShell instead of Fyne — this environment has no gcc and
+  CGO_ENABLED=0, so Fyne (CGO+OpenGL) would break the pure-Go build.
+- New files:
+  * cmd/tray/setup_wizard.ps1 — embedded (go:embed) WinForms wizard. Sections:
+    Intake Paths (4 required path rows w/ Browse), API Keys, LLM, Notifications
+    (email checkbox enables/disables SMTP fields), Advanced. Save & Launch writes
+    JSON to -OutPath and exits 0; Cancel/close exits 1. Folder browse detects a
+    mapped network drive and offers Convert-to-UNC / Keep / Cancel.
+  * cmd/tray/setup_windows.go — runSetupWizard() (temp files + powershell),
+    applyAndSaveConfig() (builds config.DefaultConfig(), overrides fields, creates
+    local dirs, writes via cfg.Save), validateLibraryPath()/isLocalPath()/driveOf(),
+    convertMappedDriveToUNC() (parses `net use X:`), showMessage() error dialog.
+  * cmd/tray/setup_check_test.go — unit tests for the non-GUI helpers (pass).
+- Config is built from config.DefaultConfig() + Save() (not hand-written YAML), so
+  all template fields are covered. Required paths must be non-empty; mapped network
+  drive letters (M:\) are rejected with a "use UNC" error; UNC paths accepted and
+  validated at runtime. intake.enabled=true on wizard completion.
+- LINUX/DOCKER: NOT changed — the browser first-run wizard already exists
+  (setup.WizardHandler wired in cmd/mediaforge/main.go), and config.Load creates a
+  default config when none exists. No duplication needed.
+- Verified: GOOS=windows go build/vet ./cmd/tray clean; PS script parses; helper
+  tests pass. The GUI modal itself needs a manual click-through (can't run headless).
+
+=== Prior session: build number injection + tray rewrite ===
 
 Build number tooling:
 - Added build.ps1 (repo root): builds dist/mediaforge.exe and dist/tray.exe

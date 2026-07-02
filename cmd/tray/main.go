@@ -84,11 +84,6 @@ func mediaForgePath() string {
 // TODO: not yet implemented — stub so the tray shows an icon with no menu.
 func buildTrayMenu() {}
 
-// setupConfig runs the first-run configuration flow (modal wizard) and blocks
-// until the user has produced a valid config file.
-// TODO: not yet implemented.
-func setupConfig() {}
-
 // fileExists reports whether path exists and is not a directory error.
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
