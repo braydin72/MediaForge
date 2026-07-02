@@ -635,6 +635,12 @@ func (b *Browser) WarmCountCache(ctx context.Context) {
 	start := time.Now()
 	logger.Info("Warming directory count cache", "media_root", b.mediaRoot)
 
+	// Bound the walk: WalkDir on an unreachable SMB share can block for a long
+	// time. Cap it so a network hiccup logs a warning instead of hanging the
+	// warm goroutine indefinitely.
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	dirCounts := make(map[string]*dirCount)
 	var videoCount int
 
@@ -684,7 +690,15 @@ func (b *Browser) WarmCountCache(ctx context.Context) {
 		// Propagate this file's count and size to every ancestor directory
 		dir := filepath.Dir(path)
 		for b.isUnderRoot(dir) {
-			dc := dirCounts[dir] // always present: WalkDir visits parents before children
+			// Normally present (WalkDir visits parents before children), but a
+			// parent can be missing if it was skipped mid-walk (nil DirEntry or
+			// an access error on an SMB share). Create it on demand rather than
+			// dereferencing nil.
+			dc := dirCounts[dir]
+			if dc == nil {
+				dc = &dirCount{}
+				dirCounts[dir] = dc
+			}
 			dc.fileCount++
 			dc.totalSize += info.Size()
 
@@ -719,6 +733,13 @@ func (b *Browser) WarmCountCache(ctx context.Context) {
 		logger.Info("Directory count cache warmed",
 			"directories", len(dirCounts),
 			"videos", videoCount,
+			"duration", time.Since(start).Round(time.Millisecond),
+		)
+	} else {
+		logger.Warn("Directory count cache warm did not complete",
+			"media_root", b.mediaRoot,
+			"error", ctx.Err(),
+			"directories_seen", len(dirCounts),
 			"duration", time.Since(start).Round(time.Millisecond),
 		)
 	}

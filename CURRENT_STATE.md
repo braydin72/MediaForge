@@ -1,6 +1,24 @@
 CURRENT STATE NOTE
 
-=== Latest session: tray launch opens browser ===
+=== Latest session: fix nil panic in WarmCountCache (SMB shares) ===
+
+- internal/browse/browse.go WarmCountCache(): the ancestor-propagation loop
+  assumed dirCounts[dir] was always present ("WalkDir visits parents before
+  children"). On SMB/UNC shares a parent dir can be skipped mid-walk (nil
+  DirEntry or access error), leaving dirCounts[dir]==nil -> dc.fileCount++
+  panicked. Now creates the dirCount on demand instead of dereferencing nil.
+- Added a 30s context.WithTimeout around the WalkDir so an unreachable share
+  logs a warning instead of hanging the warm goroutine forever. New warning
+  log ("Directory count cache warm did not complete") when ctx cancels/times
+  out before completion.
+- Note: the nil-DirEntry guard the original report asked for was already
+  present; the real crash was the ancestor-loop deref above.
+- Verified: `go build ./internal/browse/` compiles clean. Could NOT run full
+  build/tests this session — C: drive is 100% full (~40MB free), so linking
+  the mediaforge/tray binaries and go test both fail on disk space, unrelated
+  to this change. Re-run `go build ./... && go test ./...` after freeing disk.
+
+=== Prior session: tray launch opens browser ===
 
 - cmd/tray/main.go launchMediaForge(): now logs to stderr on cmd.Start()
   failure and, after the 2s bind wait, opens the web UI via new openBrowser()

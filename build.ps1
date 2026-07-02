@@ -1,4 +1,4 @@
-# build.ps1 — build mediaforge.exe and tray.exe with an injected build number.
+# build.ps1 — build mediaforge.exe and mediaforge-tray.exe with an injected build number.
 #
 # The build number is injected into internal/version.Build via -ldflags -X,
 # matching the scheme used by the Dockerfile and CI. Locally we derive it from
@@ -21,7 +21,7 @@ New-Item -ItemType Directory -Force -Path dist | Out-Null
 Write-Host "Building mediaforge.exe (build $Build)..."
 go build -ldflags $ldflags -o dist/mediaforge.exe ./cmd/mediaforge
 
-Write-Host "Building tray.exe (build $Build)..."
-go build -ldflags $ldflags -o dist/tray.exe ./cmd/tray
+Write-Host "Building mediaforge-tray.exe (build $Build)..."
+go build -ldflags $ldflags -o dist/mediaforge-tray.exe ./cmd/tray
 
 Write-Host "Done. Binaries in .\dist\ (build $Build)."

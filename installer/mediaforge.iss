@@ -1,7 +1,7 @@
 ; MediaForge Windows Installer
 ; Requires Inno Setup 6.x — https://jrsoftware.org/isinfo.php
 #define MyAppName "MediaForge"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.0-alpha4"
 #define MyAppPublisher "braydin72"
 #define MyAppURL "https://github.com/braydin72/mediaforge"
 #define MyAppExeName "mediaforge.exe"
