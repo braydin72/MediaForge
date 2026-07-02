@@ -1,6 +1,28 @@
 CURRENT STATE NOTE
 
-=== Latest session: first-run setup wizard (tray, Windows) ===
+=== Latest session: tray menu implementation ===
+
+- Implemented buildTrayMenu() in cmd/tray/main.go. Menu (in order): Pipeline
+  (checkbox, checked=running; toggles /api/queue/start|pause), Transcode Queue
+  (N) (disabled label, refreshed every 2s from /api/stats pending+running),
+  sep, Start/Pause/Stop Queue (POST /api/queue/*), sep, Config (opens
+  mediaforge.yaml), Restart MediaForge (killMediaForge -> sleep 1s ->
+  launchMediaForge), View Logs, sep, Exit (kill + systray.Quit + os.Exit).
+- Helpers added: callQueueAPI (silent-fail POST, logs to stderr), getQueueCount
+  (GET /api/stats), openFile (cmd /c start), killMediaForge (taskkill /F +
+  wait up to 3s via tasklist), mediaForgeRunning, logsPath.
+- Corrected log path vs the prompt: real path is
+  %APPDATA%\MediaForge\logs\mediaforge.log (logger uses {configDir}/logs), NOT
+  ...\config\logs\... . Derived from configPath() rather than hardcoded.
+- Kept the existing real embedded icon (loadIcon) instead of a blue-square
+  placeholder. Omitted the openBrowser helper from the spec — no menu item uses
+  it and it would trip the unused-func linter; add it if an "Open Web UI" item
+  is introduced later.
+- Verified: GOOS=windows go build/vet ./cmd/tray clean; queue handlers ignore
+  body and return 200 (callQueueAPI nil body OK); /api/queue/stop exists.
+  GUI modal/tray interaction can't be driven headlessly — needs manual click.
+
+=== Prior session: first-run setup wizard (tray, Windows) ===
 
 - Implemented setupConfig() for the tray (Windows). Chose a native Windows Forms
   dialog driven via PowerShell instead of Fyne — this environment has no gcc and
