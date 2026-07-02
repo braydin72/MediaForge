@@ -231,7 +231,9 @@ $btnSave.Add_Click({
             "Missing Required Fields", 'OK', 'Error') | Out-Null
         return
     }
-    ($obj | ConvertTo-Json) | Set-Content -Path $OutPath -Encoding UTF8
+    # Write UTF-8 WITHOUT a BOM: Windows PowerShell 5.1's `Set-Content -Encoding UTF8`
+    # emits a BOM that Go's encoding/json rejects.
+    [System.IO.File]::WriteAllText($OutPath, ($obj | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
     $script:saved = $true
     $form.Close()
 })

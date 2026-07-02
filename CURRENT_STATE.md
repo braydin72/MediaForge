@@ -1,6 +1,25 @@
 CURRENT STATE NOTE
 
-=== Latest session: fix nil panic in WarmCountCache (SMB shares) ===
+=== Latest session: fix tray first-run config not persisting (UTF-8 BOM) ===
+
+- Symptom: first-run setup modal always opened with defaults; after "Save &
+  Launch" the form closed, nothing launched, and restart re-showed the modal
+  with defaults (config never written to %APPDATA%\MediaForge\mediaforge.yaml).
+- Root cause: setup_wizard.ps1 wrote result.json via `Set-Content -Encoding
+  UTF8`, which in Windows PowerShell 5.1 prepends a UTF-8 BOM. Go's
+  encoding/json rejects a leading BOM, so runSetupWizard()'s json.Unmarshal
+  failed and returned ok=false -> setupConfig() treated it as Cancel and
+  os.Exit(0). The config-save path (applyAndSaveConfig -> cfg.Save) was never
+  reached.
+- Fix: cmd/tray/setup_windows.go strips a leading UTF-8 BOM before Unmarshal
+  (bytes.TrimPrefix). Also changed setup_wizard.ps1 to write UTF-8 without a
+  BOM via [System.IO.File]::WriteAllText for good measure.
+- Also removed a stray untracked cmd/tray/main_windows.go (poller-only tray
+  duplicate) that redeclared main/onReady/baseURL/openFile and broke the
+  Windows build. It was never committed; HEAD was unaffected.
+- Verified: `GOOS=windows go build ./...` and `go build ./...` both pass.
+
+=== Prior session: fix nil panic in WarmCountCache (SMB shares) ===
 
 - internal/browse/browse.go WarmCountCache(): the ancestor-propagation loop
   assumed dirCounts[dir] was always present ("WalkDir visits parents before

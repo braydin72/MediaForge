@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -135,6 +136,9 @@ func runSetupWizard(defaults wizardValues) (wizardValues, bool) {
 	if err != nil {
 		return wizardValues{}, false
 	}
+	// Windows PowerShell 5.1's `Set-Content -Encoding UTF8` prepends a UTF-8 BOM,
+	// which encoding/json rejects ("invalid character 'ï'"). Strip it before decode.
+	out = bytes.TrimPrefix(out, []byte{0xEF, 0xBB, 0xBF})
 	var v wizardValues
 	if err := json.Unmarshal(out, &v); err != nil {
 		return wizardValues{}, false
