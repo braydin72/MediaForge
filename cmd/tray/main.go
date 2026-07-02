@@ -110,7 +110,9 @@ func buildTrayMenu() {
 
 	// 4-6. Explicit queue controls.
 	mStart := systray.AddMenuItem("Start Queue", "Resume processing the transcode queue")
-	mPause := systray.AddMenuItem("Pause Queue", "Pause processing the transcode queue")
+	// Checked = queue paused. Toggling drives the pause/start API and keeps the
+	// Pipeline checkbox visually in sync (checked Pipeline = running).
+	mPause := systray.AddMenuItemCheckbox("Pause Queue", "Pause processing the transcode queue", false)
 	mStop := systray.AddMenuItem("Stop Queue", "Stop the transcode queue")
 
 	systray.AddSeparator() // 7
@@ -140,19 +142,32 @@ func buildTrayMenu() {
 			case <-mPipeline.ClickedCh:
 				if mPipeline.Checked() {
 					mPipeline.Uncheck()
+					mPause.Check()
 					callQueueAPI("pause")
 				} else {
 					mPipeline.Check()
+					mPause.Uncheck()
 					callQueueAPI("start")
 				}
 			case <-mStart.ClickedCh:
 				mPipeline.Check()
+				mPause.Uncheck()
 				callQueueAPI("start")
 			case <-mPause.ClickedCh:
-				mPipeline.Uncheck()
-				callQueueAPI("pause")
+				if mPause.Checked() {
+					// Was paused, now unchecked -> resume.
+					mPause.Uncheck()
+					mPipeline.Check()
+					callQueueAPI("start")
+				} else {
+					// Now checked -> pause.
+					mPause.Check()
+					mPipeline.Uncheck()
+					callQueueAPI("pause")
+				}
 			case <-mStop.ClickedCh:
 				mPipeline.Uncheck()
+				mPause.Check()
 				callQueueAPI("stop")
 			case <-mConfig.ClickedCh:
 				openFile(configPath())
