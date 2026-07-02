@@ -6,7 +6,6 @@
 #define MyAppURL "https://github.com/braydin72/mediaforge"
 #define MyAppExeName "mediaforge.exe"
 #define MyTrayExeName "mediaforge-tray.exe"
-#define MyServiceName "MediaForge"
 [Setup]
 AppId={{8F3A2B1C-7D4E-4A9B-9C2D-1E5F6A7B8C9D}
 AppName={#MyAppName}
@@ -29,9 +28,6 @@ ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
-[Tasks]
-Name: "startupservice"; Description: "Start MediaForge automatically at Windows startup"; GroupDescription: "Startup options:"; Flags: checkedonce
-Name: "traystartup"; Description: "Launch MediaForge tray icon at login"; GroupDescription: "Startup options:"; Flags: checkedonce
 [Dirs]
 Name: "{userappdata}\MediaForge"; Permissions: users-modify
 Name: "{userappdata}\MediaForge\logs"; Permissions: users-modify
@@ -43,27 +39,16 @@ Source: "..\web\templates\logo.png"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{group}\MediaForge"; Filename: "{app}\{#MyTrayExeName}"
 Name: "{group}\Open MediaForge Web UI"; Filename: "http://127.0.0.1:8080"
 Name: "{group}\Uninstall MediaForge"; Filename: "{uninstallexe}"
-Name: "{userstartup}\MediaForge"; Filename: "{app}\{#MyTrayExeName}"; Tasks: traystartup
+[Registry]
+; Auto-launch the tray at login (user-level). The tray is responsible for
+; starting mediaforge.exe, so this is the single autostart entry.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "MediaForge"; ValueData: """{app}\{#MyTrayExeName}"""; Flags: uninsdeletevalue
 [Run]
-; Install and start the Windows service
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing MediaForge service..."
-Filename: "sc.exe"; Parameters: "start ""{#MyServiceName}"""; Flags: runhidden waituntilterminated; Tasks: startupservice; StatusMsg: "Starting MediaForge service..."
-; Launch tray app after install if requested
-Filename: "{app}\{#MyTrayExeName}"; Description: "Launch MediaForge tray icon now"; Flags: postinstall nowait skipifsilent
+; Launch the tray after install. The tray runs first-run setup if needed and
+; then launches mediaforge.exe (hidden). We do NOT open a browser here — the
+; tray handles that after configuration.
+Filename: "{app}\{#MyTrayExeName}"; Parameters: "--first-run"; Flags: nowait skipifsilent; StatusMsg: "Starting MediaForge..."
 [UninstallRun]
-; Stop and remove the service before files are deleted
-Filename: "sc.exe"; Parameters: "stop ""{#MyServiceName}"""; Flags: runhidden waituntilterminated; RunOnceId: "StopService"
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "UninstallService"
-[Code]
-function InitializeSetup(): Boolean;
-begin
-  Result := True;
-end;
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  if CurStep = ssPostInstall then
-  begin
-    // Give the service a moment to fully register before any start attempt
-    Sleep(1000);
-  end;
-end;
+; Stop the tray and server so their files can be removed cleanly.
+Filename: "taskkill.exe"; Parameters: "/F /IM {#MyTrayExeName}"; Flags: runhidden; RunOnceId: "KillTray"
+Filename: "taskkill.exe"; Parameters: "/F /IM {#MyAppExeName}"; Flags: runhidden; RunOnceId: "KillServer"

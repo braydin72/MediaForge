@@ -1,6 +1,31 @@
 CURRENT STATE NOTE
 
-=== Latest session: tray menu implementation ===
+=== Latest session: installer switched to launcher model ===
+
+- installer/mediaforge.iss reworked from the Windows-service model to the tray
+  launcher model (tray starts mediaforge.exe; no service).
+- Added [Registry]: HKCU\...\Run "MediaForge" = "{app}\mediaforge-tray.exe"
+  (ValueType string, uninsdeletevalue). Single autostart entry.
+- Removed the [Tasks] (startupservice/traystartup) and the {userstartup}
+  shortcut that duplicated autostart. Removed [Run] service --install + sc
+  start and the [UninstallRun] service stop/--uninstall. Removed the unused
+  MyServiceName define and the service-sleep [Code] block.
+- [Run] now launches {app}\mediaforge-tray.exe --first-run (nowait). NOTE: the
+  tray does not parse --first-run (no flag.Parse); it auto-detects first run via
+  configExists(), so the flag is currently a harmless no-op.
+- [UninstallRun] now taskkills mediaforge-tray.exe and mediaforge.exe so files
+  can be removed.
+- Used correct binary name mediaforge-tray.exe throughout (prompt said tray.exe,
+  which this installer never produced).
+- CAVEAT (ISCC warning): PrivilegesRequired=admin + HKCU Run key — in an admin
+  install HKCU is the elevated user's hive. Fine when the logged-in user is the
+  admin (typical); unreliable if a standard user installs with separate admin
+  creds. Follow-up options: switch Root to HKA/HKLM, or make it a per-user
+  ({localappdata}) install to drop admin. Also pre-existing warning: x64 arch id
+  deprecated (use x64compatible).
+- Verified: ISCC compiles mediaforge.iss successfully.
+
+=== Prior session: tray menu implementation ===
 
 - Implemented buildTrayMenu() in cmd/tray/main.go. Menu (in order): Pipeline
   (checkbox, checked=running; toggles /api/queue/start|pause), Transcode Queue
