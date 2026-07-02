@@ -33,9 +33,9 @@ func main() {
 		setupConfig()
 	}
 
-	// 4-5. Launch the server hidden, then give it a moment to bind its port.
+	// 4-5. Launch the server hidden; launchMediaForge waits for it to bind and
+	// opens the web UI.
 	launchMediaForge()
-	time.Sleep(2 * time.Second)
 
 	// 6-7. Host the tray until the user chooses Exit.
 	systray.Run(onReady, onExit)
@@ -69,9 +69,15 @@ func configPath() string {
 // back to the working directory / PATH.
 func launchMediaForge() {
 	cmd := exec.Command(mediaForgePath())
+	// Windows only: start the server without allocating a console window.
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: hideConsole}
-	// Fire and forget; the tray polls the server API for status once it's up.
-	_ = cmd.Start()
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "tray: failed to start mediaforge.exe: %v\n", err)
+		return
+	}
+	// Give the server time to bind its port, then open the web UI.
+	time.Sleep(2 * time.Second)
+	openBrowser(baseURL)
 }
 
 // mediaForgePath resolves the mediaforge.exe location, preferring the directory
@@ -211,6 +217,13 @@ func getQueueCount() int {
 func openFile(path string) {
 	if err := exec.Command("cmd", "/c", "start", "", path).Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "tray: openFile %s failed: %v\n", path, err)
+	}
+}
+
+// openBrowser opens a URL in the default web browser.
+func openBrowser(url string) {
+	if err := exec.Command("cmd", "/c", "start", "", url).Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "tray: openBrowser %s failed: %v\n", url, err)
 	}
 }
 

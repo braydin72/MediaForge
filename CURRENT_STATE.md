@@ -1,6 +1,19 @@
 CURRENT STATE NOTE
 
-=== Latest session: installer switched to launcher model ===
+=== Latest session: tray launch opens browser ===
+
+- cmd/tray/main.go launchMediaForge(): now logs to stderr on cmd.Start()
+  failure and, after the 2s bind wait, opens the web UI via new openBrowser()
+  helper. Console-hiding (hideConsole/syscall) was already present, unchanged.
+- Removed the redundant time.Sleep(2s) in main() (the wait now lives inside
+  launchMediaForge, so startup no longer double-waits to 4s).
+- openBrowser() added (retires the earlier unused-helper note). Kept the robust
+  mediaForgePath() (os.Executable) rather than os.Args[0].
+- OPEN BEHAVIOR: launchMediaForge is also called by the Restart menu item, so
+  Restart now also reopens the browser after 2s. Left as-is; split into a
+  startup-only browser open if that's unwanted.
+
+=== Prior session: installer switched to launcher model ===
 
 - installer/mediaforge.iss reworked from the Windows-service model to the tray
   launcher model (tray starts mediaforge.exe; no service).
