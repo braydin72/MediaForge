@@ -1,7 +1,12 @@
 ; MediaForge Windows Installer
 ; Requires Inno Setup 6.x — https://jrsoftware.org/isinfo.php
 #define MyAppName "MediaForge"
+; MyAppVersion may be overridden by the build via ISCC /DMyAppVersion=x.y.z
+; (see .github/workflows/release.yml). The fallback below lets the script
+; compile standalone.
+#ifndef MyAppVersion
 #define MyAppVersion "1.0.0-alpha4"
+#endif
 #define MyAppPublisher "braydin72"
 #define MyAppURL "https://github.com/braydin72/mediaforge"
 #define MyAppExeName "mediaforge.exe"
