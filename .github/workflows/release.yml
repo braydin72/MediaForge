@@ -20,29 +20,8 @@ jobs:
         with:
           generate_release_notes: true
 
-  windows:
-    runs-on: windows-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-      - name: Build Windows binaries
-        run: |
-          go build -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=${{ github.run_number }}" -o mediaforge.exe ./cmd/mediaforge
-          go build -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=${{ github.run_number }}" -o mediaforge-tray.exe ./cmd/tray
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            mediaforge.exe
-            mediaforge-tray.exe
-
   windows-installer:
     runs-on: windows-latest
-    needs: windows
     permissions:
       contents: write
     steps:
@@ -55,15 +34,36 @@ jobs:
           go build -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=${{ github.run_number }}" -o mediaforge.exe ./cmd/mediaforge
           go build -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=${{ github.run_number }}" -o mediaforge-tray.exe ./cmd/tray
       - name: Install Inno Setup
-        run: |
-          choco install innosetup -y
+        run: choco install innosetup -y --no-progress
       - name: Compile installer
+        shell: pwsh
         run: |
-          iscc installer\mediaforge.iss
-      - name: Upload installer to release
+          # Derive the installer version from the git tag (vX.Y.Z -> X.Y.Z);
+          # fall back to the default baked into the .iss for non-tag runs.
+          $ref = "${{ github.ref }}"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          if ($ref -like 'refs/tags/*') {
+            $version = "${{ github.ref_name }}" -replace '^v', ''
+            & $iscc "/DMyAppVersion=$version" installer\mediaforge.iss
+          } else {
+            & $iscc installer\mediaforge.iss
+          }
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+      - name: Upload Windows binaries to release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: installer-output\MediaForge-Setup-*.exe
+          files: |
+            mediaforge.exe
+            mediaforge-tray.exe
+      - name: Upload installer to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          # OutputDir in the .iss is relative to the script's folder (installer/),
+          # so the compiled installer lands in installer\installer-output\.
+          files: installer\installer-output\MediaForge-Setup-*.exe
 
   docker:
     runs-on: ubuntu-latest
