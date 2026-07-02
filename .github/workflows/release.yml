@@ -28,9 +28,9 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.25'
       - name: Build Windows binary
-        run: go build -o mediaforge.exe ./cmd/mediaforge
+        run: go build -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=${{ github.run_number }}" -o mediaforge.exe ./cmd/mediaforge
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
@@ -45,11 +45,11 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.25'
       - name: Build Windows binaries
         run: |
-          go build -o mediaforge.exe ./cmd/mediaforge
-          go build -o mediaforge-tray.exe ./cmd/tray
+          go build -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=${{ github.run_number }}" -o mediaforge.exe ./cmd/mediaforge
+          go build -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=${{ github.run_number }}" -o mediaforge-tray.exe ./cmd/tray
       - name: Install Inno Setup
         run: |
           choco install innosetup -y
@@ -91,6 +91,7 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: BUILD_NUMBER=${{ github.run_number }}
           tags: |
             ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest
             ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}', env.REGISTRY, steps.image.outputs.name, steps.version.outputs.tag) || '' }}

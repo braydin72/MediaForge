@@ -1,5 +1,36 @@
 CURRENT STATE NOTE
 
+=== Latest session: build number injection + tray rewrite ===
+
+Build number tooling:
+- Added build.ps1 (repo root): builds dist/mediaforge.exe and dist/tray.exe
+  with the build number injected into internal/version.Build via -ldflags -X.
+  Defaults to git commit count; override with -Build <n>.
+- .github/workflows/release.yml: Windows jobs (mediaforge.exe + tray.exe) and
+  the docker job now inject the build number from github.run_number (matching
+  Dockerfile / dev-build.yml). Bumped setup-go 1.21 -> 1.25 in both Windows
+  jobs to match go.mod (was previously broken).
+
+=== Tray app rewrite (scaffold) ===
+
+- REWROTE the system tray app as a launcher. Deleted the old
+  cmd/tray/main_windows.go (which assumed mediaforge already ran as a Windows
+  service and built a full menu). Replaced with cmd/tray/main.go (//go:build
+  windows).
+- New flow in main(): configExists() → setupConfig() if missing → launchMediaForge()
+  (starts mediaforge.exe hidden via SysProcAttr CreationFlags 0x08000000) →
+  sleep 2s → systray.Run(onReady, onExit).
+- mediaForgePath() prefers mediaforge.exe next to the tray exe, else falls back
+  to "mediaforge.exe" on PATH.
+- STUBS (not yet implemented): buildTrayMenu() (no-op → tray shows icon, empty
+  menu) and setupConfig() (no-op). These are intentional placeholders for the
+  next steps — the previous menu/polling/toast logic was NOT carried over and
+  needs to be rebuilt.
+- cmd/tray/icon_windows.go kept unchanged (loadIcon used by onReady).
+- Verified: GOOS=windows go build -o dist/tray.exe ./cmd/tray is clean.
+
+=== Prior session ===
+
 As of this session, the following were completed:
 
 1. Windows system tray app (cmd/tray/main_windows.go + icon_windows.go) — ALREADY
