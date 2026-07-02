@@ -81,6 +81,20 @@ func main() {
 	// Initialize logger: write to stdout and a rotating session log file.
 	logger.InitWithFile(cfg.LogLevel, earlyConfigDir)
 
+	// Platform-specific first-run handling.
+	// On Windows the MediaForge Setup/tray app is responsible for creating the
+	// config before mediaforge.exe is ever launched, so a missing config is a
+	// fatal error — we fail fast and never show a GUI. On Linux/Docker we keep
+	// the web-based first-run wizard (wired below via the firstRun flag).
+	if runtime.GOOS == "windows" {
+		if !cfgFileExisted {
+			logger.Error("Config not found. Run Windows Setup or the MediaForge tray app first.", "path", cfgPath)
+			os.Exit(1)
+		}
+		// Never serve the setup wizard on Windows; config is owned by Setup/tray.
+		firstRun = false
+	}
+
 	// Override with environment variables
 	if envMedia := os.Getenv("MEDIA_PATH"); envMedia != "" {
 		cfg.MediaPath = envMedia

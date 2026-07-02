@@ -28,9 +28,9 @@ ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
-[Dirs]
-Name: "{userappdata}\MediaForge"; Permissions: users-modify
-Name: "{userappdata}\MediaForge\logs"; Permissions: users-modify
+; No [Dirs] section: the installer does NOT pre-create %APPDATA%\MediaForge or
+; its logs subfolder. The tray/setup app and mediaforge.exe (EnsureWindowsDirs)
+; create those on first run, so user data lives entirely outside Program Files.
 [Files]
 Source: "..\mediaforge.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\mediaforge-tray.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -52,3 +52,7 @@ Filename: "{app}\{#MyTrayExeName}"; Parameters: "--first-run"; Flags: nowait ski
 ; Stop the tray and server so their files can be removed cleanly.
 Filename: "taskkill.exe"; Parameters: "/F /IM {#MyTrayExeName}"; Flags: runhidden; RunOnceId: "KillTray"
 Filename: "taskkill.exe"; Parameters: "/F /IM {#MyAppExeName}"; Flags: runhidden; RunOnceId: "KillServer"
+[UninstallDelete]
+; Remove the install dir if empty after installed files are deleted. User data
+; in %APPDATA%\MediaForge (config, logs, database) is intentionally preserved.
+Type: dirifempty; Name: "{app}"
