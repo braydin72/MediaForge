@@ -56,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Review Queue resized entries based on content (compact cards, scrollable)
 
 ### Fixed
+- Tray Exit left `mediaforge.exe` running as an orphan: `killMediaForge()` now polls up to 5s, re-issuing `taskkill /F` and confirming the process is gone before returning (`cmd/tray/main.go`)
+- Tray executable launched with a visible console window: tray is now linked with `-H windowsgui` (GUI subsystem, no console) (`build.ps1`, `.github/workflows/release.yml`)
+- Tray "View Logs" crashed with "exit status 1" when no log file existed: now creates the log directory and shows a dialog with the full `%APPDATA%\MediaForge\logs\mediaforge.log` path instead of failing silently (`cmd/tray/main.go`)
+- Left-click on the tray icon did nothing: switched from `getlantern/systray` to `fyne.io/systray` and wired `SetOnTapped` so left-click opens the dashboard; right-click still opens the menu (`cmd/tray/main.go`, `go.mod`, `go.sum`)
+- Installer deprecated `x64` architecture id and admin/HKCU autostart hive mismatch: `mediaforge.iss` now uses `x64compatible` and a per-user install (`PrivilegesRequired=lowest`) so the install dir and autostart Run key share the same user hive (`installer/mediaforge.iss`)
 - PowerShell UTF-8 BOM handling: `setup_wizard.ps1` now writes UTF-8 without BOM; Go-side strips any leading BOM before JSON unmarshal
 - Tray app console window visibility: added `CREATE_NO_WINDOW` flag on mediaforge.exe launch
 - Nil pointer panic in `WarmCountCache` when SMB shares become unavailable mid-walk
