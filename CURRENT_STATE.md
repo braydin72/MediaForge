@@ -1,6 +1,29 @@
 CURRENT STATE NOTE
 
-=== Latest session: browse cache timeout configurable + early-exit ===
+=== Latest session: tray self-logging to tray.log ===
+
+Problem: the tray produced no log, so right-click/errors couldn't be
+diagnosed. Root cause: the tray is linked -H windowsgui (no console), so
+every fmt.Fprintf(os.Stderr, ...) diagnostic was discarded. A user-added
+init() redirected the log package to tray.log but nothing used log.*, and
+it could panic (log.SetOutput(nil) on a fresh install where the logs dir
+didn't exist yet).
+
+Fixes in cmd/tray/main.go:
+- Hardened init(): MkdirAll the logs dir first, bail (keep default stderr)
+  if OpenFile fails instead of SetOutput(nil), set "tray: " prefix +
+  timestamps, write a "----- tray started -----" marker.
+- Converted all 9 fmt.Fprintf(os.Stderr,...) diagnostics to log.Printf/
+  log.Println, dropping the now-redundant "tray: " message prefix.
+
+Note: tray.log (tray's own log) is separate from mediaforge.log (the server
+log opened by the View Logs menu) — intentional so tray errors don't depend
+on the server starting.
+
+Verified: GOOS=windows go build -ldflags "-H windowsgui" ./cmd/tray, vet,
+and go test ./cmd/tray all clean.
+
+=== Prior session: browse cache timeout configurable + early-exit ===
 
 Issue #11 — WarmCountCache timed out at a fixed 30s on large SMB shares,
 leaving dashboard stats empty. Changes:

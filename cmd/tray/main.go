@@ -6,6 +6,7 @@
 package main
 
 import (
+	"log"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -26,6 +27,31 @@ const hideConsole = 0x08000000
 
 // baseURL is the local MediaForge server the tray talks to.
 const baseURL = "http://127.0.0.1:8080"
+
+// init routes the tray's own diagnostics to %APPDATA%\MediaForge\logs\tray.log.
+// The tray is linked with -H windowsgui (no console), so stderr goes nowhere;
+// without this file there is no way to see why the tray misbehaves. The log dir
+// is created first because on a fresh install it may not exist yet, and we keep
+// the default stderr output if the file can't be opened (SetOutput(nil) would
+// make every later log call panic on a nil writer).
+func init() {
+	logDir := filepath.Join(os.Getenv("APPDATA"), "MediaForge", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return
+	}
+	logFile, err := os.OpenFile(
+		filepath.Join(logDir, "tray.log"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+		0o644,
+	)
+	if err != nil {
+		return
+	}
+	log.SetOutput(logFile)
+	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
+	log.SetPrefix("tray: ")
+	log.Println("----- tray started -----")
+}
 
 func main() {
 	// 1-3. Ensure a config exists; run first-run setup if it doesn't.
@@ -76,7 +102,7 @@ func launchMediaForge() {
 	// Windows only: start the server without allocating a console window.
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: hideConsole}
 	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "tray: failed to start mediaforge.exe: %v\n", err)
+		log.Printf("failed to start mediaforge.exe: %v", err)
 		return
 	}
 	// Give the server time to bind its port, then open the web UI.
@@ -176,7 +202,7 @@ func buildTrayMenu() {
 			case <-mConfig.ClickedCh:
 				openFile(configPath())
 			case <-mRestart.ClickedCh:
-				fmt.Fprintln(os.Stderr, "tray: restarting mediaforge.exe")
+				log.Println("restarting mediaforge.exe")
 				killMediaForge()
 				time.Sleep(1 * time.Second)
 				launchMediaForge()
@@ -205,7 +231,7 @@ func openLog() {
 	path := logsPath()
 	if !fileExists(path) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			fmt.Fprintf(os.Stderr, "tray: could not create log dir %s: %v\n", filepath.Dir(path), err)
+			log.Printf("could not create log dir %s: %v", filepath.Dir(path), err)
 		}
 		showMessage("MediaForge — Logs",
 			fmt.Sprintf("No log file exists yet at:\n\n%s\n\n"+
@@ -221,12 +247,12 @@ func callQueueAPI(endpoint string) error {
 	url := baseURL + "/api/queue/" + endpoint
 	resp, err := http.Post(url, "application/json", nil) //nolint:noctx
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "tray: POST %s failed: %v\n", url, err)
+		log.Printf("POST %s failed: %v", url, err)
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintf(os.Stderr, "tray: POST %s returned HTTP %d\n", url, resp.StatusCode)
+		log.Printf("POST %s returned HTTP %d", url, resp.StatusCode)
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return nil
@@ -253,14 +279,14 @@ func getQueueCount() int {
 // openFile opens a file with its default handler (Explorer's "start").
 func openFile(path string) {
 	if err := exec.Command("cmd", "/c", "start", "", path).Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "tray: openFile %s failed: %v\n", path, err)
+		log.Printf("openFile %s failed: %v", path, err)
 	}
 }
 
 // openBrowser opens a URL in the default web browser.
 func openBrowser(url string) {
 	if err := exec.Command("cmd", "/c", "start", "", url).Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "tray: openBrowser %s failed: %v\n", url, err)
+		log.Printf("openBrowser %s failed: %v", url, err)
 	}
 }
 
@@ -278,13 +304,13 @@ func killMediaForge() {
 			if !mediaForgeRunning() {
 				return
 			}
-			fmt.Fprintf(os.Stderr, "tray: taskkill mediaforge.exe: %v: %s\n", err, strings.TrimSpace(string(out)))
+			log.Printf("taskkill mediaforge.exe: %v: %s", err, strings.TrimSpace(string(out)))
 		}
 		if !mediaForgeRunning() {
 			return
 		}
 		if time.Now().After(deadline) {
-			fmt.Fprintln(os.Stderr, "tray: mediaforge.exe still running after 5s kill timeout")
+			log.Println("mediaforge.exe still running after 5s kill timeout")
 			return
 		}
 		time.Sleep(200 * time.Millisecond)
