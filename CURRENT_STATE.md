@@ -1,6 +1,26 @@
 CURRENT STATE NOTE
 
-=== Latest session: startup version banner + encoder logging (#10) ===
+=== Latest session: wizard & installer UX polish (#15/#16/#17/#18) ===
+
+Added help/warning text to the first-run wizard and an AppData-removal prompt to
+the uninstaller. The wizard UI lives in cmd/tray/setup_wizard.ps1 (embedded via
+go:embed into setup_windows.go), so the text was added there, not in the .go.
+
+- New Add-Help helper (dim-gray 8pt wrapping label) in setup_wizard.ps1.
+- #16: UNC-path note under INTAKE PATHS section header.
+- #17: SSD tip after the Staging Folder row.
+- #18: "API keys are optional / route to Review Queue" note under API KEYS.
+- Form/panel/button-bar heights grew by 114px to fit the added text
+  (ClientSize 861->975, panel 812->926, bar y 814->928); panel AutoScroll still
+  handles overflow on small screens.
+- #15: installer/mediaforge.iss gained a [Code] CurUninstallStepChanged handler
+  that, at usPostUninstall, prompts "Remove application data (config, logs,
+  cache)?" and DelTree's {userappdata}\MediaForge only if the user clicks Yes.
+  The existing [UninstallDelete] dirifempty on {app} is unchanged.
+
+Verified: GOOS=windows go build ./cmd/tray clean. Nothing outstanding.
+
+=== Prior session: startup version banner + encoder logging (#10) ===
 
 Added a level-independent logger.Banner(msg) to internal/logger/logger.go: it
 writes directly to the logger's underlying writer (stdout + session file),

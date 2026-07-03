@@ -70,5 +70,27 @@ Filename: "taskkill.exe"; Parameters: "/F /IM {#MyTrayExeName}"; Flags: runhidde
 Filename: "taskkill.exe"; Parameters: "/F /IM {#MyAppExeName}"; Flags: runhidden; RunOnceId: "KillServer"
 [UninstallDelete]
 ; Remove the install dir if empty after installed files are deleted. User data
-; in %APPDATA%\MediaForge (config, logs, database) is intentionally preserved.
+; in %APPDATA%\MediaForge (config, logs, database) is preserved unless the user
+; opts to remove it during uninstall (see [Code] below).
 Type: dirifempty; Name: "{app}"
+[Code]
+// On uninstall, offer to remove the user's application data (config, logs,
+// cache, database) from %APPDATA%\MediaForge. Defaults to keeping it so an
+// accidental uninstall/reinstall doesn't wipe the user's configuration.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  AppData: string;
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    AppData := ExpandConstant('{userappdata}\MediaForge');
+    if DirExists(AppData) then
+    begin
+      if MsgBox('Remove application data (config, logs, cache)?' + #13#10 + #13#10 +
+                AppData, mbConfirmation, MB_YESNO) = IDYES then
+      begin
+        DelTree(AppData, True, True, True);
+      end;
+    end;
+  end;
+end;

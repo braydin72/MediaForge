@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Setup/installer UX polish (#15, #16, #17, #18): first-run wizard now shows a
+  UNC-path note under Intake Paths (mapped drives unsupported as a service), an
+  SSD recommendation under the Staging Folder, and a note that API keys are
+  optional (missing keys route files to the Review Queue). The uninstaller now
+  prompts to remove application data (%APPDATA%\MediaForge) instead of always
+  preserving it.
+  Files modified: cmd/tray/setup_wizard.ps1, installer/mediaforge.iss
+
 - Startup logging (#10): mediaforge.exe now writes a version/build banner
   ("MediaForge v{VERSION}+build.{BUILD} starting") as the first log line, and a
   human-readable summary of detected hardware encoders (NVENC, VAAPI, Quick

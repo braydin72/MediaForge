@@ -55,7 +55,7 @@ function Browse-Folder {
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "MediaForge - First Run Setup"
-$form.ClientSize = New-Object System.Drawing.Size(690, 861)
+$form.ClientSize = New-Object System.Drawing.Size(690, 975)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
@@ -63,7 +63,7 @@ $form.MinimizeBox = $false
 
 $panel = New-Object System.Windows.Forms.Panel
 $panel.Location = New-Object System.Drawing.Point(0, 0)
-$panel.Size = New-Object System.Drawing.Size(690, 812)
+$panel.Size = New-Object System.Drawing.Size(690, 926)
 $panel.Anchor = 'Top,Bottom,Left,Right'
 $panel.AutoScroll = $true
 $form.Controls.Add($panel)
@@ -117,6 +117,17 @@ function Add-PathRow([string]$labelText, [string]$default) {
     return $t
 }
 
+function Add-Help([string]$text) {
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $text
+    $l.Location = New-Object System.Drawing.Point(12, $script:y)
+    $l.Size = New-Object System.Drawing.Size(620, 34)
+    $l.ForeColor = [System.Drawing.Color]::DimGray
+    $l.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+    $panel.Controls.Add($l)
+    $script:y += 38
+}
+
 function Add-Combo([string[]]$items, [string]$default) {
     $c = New-Object System.Windows.Forms.ComboBox
     $c.DropDownStyle = 'DropDownList'
@@ -133,12 +144,15 @@ function Add-Combo([string[]]$items, [string]$default) {
 # --- Fields ----------------------------------------------------------------
 
 Add-Section "INTAKE PATHS"
+Add-Help "Note: Use UNC paths for network shares (\\SERVER\SHARE\FOLDER). Mapped drives (M:\) are not supported when running as a service."
 $eWatch  = Add-PathRow "Watch Folder (required)"     $d.watch_folder
 $eStage  = Add-PathRow "Staging Folder (required)"   $d.staging_folder
+Add-Help "Tip: Use a fast SSD for the Staging Folder for best performance. Temporary staging and working files are stored here during encoding."
 $eMovies = Add-PathRow "Movies Library (required)"   $d.movies
 $eTV     = Add-PathRow "TV Shows Library (required)" $d.tv_shows
 
 Add-Section "API KEYS (optional)"
+Add-Help "API keys are optional. Without them, all files will be routed to the Review Queue for manual metadata matching."
 Add-Field "TMDB API Key";  $eTmdb = Add-Entry $d.tmdb "(optional)"
 Add-Field "TVDB API Key";  $eTvdb = Add-Entry $d.tvdb "(optional)"
 Add-Field "OMDb API Key";  $eOmdb = Add-Entry $d.omdb "(optional)"
@@ -179,7 +193,7 @@ Add-Field "Target Reduction %"; $eRed = Add-Entry $d.target_reduction ""
 # --- Button bar ------------------------------------------------------------
 
 $bar = New-Object System.Windows.Forms.Panel
-$bar.Location = New-Object System.Drawing.Point(0, 814)
+$bar.Location = New-Object System.Drawing.Point(0, 928)
 $bar.Size = New-Object System.Drawing.Size(690, 47)
 $bar.Anchor = 'Bottom,Left,Right'
 $form.Controls.Add($bar)
