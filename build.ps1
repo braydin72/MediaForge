@@ -22,6 +22,8 @@ Write-Host "Building mediaforge.exe (build $Build)..."
 go build -ldflags $ldflags -o dist/mediaforge.exe ./cmd/mediaforge
 
 Write-Host "Building mediaforge-tray.exe (build $Build)..."
-go build -ldflags $ldflags -o dist/mediaforge-tray.exe ./cmd/tray
+# -H windowsgui marks the tray as a GUI subsystem app so Windows does not
+# allocate a console window when it launches (no black command window).
+go build -ldflags "$ldflags -H windowsgui" -o dist/mediaforge-tray.exe ./cmd/tray
 
 Write-Host "Done. Binaries in .\dist\ (build $Build)."

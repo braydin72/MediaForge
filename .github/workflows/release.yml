@@ -32,7 +32,7 @@ jobs:
       - name: Build Windows binaries
         run: |
           go build -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=${{ github.run_number }}" -o mediaforge.exe ./cmd/mediaforge
-          go build -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=${{ github.run_number }}" -o mediaforge-tray.exe ./cmd/tray
+          go build -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=${{ github.run_number }} -H windowsgui" -o mediaforge-tray.exe ./cmd/tray
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
       - name: Compile installer

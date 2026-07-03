@@ -1,6 +1,42 @@
 CURRENT STATE NOTE
 
-=== Latest session: fix tray first-run config not persisting (UTF-8 BOM) ===
+=== Latest session: tray critical fixes + left-click dashboard ===
+
+Fixed four tray issues in cmd/tray/main.go (plus build flag / CI):
+
+- #1 Orphaned mediaforge.exe on Exit: killMediaForge() rewritten to poll for up
+  to 5s, re-issuing taskkill /F each iteration and confirming the process is
+  actually gone (via mediaForgeRunning) before returning. A taskkill "not found"
+  exit now counts as success. Exit/Restart handlers were already calling it.
+- #2 Left-click opens dashboard: switched the systray dependency from the
+  unmaintained github.com/getlantern/systray v1.2.2 (which hardcoded showMenu on
+  BOTH left+right click, no hook) to fyne.io/systray v1.12.2 — a drop-in API
+  match. onReady now calls systray.SetOnTapped(openBrowser(baseURL)); right-click
+  still opens the menu (default fallback when no secondary handler is set).
+  go.mod/go.sum updated via `go mod tidy` (dropped getlantern/* + go-stack/bpool,
+  added godbus/dbus).
+- #8 Tray console window: build now links the tray with `-H windowsgui` so
+  Windows allocates no console (no black command window). Applied in build.ps1
+  and .github/workflows/release.yml. dev-build.yml does not build the tray.
+- #9 View Logs "exit status 1": new openLog() checks logsPath() first; if the
+  log file is absent it creates the parent dir and shows a native error dialog
+  (showMessage) with the full %APPDATA%\MediaForge\logs\mediaforge.log path
+  instead of a silent shell failure. Existing log opens as before.
+
+Also cleaned up two pre-existing installer/mediaforge.iss warnings:
+- ArchitecturesAllowed / ArchitecturesInstallIn64BitMode: x64 -> x64compatible
+  (x64 arch id was deprecated in Inno Setup 6).
+- Switched from PrivilegesRequired=admin to =lowest (per-user install). This
+  resolves the admin-hive vs HKCU Run-key mismatch: install dir ({autopf} now
+  resolves to %LOCALAPPDATA%\Programs) and the autostart Run key live in the
+  same user hive. No component required admin (no service; user data already
+  lives in %APPDATA%).
+
+Verified: GOOS=windows go build (-H windowsgui) + vet + test-compile ./cmd/tray
+clean; go build ./... and go test ./... all pass; ISCC compiles mediaforge.iss
+with no warnings.
+
+=== Prior session: fix tray first-run config not persisting (UTF-8 BOM) ===
 
 - Symptom: first-run setup modal always opened with defaults; after "Save &
   Launch" the form closed, nothing launched, and restart re-showed the modal

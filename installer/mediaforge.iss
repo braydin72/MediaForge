@@ -22,15 +22,21 @@ AppUpdatesURL={#MyAppURL}/releases
 DefaultDirName={autopf}\MediaForge
 DefaultGroupName=MediaForge
 DisableProgramGroupPage=yes
-PrivilegesRequired=admin
+; Per-user install (no elevation). This keeps the install location and the HKCU
+; autostart entry in the same user hive, so the "MediaForge" Run key always
+; belongs to the user who installed — avoiding the admin-hive mismatch that a
+; PrivilegesRequired=admin install could produce when a standard user installs
+; with separate admin credentials. With lowest privileges {autopf} resolves to
+; the per-user Programs folder (%LOCALAPPDATA%\Programs).
+PrivilegesRequired=lowest
 OutputDir=installer-output
 OutputBaseFilename=MediaForge-Setup-{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#MyAppExeName}
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 ; No [Dirs] section: the installer does NOT pre-create %APPDATA%\MediaForge or

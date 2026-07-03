@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/braydin72/mediaforge/internal/config"
-	"github.com/getlantern/systray"
+	"fyne.io/systray"
 )
 
 // hideConsole is the Windows CreateProcess flag (CREATE_NO_WINDOW) that starts
@@ -47,6 +47,10 @@ func onReady() {
 		systray.SetIcon(icon)
 	}
 	systray.SetTooltip("MediaForge")
+	// Left-click (primary tap) opens the dashboard. Right-click still opens the
+	// menu (systray falls back to showing the menu when no secondary handler is
+	// set).
+	systray.SetOnTapped(func() { openBrowser(baseURL) })
 	buildTrayMenu()
 }
 
@@ -177,7 +181,7 @@ func buildTrayMenu() {
 				time.Sleep(1 * time.Second)
 				launchMediaForge()
 			case <-mLogs.ClickedCh:
-				openFile(logsPath())
+				openLog()
 			case <-mExit.ClickedCh:
 				killMediaForge()
 				systray.Quit()
@@ -191,6 +195,24 @@ func buildTrayMenu() {
 // (%APPDATA%\MediaForge\logs\mediaforge.log).
 func logsPath() string {
 	return filepath.Join(filepath.Dir(configPath()), "logs", "mediaforge.log")
+}
+
+// openLog opens the current session log with its default handler. If the log
+// file (or its parent directory) does not yet exist, it creates the directory
+// and shows an explanatory error dialog with the full path instead of failing
+// silently with "exit status 1".
+func openLog() {
+	path := logsPath()
+	if !fileExists(path) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "tray: could not create log dir %s: %v\n", filepath.Dir(path), err)
+		}
+		showMessage("MediaForge — Logs",
+			fmt.Sprintf("No log file exists yet at:\n\n%s\n\n"+
+				"It will be created once MediaForge writes its first log entry.", path))
+		return
+	}
+	openFile(path)
 }
 
 // callQueueAPI POSTs to /api/queue/{endpoint}. It fails silently (logging to
@@ -243,19 +265,30 @@ func openBrowser(url string) {
 }
 
 // killMediaForge force-terminates any running mediaforge.exe and waits up to
-// 3 seconds for it to exit. Failures are logged to stderr.
+// 5 seconds, confirming the process is actually gone before returning. taskkill
+// is retried on each poll in case a child/respawned process is still holding on.
+// Failures are logged to stderr. Callers (Exit, Restart) rely on this so the
+// server is never left orphaned.
 func killMediaForge() {
-	if out, err := exec.Command("taskkill", "/F", "/IM", "mediaforge.exe").CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "tray: taskkill mediaforge.exe failed: %v: %s\n", err, strings.TrimSpace(string(out)))
-		return
-	}
-	for i := 0; i < 15; i++ {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if out, err := exec.Command("taskkill", "/F", "/IM", "mediaforge.exe").CombinedOutput(); err != nil {
+			// A non-zero exit usually means "process not found" — treat a
+			// confirmed-absent process as success.
+			if !mediaForgeRunning() {
+				return
+			}
+			fmt.Fprintf(os.Stderr, "tray: taskkill mediaforge.exe: %v: %s\n", err, strings.TrimSpace(string(out)))
+		}
 		if !mediaForgeRunning() {
+			return
+		}
+		if time.Now().After(deadline) {
+			fmt.Fprintln(os.Stderr, "tray: mediaforge.exe still running after 5s kill timeout")
 			return
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	fmt.Fprintln(os.Stderr, "tray: mediaforge.exe still running after kill timeout")
 }
 
 // mediaForgeRunning reports whether a mediaforge.exe process is currently alive.
