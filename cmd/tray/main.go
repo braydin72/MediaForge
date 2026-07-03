@@ -238,7 +238,14 @@ func openLog() {
 				"It will be created once MediaForge writes its first log entry.", path))
 		return
 	}
-	openFile(path)
+	// Open with Notepad directly rather than via "start". The .log extension
+	// usually has no default file association, so "cmd /c start" just flashes a
+	// console window and opens nothing. Notepad always handles a text log.
+	if err := exec.Command("notepad.exe", path).Start(); err != nil {
+		log.Printf("openLog notepad %s failed: %v", path, err)
+		showMessage("MediaForge — Logs",
+			fmt.Sprintf("Could not open the log file:\n\n%s\n\n%v", path, err))
+	}
 }
 
 // callQueueAPI POSTs to /api/queue/{endpoint}. It fails silently (logging to
@@ -276,9 +283,12 @@ func getQueueCount() int {
 	return s.Pending + s.Running
 }
 
-// openFile opens a file with its default handler (Explorer's "start").
+// openFile opens a text file (config, logs) in Notepad. We invoke notepad.exe
+// directly rather than "cmd /c start": the tray is a -H windowsgui process with
+// no console, so the "start" builtin just spawns a throwaway cmd that flashes
+// and dies before handing off. Notepad has no console dependency.
 func openFile(path string) {
-	if err := exec.Command("cmd", "/c", "start", "", path).Run(); err != nil {
+	if err := exec.Command("notepad.exe", path).Start(); err != nil {
 		log.Printf("openFile %s failed: %v", path, err)
 	}
 }

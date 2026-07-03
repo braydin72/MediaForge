@@ -1,6 +1,20 @@
 CURRENT STATE NOTE
 
-=== Latest session: restore installer location choice ===
+=== Latest session: tray View Logs / Config open in Notepad ===
+
+Symptom: tray "View Logs" flashed a box then opened nothing, even though
+%APPDATA%\MediaForge\logs\mediaforge.log exists. Not a file-association
+issue (cmd /c start "" mediaforge.log works from a real console). Root
+cause: the tray is linked -H windowsgui (no console), so the "start" cmd
+builtin spawns a throwaway cmd that flashes and dies before handing off.
+
+Fix (cmd/tray/main.go): openLog() and openFile() now launch the file
+directly via exec.Command("notepad.exe", path).Start() instead of
+cmd /c start. openLog keeps its "no log yet" dialog and adds an error
+dialog if notepad fails; openFile (used by the Config menu item) now uses
+notepad too. GOOS=windows go build -H windowsgui ./cmd/tray clean.
+
+=== Prior session: restore installer location choice ===
 
 The installer stopped offering a "Select Destination Location" page. Root
 cause: a prior session switched to a per-user install
