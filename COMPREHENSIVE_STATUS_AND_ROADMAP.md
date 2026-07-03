@@ -246,41 +246,126 @@ This session produced detailed plans for 6 major improvement areas. No code was 
 
 ---
 
-## Suggested Implementation Roadmap
+## Release Strategy & Sprint Breakdown
 
-### Immediate (Next 1-2 sprints)
+### v1.0.x — Immediate Fixes (8 hours)
 
-**Sprint 1: Critical Path (19 hours)**
-- Windows Install Fix (13h)
-- SMTP Notifications (4h)
-- TVDB Matching (5h) — can run in parallel with install testing
+These are blockers before v1.1. Already planned:
 
-**Result:** v1.0.1 release with:
-- ✅ Working Windows installer and tray app
-- ✅ SMTP email notifications + test button
-- ✅ Better show identification (fixes The Office, etc.)
-- ✅ Stable foundation for next work
+**Retry Reliability (6 hours)**
+- Pre-flight checks: file exists, locked status, orphaned temp files
+- Transactional safety: add new job before removing old
+- Better error messages: distinguish "not found" from "in use"
+- Users can trust retry; no more mysterious disappearing files
 
-### Near-term (Sprint 2-3)
+**SMTP Test Button (2 hours)**
+- POST /api/smtp/test endpoint
+- Test button in Settings UI
+- Users verify SMTP config works before relying on notifications
 
-**Sprint 2: Reliability & UX (17 hours)**
-- Retry Reliability Fix (6h)
-- Smart Duplicate Resolution (11h)
+**TVDB Disambiguation (0 hours — done)**
+- 4-component scoring implemented (commit fc4e7d8)
+- "The Office" (2005 US) no longer mismatches to UK version
 
-**Result:** v1.1.0 release with:
-- ✅ Trustworthy retry feature (no more missing videos)
-- ✅ Cleaner Review Queue (auto-resolved duplicates)
-- ✅ Better user confidence in automation
+### v1.1 Sprint (19 hours)
 
-### Later (Sprint 3+)
+Features for next release, prioritized by value + effort.
 
-**Sprint 3: Polish (23 hours)**
-- SmartShrink Redesign (12h)
-- Review Queue UI Rework (11h)
+**SmartShrink Quality Cascade (3 hours)**
+- When Excellent preset fails, auto-fallback to Good → Acceptable before Review Queue
+- Fewer queue entries; users get usable files instead of manual intervention
 
-**Result:** v1.2.0 release with:
-- ✅ Faster, smarter encode queue
-- ✅ Polished UI for Review Queue triage
+**CRF Search Range Expansion (2 hours)**
+- Lower floor from 28 to 16 for better compression on high-motion content
+- More headroom for action/sports; better results overall
+
+**Configurable VMAF Sample Count (2 hours)**
+- Let users tune accuracy vs speed (default 5 samples)
+- Power users want control; higher samples = better precision
+
+**Intelligent Duplicate Resolution (6 hours)**
+- Auto-resolve duplicates by codec tier, resolution, bitrate
+- Only tied files go to Review Queue (80% of duplicates are obvious: higher res wins, HEVC beats AVC)
+- Decision tree:
+  1. Resolution mismatch → keep higher
+  2. Same res + same codec → compare bitrate
+  3. Same res + different codec → prefer HEVC
+  4. Tied → Review Queue with full context
+
+**Review Queue UI Rework (6 hours)**
+- Group entries by reason (Codec Error, Low Confidence, Duplicate, Move Failed)
+- Scrollable card layout, per-entry actions, pagination
+- Current UI unreadable with >20 entries; users can't triage
+
+### v1.2 Sprint (24 hours)
+
+Strategic improvements for the release after v1.1.
+
+**Subtitle File Handling (3 hours)**
+- Move .srt, .ass, .vtt files alongside video during library move
+- Subtitles no longer orphaned when video renamed
+
+**Per-Show Naming Template Override (4 hours)**
+- Allow per-show naming customization (Show - S01E01 Title.mkv vs 01x01 - Title.mkv)
+- Organize libraries with show-specific formatting
+
+**Automatic Library Scanning (4 hours)**
+- Scan library on startup and index existing files
+- Users can migrate existing library and get stats immediately (no re-ingest)
+
+**Stats Dashboard Gauge with Trend (4 hours)**
+- Circular gauge (speedometer style) showing storage saved + 30-day trend line
+- More visual than bar chart; easier to see progress at a glance
+
+**Mobile-Friendly UI (5 hours)**
+- Responsive design for tablet/phone dashboards and settings
+- Users want to monitor encodes on mobile
+
+**Webhook Outbound Notifications (4 hours)**
+- Send JSON webhooks to custom URLs for Home Assistant, Discord, Slack
+- Power users want to trigger automation based on MediaForge events
+
+---
+
+## Implementation Timeline
+
+### Recommended Order
+
+1. **Immediate** (8h) — unblock v1.0.x
+2. **v1.1 Reliability** (6h) — SmartShrink + Duplicates (highest value)
+3. **v1.1 Polish** (13h) — Review Queue UI + VMAF config + CRF range
+4. **v1.2** (24h) — mobile, webhooks, library scanning
+
+Release v1.1 after immediate + reliability (14h).  
+Release v1.2 after v1.2 sprint (24h).
+
+### Effort Summary by Release
+
+| Item | Hours | Release | Status |
+|---|---|---|---|
+| Retry reliability | 6 | v1.0.x | Ready |
+| SMTP test button | 2 | v1.0.x | Ready |
+| TVDB disambiguation | 0 | v1.0.x | ✅ Done |
+| SmartShrink cascade | 3 | v1.1 | Ready |
+| CRF range expansion | 2 | v1.1 | Ready |
+| VMAF sample config | 2 | v1.1 | Ready |
+| Duplicate resolution | 6 | v1.1 | Ready |
+| Review Queue UI | 6 | v1.1 | Ready |
+| Subtitles | 3 | v1.2 | Ready |
+| Per-show templates | 4 | v1.2 | Ready |
+| Library scanning | 4 | v1.2 | Ready |
+| Stats gauge | 4 | v1.2 | Ready |
+| Mobile UI | 5 | v1.2 | Ready |
+| Webhooks | 4 | v1.2 | Ready |
+| **TOTAL** | **51 hours** | | |
+
+---
+
+## Backlog (Lower Priority)
+
+- Multi-file episode detection (complex; deferred unless user demand)
+- Per-job VMAF sample override (covered by global config)
+- Metadata caching layer (optimization if API rate limits hit)
 
 ---
 
