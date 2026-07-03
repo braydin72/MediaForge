@@ -20,6 +20,11 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/issues
 AppUpdatesURL={#MyAppURL}/releases
 DefaultDirName={autopf}\MediaForge
+; Force the "Select Destination Location" page to appear. Without this,
+; DisableDirPage defaults to "auto", which suppresses the page for per-user
+; {auto...} installs (PrivilegesRequired=lowest). "no" restores the choice
+; while keeping the per-user, no-elevation model.
+DisableDirPage=no
 DefaultGroupName=MediaForge
 DisableProgramGroupPage=yes
 ; Per-user install (no elevation). This keeps the install location and the HKCU

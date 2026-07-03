@@ -56,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Review Queue resized entries based on content (compact cards, scrollable)
 
 ### Fixed
+- Installer no longer offered a choice of install location: switching to a per-user install (`PrivilegesRequired=lowest`) made Inno Setup's `DisableDirPage=auto` suppress the "Select Destination Location" page for the `{autopf}` default. Added `DisableDirPage=no` to restore the page while keeping the per-user, no-elevation model (`installer/mediaforge.iss`)
 - Tray errors were invisible: the tray is linked with `-H windowsgui` (no console) so all `fmt.Fprintf(os.Stderr, ...)` diagnostics were discarded. Tray diagnostics now go to `%APPDATA%\MediaForge\logs\tray.log` via the `log` package; `init()` creates the log dir first and keeps default output if the file can't be opened (avoids a nil-writer panic from `log.SetOutput(nil)`) (`cmd/tray/main.go`)
 - Directory count cache warm timed out on large SMB shares (fixed 30s cap): the timeout is now configurable via `intake.cache_timeout_seconds` (default 60) and `WarmCountCache` early-exits with a warning if the media root is unreachable instead of burning the whole window (`internal/browse/browse.go`, `internal/config/config.go`, `internal/api/handler.go`, `web/templates/index.html`, `cmd/mediaforge/main.go`, `internal/winsvc/service.go`)
 - Tray Exit left `mediaforge.exe` running as an orphan: `killMediaForge()` now polls up to 5s, re-issuing `taskkill /F` and confirming the process is gone before returning (`cmd/tray/main.go`)

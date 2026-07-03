@@ -1,6 +1,19 @@
 CURRENT STATE NOTE
 
-=== Latest session: tray self-logging to tray.log ===
+=== Latest session: restore installer location choice ===
+
+The installer stopped offering a "Select Destination Location" page. Root
+cause: a prior session switched to a per-user install
+(PrivilegesRequired=lowest). Inno Setup's DisableDirPage defaults to "auto",
+which suppresses the dir page for per-user {auto...} installs, so
+DefaultDirName={autopf}\MediaForge went straight to
+%LOCALAPPDATA%\Programs\MediaForge with no prompt.
+
+Fix: added DisableDirPage=no to [Setup] in installer/mediaforge.iss. The
+destination page appears again; still a per-user, no-elevation install.
+No Go code changed. Nothing outstanding.
+
+=== Prior session: tray self-logging to tray.log ===
 
 Problem: the tray produced no log, so right-click/errors couldn't be
 diagnosed. Root cause: the tray is linked -H windowsgui (no console), so
