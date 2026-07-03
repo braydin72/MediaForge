@@ -2732,6 +2732,17 @@
                                        onchange="updateSetting('intake_review_threshold', parseFloat(this.value))">
                             </div>
                         </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">Cache warm timeout</div>
+                                <div class="setting-desc">Max seconds to spend warming the directory count cache at startup. Raise for large SMB shares (1&ndash;3600)</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="number" class="setting-input" id="setting-intake-cache-timeout"
+                                       min="1" max="3600" step="1" style="width: 80px"
+                                       onchange="updateSetting('intake_cache_timeout_seconds', parseInt(this.value, 10))">
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="setting-group">
@@ -4937,6 +4948,7 @@
                 document.getElementById('setting-intake-stability-passes').value = config.intake_stability_passes || 6;
                 document.getElementById('setting-intake-confidence').value = config.intake_confidence_threshold ?? 0.85;
                 document.getElementById('setting-intake-review').value = config.intake_review_threshold ?? 0.60;
+                document.getElementById('setting-intake-cache-timeout').value = config.intake_cache_timeout_seconds ?? 60;
 
                 // Identification settings
                 document.getElementById('setting-apis-tmdb').value = config.apis_tmdb_key || '';

@@ -315,7 +315,7 @@ func main() {
 	fmt.Printf("  Logging started (level: %s)\n", cfg.LogLevel)
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	logger.Info("MediaForge started", "version", version.String(), "encoder", best.Name, "workers", cfg.Workers, "port", *port)
-	go browser.WarmCountCache(context.Background())
+	go browser.WarmCountCache(context.Background(), time.Duration(cfg.Intake.CacheTimeoutSeconds)*time.Second)
 	if vmaf.IsAvailable() {
 		logger.Info("VMAF support detected", "models", vmaf.GetModels())
 		logger.Info("VMAF scoring configured", "max_score_workers", vmaf.MaxScoreWorkers, "gomaxprocs", runtime.GOMAXPROCS(0))

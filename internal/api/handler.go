@@ -480,6 +480,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		"intake_stability_passes":    h.cfg.Intake.StabilityCheck.PassesRequired,
 		"intake_confidence_threshold": h.cfg.Intake.ConfidenceThreshold,
 		"intake_review_threshold":    h.cfg.Intake.ReviewThreshold,
+		"intake_cache_timeout_seconds": h.cfg.Intake.CacheTimeoutSeconds,
 		"intake_naming_movie_folder": h.cfg.Intake.Naming.MovieFolder,
 		"intake_naming_movie_file":   h.cfg.Intake.Naming.MovieFile,
 		"intake_naming_show_folder":  h.cfg.Intake.Naming.ShowFolder,
@@ -544,6 +545,7 @@ type UpdateConfigRequest struct {
 	IntakeStabilityPasses    *int     `json:"intake_stability_passes,omitempty"`
 	IntakeConfidenceThreshold *float64 `json:"intake_confidence_threshold,omitempty"`
 	IntakeReviewThreshold    *float64 `json:"intake_review_threshold,omitempty"`
+	IntakeCacheTimeoutSeconds *int     `json:"intake_cache_timeout_seconds,omitempty"`
 	IntakeNamingMovieFolder  *string  `json:"intake_naming_movie_folder,omitempty"`
 	IntakeNamingMovieFile    *string  `json:"intake_naming_movie_file,omitempty"`
 	IntakeNamingShowFolder   *string  `json:"intake_naming_show_folder,omitempty"`
@@ -763,6 +765,14 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.cfg.Intake.ReviewThreshold = val
+	}
+	if req.IntakeCacheTimeoutSeconds != nil {
+		val := *req.IntakeCacheTimeoutSeconds
+		if val < 1 || val > 3600 {
+			writeError(w, http.StatusBadRequest, "intake_cache_timeout_seconds must be between 1 and 3600")
+			return
+		}
+		h.cfg.Intake.CacheTimeoutSeconds = val
 	}
 	if req.IntakeNamingMovieFolder != nil {
 		h.cfg.Intake.Naming.MovieFolder = *req.IntakeNamingMovieFolder

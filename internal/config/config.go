@@ -35,6 +35,11 @@ type IntakeConfig struct {
 	ConfidenceThreshold float64               `yaml:"confidence_threshold"`
 	ReviewThreshold     float64               `yaml:"review_threshold"`
 	Naming              IntakeNamingConfig    `yaml:"naming"`
+
+	// CacheTimeoutSeconds bounds the directory count-cache warm walk. On large
+	// SMB shares the walk can exceed the previous fixed 30s cap; make it
+	// configurable. Default 60.
+	CacheTimeoutSeconds int `yaml:"cache_timeout_seconds"`
 }
 
 type APIsConfig struct {
@@ -225,6 +230,7 @@ func DefaultConfig() *Config {
 			},
 			ConfidenceThreshold: 0.85,
 			ReviewThreshold:     0.60,
+			CacheTimeoutSeconds: 60,
 			Naming: IntakeNamingConfig{
 				MovieFolder: "{title} ({year})",
 				MovieFile:   "{title} ({year})",
@@ -363,6 +369,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Intake.ReviewThreshold == 0 {
 		cfg.Intake.ReviewThreshold = 0.60
+	}
+	if cfg.Intake.CacheTimeoutSeconds < 1 {
+		cfg.Intake.CacheTimeoutSeconds = 60
 	}
 	if cfg.Intake.Naming.MovieFolder == "" {
 		cfg.Intake.Naming.MovieFolder = "{title} ({year})"

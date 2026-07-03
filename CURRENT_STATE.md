@@ -1,6 +1,34 @@
 CURRENT STATE NOTE
 
-=== Latest session: tray critical fixes + left-click dashboard ===
+=== Latest session: browse cache timeout configurable + early-exit ===
+
+Issue #11 — WarmCountCache timed out at a fixed 30s on large SMB shares,
+leaving dashboard stats empty. Changes:
+
+- internal/config/config.go: added IntakeConfig.CacheTimeoutSeconds
+  (yaml: cache_timeout_seconds), default 60, clamped to >=1 in Load().
+- internal/browse/browse.go: WarmCountCache now takes a timeout arg
+  (time.Duration; <1 falls back to 60s). Added an early os.Stat(mediaRoot)
+  accessibility check that logs a warning and returns immediately if the
+  media root is unreachable (common disconnected-drive case), instead of
+  spinning up a walk that just burns the timeout.
+- Callers updated: cmd/mediaforge/main.go and internal/winsvc/service.go
+  pass time.Duration(cfg.Intake.CacheTimeoutSeconds)*time.Second.
+- internal/api/handler.go: GET config returns intake_cache_timeout_seconds;
+  UpdateConfigRequest accepts it (validated 1..3600).
+- web/templates/index.html: new "Cache warm timeout" number field in the
+  Intake settings group + loadSettings populate.
+- Docs: installer/default-config.yaml, MEDIAFORGE_SPEC.md, README.md schema
+  blocks updated with cache_timeout_seconds: 60.
+
+Nil-pointer guard the prompt also asked for was already present in the walk
+callback (nil DirEntry skip) and the ancestor-propagation loop (create-on-
+demand) from a prior session — no change needed.
+
+Verified: go build ./... and GOOS=windows go build ./... clean; go test ./...
+all pass.
+
+=== Prior session: tray critical fixes + left-click dashboard ===
 
 Fixed four tray issues in cmd/tray/main.go (plus build flag / CI):
 

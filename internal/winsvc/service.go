@@ -159,7 +159,7 @@ func (s *WindowsService) Execute(args []string, r <-chan svc.ChangeRequest, stat
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go browser.WarmCountCache(ctx)
+	go browser.WarmCountCache(ctx, time.Duration(cfg.Intake.CacheTimeoutSeconds)*time.Second)
 
 	if intakeWatcher != nil && cfg.Intake.Enabled {
 		go intakeWatcher.Start(ctx)
