@@ -1,6 +1,27 @@
 CURRENT STATE NOTE
 
-=== Latest session: tray View Logs / Config open in Notepad ===
+=== Latest session: startup version banner + encoder logging (#10) ===
+
+Added a level-independent logger.Banner(msg) to internal/logger/logger.go: it
+writes directly to the logger's underlying writer (stdout + session file),
+bypassing the slog level filter. InitWithFile/Init now stash that writer in a
+package var so Banner reaches the log file too (previously the fmt.Println box
+in main.go only went to a live console — invisible in the log file and in
+headless tray runs).
+
+Startup logging in cmd/mediaforge/main.go now uses Banner:
+- First log line: "MediaForge v{Version}+build.{Build} starting".
+- After ffmpeg.DetectEncoders(), logDetectedEncoders() emits "Available
+  encoders: NVIDIA NVENC" / "AMD/Intel VAAPI" / "Intel Quick Sync" / "Apple
+  VideoToolbox" as applicable, always "CPU fallback ready", and "No hardware
+  acceleration detected, using CPU" when no HW accel is present.
+These now appear at every log level (including warn/error).
+
+Note: hwaccel lives in internal/ffmpeg/hwaccel.go (not internal/hwaccel), and
+DetectEncoders/version.Version/Build were already exported. go build ./... and
+logger tests clean. Nothing outstanding.
+
+=== Prior session: tray View Logs / Config open in Notepad ===
 
 Symptom: tray "View Logs" flashed a box then opened nothing, even though
 %APPDATA%\MediaForge\logs\mediaforge.log exists. Not a file-association

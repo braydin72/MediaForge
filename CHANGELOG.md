@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Startup logging (#10): mediaforge.exe now writes a version/build banner
+  ("MediaForge v{VERSION}+build.{BUILD} starting") as the first log line, and a
+  human-readable summary of detected hardware encoders (NVENC, VAAPI, Quick
+  Sync, VideoToolbox, CPU fallback) after encoder detection. Both go through a
+  new logger.Banner() that bypasses the level filter, so they appear in the log
+  file at every log level (including warn/error) and in headless (tray) runs.
+  Files modified: cmd/mediaforge/main.go, internal/logger/logger.go
+
 ### Added
 - Windows system tray application (tray launcher model) with process lifecycle management
 - First-run setup wizard via native Windows Forms dialog with path validation and UNC conversion

@@ -28,6 +28,37 @@ import (
 	"github.com/braydin72/mediaforge/internal/version"
 )
 
+// logDetectedEncoders logs a human-readable summary of the hardware encoders
+// found by ffmpeg.DetectEncoders. CPU (software) encoding is always available,
+// so it is always reported as a fallback.
+func logDetectedEncoders(detected map[ffmpeg.EncoderKey]*ffmpeg.HWEncoder) {
+	// Collect which hardware accel types are available across any codec.
+	seen := make(map[ffmpeg.HWAccel]bool)
+	for _, enc := range detected {
+		if enc.Available && enc.Accel != ffmpeg.HWAccelNone {
+			seen[enc.Accel] = true
+		}
+	}
+
+	if seen[ffmpeg.HWAccelNVENC] {
+		logger.Banner("Available encoders: NVIDIA NVENC")
+	}
+	if seen[ffmpeg.HWAccelVAAPI] {
+		logger.Banner("Available encoders: AMD/Intel VAAPI")
+	}
+	if seen[ffmpeg.HWAccelQSV] {
+		logger.Banner("Available encoders: Intel Quick Sync")
+	}
+	if seen[ffmpeg.HWAccelVideoToolbox] {
+		logger.Banner("Available encoders: Apple VideoToolbox")
+	}
+
+	if len(seen) == 0 {
+		logger.Banner("No hardware acceleration detected, using CPU")
+	}
+	logger.Banner("Available encoders: CPU fallback ready")
+}
+
 func main() {
 	// Parse command line flags
 	configPath := flag.String("config", "", "Path to config file (default: ./config/mediaforge.yaml)")
@@ -80,6 +111,11 @@ func main() {
 
 	// Initialize logger: write to stdout and a rotating session log file.
 	logger.InitWithFile(cfg.LogLevel, earlyConfigDir)
+
+	// Startup banner: record version and build number as the first log line so
+	// every session log opens with exactly what binary produced it. Uses Banner
+	// so it is written at every log level (even warn/error).
+	logger.Banner(fmt.Sprintf("MediaForge v%s+build.%s starting", version.Version, version.Build))
 
 	// Platform-specific first-run handling.
 	// On Windows the MediaForge Setup/tray app is responsible for creating the
@@ -165,7 +201,8 @@ func main() {
 	fmt.Println()
 
 	// Detect available hardware encoders
-	ffmpeg.DetectEncoders(cfg.FFmpegPath)
+	detected := ffmpeg.DetectEncoders(cfg.FFmpegPath)
+	logDetectedEncoders(detected)
 
 	// Detect VMAF availability (must be BEFORE preset init for SmartShrink presets)
 	// Logging deferred until after splash screen
