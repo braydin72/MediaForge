@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/braydin72/mediaforge/internal/logger"
 )
 
 const tmdbBaseURL = "https://api.themoviedb.org/3"
@@ -76,6 +78,7 @@ func (c *TMDBClient) LookupMovie(ctx context.Context, parsed *ParsedFilename, pr
 		return nil, &TMDBError{Code: "no_api_key", Reason: "TMDB API key is not configured"}
 	}
 
+	logger.Debug("TMDB: movie search", "query", parsed.Title)
 	// Search by title only — year filtering is done in scoring, not in the API call.
 	candidates, err := c.searchMovies(ctx, parsed.Title, 0)
 	if err != nil {
@@ -83,13 +86,18 @@ func (c *TMDBClient) LookupMovie(ctx context.Context, parsed *ParsedFilename, pr
 	}
 
 	if len(candidates) == 0 {
+		logger.Debug("TMDB: no movie candidates returned", "query", parsed.Title)
 		return nil, &TMDBError{
 			Code:   "not_found",
 			Reason: fmt.Sprintf("no TMDB movie found for %q", parsed.Title),
 		}
 	}
 
+	logger.Debug("TMDB: movie candidates returned", "query", parsed.Title, "count", len(candidates))
 	best, score := selectBestMovie(candidates, parsed)
+	logger.Debug("TMDB: best movie candidate",
+		"title", best.Title, "year", best.releaseYear(),
+		"tmdb_id", best.ID, "selection_score", fmt.Sprintf("%.2f", score))
 
 	detail, err := c.fetchMovieDetail(ctx, best.ID)
 	if err != nil {
@@ -124,18 +132,24 @@ func (c *TMDBClient) LookupTV(ctx context.Context, parsed *ParsedFilename) (*TMD
 		return nil, &TMDBError{Code: "no_api_key", Reason: "TMDB API key is not configured"}
 	}
 
+	logger.Debug("TMDB: TV search", "query", parsed.Title)
 	candidates, err := c.searchTV(ctx, parsed.Title)
 	if err != nil {
 		return nil, err
 	}
 	if len(candidates) == 0 {
+		logger.Debug("TMDB: no TV candidates returned", "query", parsed.Title)
 		return nil, &TMDBError{
 			Code:   "not_found",
 			Reason: fmt.Sprintf("no TMDB TV series found for %q", parsed.Title),
 		}
 	}
 
+	logger.Debug("TMDB: TV candidates returned", "query", parsed.Title, "count", len(candidates))
 	best, score := selectBestTV(candidates, parsed)
+	logger.Debug("TMDB: best TV candidate",
+		"name", best.Name, "year", best.firstAirYear(),
+		"tmdb_id", best.ID, "selection_score", fmt.Sprintf("%.2f", score))
 
 	result := &TMDBResult{
 		MediaType:  "tv",
@@ -147,9 +161,12 @@ func (c *TMDBClient) LookupTV(ctx context.Context, parsed *ParsedFilename) (*TMD
 	}
 
 	if parsed.IsTV && parsed.Season > 0 && parsed.Episode > 0 {
+		logger.Debug("TMDB: fetching episode",
+			"tmdb_id", best.ID, "season", parsed.Season, "episode", parsed.Episode)
 		ep, err := c.fetchTVEpisode(ctx, best.ID, parsed.Season, parsed.Episode)
 		if err != nil {
 			if isTMDBNotFound(err) {
+				logger.Debug("TMDB: episode not found, penalizing", "error", err)
 				result.Confidence = max(result.Confidence-0.10, 0)
 				return result, nil
 			}
@@ -158,6 +175,7 @@ func (c *TMDBClient) LookupTV(ctx context.Context, parsed *ParsedFilename) (*TMD
 		result.EpisodeTitle = ep.Name
 		result.EpisodeAirDate = ep.AirDate
 		result.Confidence = min(result.Confidence+0.10, 1.0)
+		logger.Debug("TMDB: episode found", "title", ep.Name, "aired", ep.AirDate)
 	}
 
 	return result, nil

@@ -1,6 +1,33 @@
 CURRENT STATE NOTE
 
-=== Latest session: wizard & installer UX polish (#15/#16/#17/#18) ===
+=== Latest session: TVDB/TMDB episode-name identification fix ===
+
+Bug: "The Office (2005) - S01E01 - Pilot.mp4" was identified as the 2001 UK
+series. Root cause: selectBestSeries() scored candidates on show name + year
+only; both Office entries tied, so the wrong one could win.
+
+Fix (internal/intake/tvdb.go):
+- Split the name+year scoring into baseSeriesScore() (pure helper).
+- selectBestSeries is now a *TVDBClient method. When the filename carries an
+  episode title (IsTV + season + episode + ParsedEpisodeTitle), it calls
+  fetchEpisode() for EACH candidate and compares the TVDB episode name to the
+  filename's episode title via stringSimilarity:
+    sim >= 0.90 → +0.40, sim >= 0.60 → +0.15, else → -0.30; fetch error → -0.20.
+  Episode-name agreement thus dominates when show names are similar. Falls back
+  to base name+year scoring when no episode title is present (unchanged behavior,
+  no extra HTTP). For the Office case: US S01E01="Pilot" (+0.40) beats UK
+  S01E01="Downsize" (-0.30).
+- Note: the winning candidate's episode is fetched again in Lookup() after
+  selection (kept simple; one redundant call only when validating).
+
+Logging added (debug level) to both tvdb.go and tmdb.go: search candidate
+counts, per-candidate scores, episode-name comparisons, and the best pick.
+
+Tests: added TestSelectBestSeries_EpisodeNameDisambiguates (Office US-vs-UK).
+Updated TestSelectBestSeries_ExactMatchWins to the new method signature. Full
+go build ./... and go test ./... pass.
+
+=== Prior session: wizard & installer UX polish (#15/#16/#17/#18) ===
 
 Added help/warning text to the first-run wizard and an AppData-removal prompt to
 the uninstaller. The wizard UI lives in cmd/tray/setup_wizard.ps1 (embedded via

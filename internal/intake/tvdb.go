@@ -105,7 +105,12 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBR
 		}
 	}
 
-	best, selScore := selectBestSeries(candidates, parsed)
+	logger.Debug("TVDB: series candidates returned",
+		"query", parsed.Title, "count", len(candidates),
+		"filename_episode", parsed.ParsedEpisodeTitle,
+		"season", parsed.Season, "episode", parsed.Episode)
+
+	best, selScore := c.selectBestSeries(ctx, candidates, parsed)
 	logger.Debug("TVDB: best series candidate",
 		"name", best.Name, "year", best.Year,
 		"tvdb_id", best.TVDBIDStr, "selection_score", fmt.Sprintf("%.2f", selScore))
@@ -312,30 +317,80 @@ func (c *TVDBClient) searchSeries(ctx context.Context, name string) ([]tvdbSearc
 	return payload.Data, nil
 }
 
-// selectBestSeries picks the candidate with the highest base confidence score.
-// Episode lookup adjusts the returned score further.
-func selectBestSeries(candidates []tvdbSearchResult, parsed *ParsedFilename) (tvdbSearchResult, float64) {
+// baseSeriesScore scores a candidate on show name and premiere year only.
+func baseSeriesScore(s tvdbSearchResult, parsed *ParsedFilename, queryLower string) float64 {
+	score := 0.50
+	nameLower := strings.ToLower(s.Name)
+
+	if nameLower == queryLower {
+		score += 0.30
+	} else if strings.Contains(nameLower, queryLower) || strings.Contains(queryLower, nameLower) {
+		score += 0.10
+	}
+
+	// Award the year bonus when the series premiere year <= the filename year.
+	// The year in a TV filename is the episode/season year, not the premiere year,
+	// so an exact match is not expected — we only need the series to have existed.
+	if seriesYear := s.parsedYear(); parsed.Year > 0 && seriesYear > 0 && seriesYear <= parsed.Year {
+		score += 0.10
+	}
+
+	return score
+}
+
+// selectBestSeries picks the candidate with the highest confidence score.
+//
+// When the filename carries an episode title (and a season/episode number), the
+// episode name is the primary differentiator between similarly-named shows: for
+// each candidate the target episode is fetched from TVDB and its name compared
+// to the filename's episode title. A close match strongly boosts the candidate;
+// a mismatch (or a missing episode) penalizes it. This is what distinguishes
+// e.g. "The Office (2005) S01E01 Pilot" (US, S01E01="Pilot") from the 2001 UK
+// series (S01E01="Downsize").
+//
+// The base name+year score is used alone when no episode title is available.
+func (c *TVDBClient) selectBestSeries(ctx context.Context, candidates []tvdbSearchResult, parsed *ParsedFilename) (tvdbSearchResult, float64) {
 	queryLower := strings.ToLower(parsed.Title)
+	validateEpisode := parsed.IsTV && parsed.Season > 0 && parsed.Episode > 0 && parsed.ParsedEpisodeTitle != ""
 
 	bestIdx := 0
 	bestScore := -1.0
 
 	for i, s := range candidates {
-		score := 0.50
-		nameLower := strings.ToLower(s.Name)
+		score := baseSeriesScore(s, parsed, queryLower)
 
-		if nameLower == queryLower {
-			score += 0.30
-		} else if strings.Contains(nameLower, queryLower) || strings.Contains(queryLower, nameLower) {
-			score += 0.10
+		if validateEpisode {
+			ep, err := c.fetchEpisode(ctx, s.intID(), parsed.Season, parsed.Episode)
+			switch {
+			case err != nil:
+				// Missing episode is evidence against this being the right series.
+				score -= 0.20
+				logger.Debug("TVDB: candidate episode fetch failed, penalizing",
+					"candidate", s.Name, "year", s.Year, "tvdb_id", s.TVDBIDStr,
+					"season", parsed.Season, "episode", parsed.Episode, "error", err)
+			default:
+				sim := stringSimilarity(ep.Name, parsed.ParsedEpisodeTitle)
+				var epAdj float64
+				switch {
+				case sim >= 0.90:
+					epAdj = 0.40 // exact / near-exact episode name match
+				case sim >= 0.60:
+					epAdj = 0.15 // partial match
+				default:
+					epAdj = -0.30 // episode name disagrees → wrong series
+				}
+				score += epAdj
+				logger.Debug("TVDB: candidate episode name compared",
+					"candidate", s.Name, "year", s.Year, "tvdb_id", s.TVDBIDStr,
+					"filename_episode", parsed.ParsedEpisodeTitle, "tvdb_episode", ep.Name,
+					"similarity", fmt.Sprintf("%.2f", sim),
+					"episode_score_adj", fmt.Sprintf("%+.2f", epAdj))
+			}
 		}
 
-		// Award the year bonus when the series premiere year <= the filename year.
-		// The year in a TV filename is the episode/season year, not the premiere year,
-		// so an exact match is not expected — we only need the series to have existed.
-		if seriesYear := s.parsedYear(); parsed.Year > 0 && seriesYear > 0 && seriesYear <= parsed.Year {
-			score += 0.10
-		}
+		logger.Debug("TVDB: candidate scored",
+			"candidate", s.Name, "year", s.Year, "tvdb_id", s.TVDBIDStr,
+			"score", fmt.Sprintf("%.2f", score))
 
 		if score > bestScore {
 			bestScore = score

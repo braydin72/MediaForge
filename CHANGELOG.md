@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- TVDB series misidentification for same-named shows (e.g. "The Office (2005)
+  S01E01 Pilot" resolving to the 2001 UK series). selectBestSeries now fetches
+  the target episode for each candidate and compares its TVDB episode title to
+  the filename's episode title before scoring: a close match strongly boosts the
+  candidate, a mismatch (or missing episode) penalizes it, making episode-name
+  agreement the primary differentiator when show names are similar. Added debug
+  logging across the TVDB and TMDB identification paths (search counts, per-
+  candidate scores, episode-name comparisons, best pick).
+  - Files modified: internal/intake/tvdb.go, internal/intake/tmdb.go,
+    internal/intake/tvdb_test.go
 - Setup/installer UX polish (#15, #16, #17, #18): first-run wizard now shows a
   UNC-path note under Intake Paths (mapped drives unsupported as a service), an
   SSD recommendation under the Staging Folder, and a note that API keys are

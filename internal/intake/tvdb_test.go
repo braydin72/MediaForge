@@ -320,7 +320,8 @@ func TestSelectBestSeries_ExactMatchWins(t *testing.T) {
 	}
 	parsed := &ParsedFilename{Title: "Breaking Bad", Year: 2008}
 
-	best, score := selectBestSeries(candidates, parsed)
+	// No episode title in parsed → base name+year scoring only (no HTTP).
+	best, score := (&TVDBClient{}).selectBestSeries(context.Background(), candidates, parsed)
 
 	if best.TVDBIDStr != "2" {
 		t.Errorf("expected exact match to win, got %q", best.Name)
@@ -329,6 +330,64 @@ func TestSelectBestSeries_ExactMatchWins(t *testing.T) {
 	// exact (0.50+0.30) + year (0.10) = 0.90
 	if !approxEqual(score, 0.90) {
 		t.Errorf("score: want ~0.90, got %f", score)
+	}
+}
+
+// TestSelectBestSeries_EpisodeNameDisambiguates verifies that when two shows
+// share a name, the candidate whose S01E01 episode title matches the filename
+// wins — "The Office (2005) S01E01 Pilot" must resolve to the US series
+// (S01E01="Pilot"), not the 2001 UK series (S01E01="Downsize").
+func TestSelectBestSeries_EpisodeNameDisambiguates(t *testing.T) {
+	officeSearchBody := map[string]interface{}{
+		"data": []map[string]interface{}{
+			{"tvdb_id": "78107", "name": "The Office", "year": "2001", "network": "BBC"},
+			{"tvdb_id": "73244", "name": "The Office", "year": "2005", "network": "NBC"},
+		},
+	}
+	ukEp := map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 1, "name": "Downsize", "aired": "2001-07-09", "seasonNumber": 1, "number": 1},
+			},
+		},
+	}
+	usEp := map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 2, "name": "Pilot", "aired": "2005-03-24", "seasonNumber": 1, "number": 1},
+			},
+		},
+	}
+
+	client := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
+		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, officeSearchBody) },
+		"/v4/series": func(r *http.Request) *http.Response {
+			if strings.Contains(r.URL.Path, "/78107/") {
+				return jsonResp(http.StatusOK, ukEp)
+			}
+			return jsonResp(http.StatusOK, usEp)
+		},
+	}))
+
+	parsed := &ParsedFilename{
+		Title:              "The Office",
+		Year:               2005,
+		IsTV:               true,
+		Season:             1,
+		Episode:            1,
+		ParsedEpisodeTitle: "Pilot",
+	}
+
+	result, err := client.Lookup(context.Background(), parsed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.SeriesID != 73244 {
+		t.Errorf("expected US series (73244) to win via episode-name match, got %d", result.SeriesID)
+	}
+	if result.EpisodeTitle != "Pilot" {
+		t.Errorf("EpisodeTitle: want %q, got %q", "Pilot", result.EpisodeTitle)
 	}
 }
 
