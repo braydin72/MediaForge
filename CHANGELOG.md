@@ -21,6 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Files modified: web/templates/index.html, internal/api/handler.go
 
 ### Fixed
+- `normTitle` (internal/intake/tmdb.go, shared by TMDB and — as of this same
+  session — TVDB series scoring) deleted punctuation instead of treating it as a
+  word boundary, so "20/20" collapsed to "2020" while a filename-derived title
+  like "20 20" stayed two tokens — they never compared equal, silently breaking
+  every exact/Contains-based title match on punctuated names. Now punctuation
+  becomes a space (then whitespace is collapsed), so "20/20" normalizes to
+  "20 20" and correctly matches. This was the real reason the TVDB
+  selectBestSeries fix earlier in this session didn't actually resolve the
+  "20/20" mis-identification in production: the name-normalization it relied on
+  was itself broken.
+  - Files modified: internal/intake/tmdb.go, internal/intake/tvdb_test.go (added
+    TestNormTitle_PunctuationIsWordBoundary; strengthened
+    TestSelectBestSeries_PunctuationNormalizedForNameMatch with a decoy that has
+    a plausible, non-garbage year — the earlier test passed on a coincidental
+    tie-break and didn't actually exercise the name-match bonus)
 - TVDB series candidate selection (selectBestSeries) now normalizes punctuation
   before comparing names, e.g. "20 20" (parsed from a filename) vs "20/20" (TVDB's
   listing) — previously a raw case-only comparison missed this as an exact match,

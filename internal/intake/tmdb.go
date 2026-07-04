@@ -442,13 +442,18 @@ func selectBestTV(candidates []tmdbTVResult, parsed *ParsedFilename) (tmdbTVResu
 	return candidates[bestIdx], bestScore
 }
 
-// normTitle lowercases s, strips punctuation, and collapses whitespace so that
-// "Avatar: Fire and Ash" and "avatar fire and ash" compare as equal.
+// normTitle lowercases s, treats punctuation as a word boundary, and collapses
+// whitespace so that "Avatar: Fire and Ash" and "avatar fire and ash" compare
+// as equal. Punctuation becomes a space rather than being deleted outright —
+// deleting it would merge "20/20" into "2020", which then never matches a
+// filename-derived title like "20 20" (underscore-to-space during parsing).
 func normTitle(s string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(s) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			b.WriteRune(r)
+		} else {
+			b.WriteRune(' ')
 		}
 	}
 	return strings.Join(strings.Fields(b.String()), " ")

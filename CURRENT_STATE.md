@@ -1,6 +1,52 @@
 CURRENT STATE NOTE
 
-=== Latest session (cont.): fix TVDB selectBestSeries picking wrong series (real prod log) ===
+=== Latest session (cont. again): normTitle deleted punctuation instead of spacing it — the previous fix was a no-op in prod ===
+
+The user re-ran the same file after the selectBestSeries fix below and got the
+IDENTICAL wrong result from a fresh log. Root cause of why that fix didn't work:
+normTitle (internal/intake/tmdb.go) strips punctuation characters entirely
+(`if unicode.IsLetter || IsDigit || IsSpace { keep } else { drop }`), so
+"20/20" collapses to "2020" (one token, no space where the slash was) while
+"20 20" (the filename-derived title, already space-separated) stays two
+tokens. "2020" != "20 20", and neither Contains the other, so my selectBestSeries
+fix — which relies on normTitle to make these compare equal — never actually
+fired in production. My own new unit test for it (TestSelectBestSeries_
+PunctuationNormalizedForNameMatch) passed anyway, but only because of a
+coincidental tie-break with the year-floor guard against a single garbage-year
+decoy — it never exercised a decoy with a real, plausible year (like the
+"11 Uhr 20"/1970 candidate that actually won in production), so it didn't catch
+this.
+
+Real fix (internal/intake/tmdb.go normTitle): punctuation now becomes a space
+(not dropped), then Fields()+Join collapses whitespace. "20/20" -> "20 20",
+matching the filename title exactly. This function is shared by TMDB's
+selectBestMovie/selectBestTV, TVDB's baseSeriesScore (wired in the prior fix
+below), and confidence.go's stringSimilarity — all of them were relying on
+punctuation-preserving equality that never actually normalized punctuation as a
+separator, so this is a correctness fix for all of them, not just TVDB.
+
+Test changes (internal/intake/tvdb_test.go):
+- Added TestNormTitle_PunctuationIsWordBoundary — direct table test asserting
+  "20/20", "20:20", "20-20" all normalize to "20 20", plus the pre-existing
+  "Avatar: Fire and Ash" case still passes.
+- Strengthened TestSelectBestSeries_PunctuationNormalizedForNameMatch by adding
+  a third candidate, "11 Uhr 20" (year 1970 — a real, plausible year, not
+  garbage), modeled directly on the actual candidate that won in the production
+  log. This is now a genuine regression test: it fails without the normTitle
+  fix (ties/loses to the plausible-year decoy) and passes with it (the exact
+  name-match bonus makes the real show win outright).
+
+Verified: go build ./..., go vet ./..., go test ./... all pass (full suite, not
+just internal/intake — normTitle is shared code). NOT re-verified against a
+live TVDB/TMDB API call for the literal file; only via unit tests. Given the
+previous "verified via unit test" claim turned out to be a false positive
+(passing for the wrong reason), the strong recommendation this time is to
+actually re-run the original 20_20 file through a live intake pass before
+trusting this is fixed — check the log for "TVDB: corrected season/episode by
+episode name" and a final destination containing "Her Last Call", not
+"I Have Killed For You".
+
+=== Prior session: fix TVDB selectBestSeries picking wrong series (real prod log) ===
 
 After the "task 2 verified done" note below, the user hit the exact same failure
 live: "20_20 (1978) - S48E30 - Her Last Call.mp4" got moved to the library as

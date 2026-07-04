@@ -580,9 +580,17 @@ func TestSelectBestSeries_PunctuationNormalizedForNameMatch(t *testing.T) {
 		// The real show: name has different punctuation than the parsed title,
 		// and its season 48 exists but the wrong episode is at E30.
 		{TVDBIDStr: "72289", Name: "20/20", Year: "1978"},
-		// A decoy with a garbage year that trivially satisfies "seriesYear <=
-		// parsed.Year" and has no season 48 at all (fetchEpisode 404s).
+		// A decoy with a garbage/implausible year — blocked by the year-bonus
+		// floor regardless of name matching.
 		{TVDBIDStr: "353196", Name: "20 Tage im 20. Jahrhundert", Year: "0099"},
+		// A decoy with a perfectly plausible year (<= parsed.Year, real, not
+		// garbage) and no season 48 at all (fetchEpisode 404s, -0.20 penalty —
+		// smaller than the real show's -0.30 episode-mismatch penalty). This is
+		// the case that actually beat the real show in production ("11 Uhr 20",
+		// year 1970): it must NOT win on penalty size alone once name matching
+		// works correctly, because it gets no name-match bonus at all while the
+		// real show gets the full exact-match bonus.
+		{TVDBIDStr: "205481", Name: "11 Uhr 20", Year: "1970"},
 	}
 
 	client := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
@@ -612,6 +620,26 @@ func TestSelectBestSeries_PunctuationNormalizedForNameMatch(t *testing.T) {
 	best, _ := client.selectBestSeries(context.Background(), candidates, parsed)
 	if best.TVDBIDStr != "72289" {
 		t.Errorf("expected real show (72289) to win despite episode mismatch, got %q (%s)", best.Name, best.TVDBIDStr)
+	}
+}
+
+// TestNormTitle_PunctuationIsWordBoundary guards the specific behavior the
+// production bug depended on: normTitle must turn "20/20" into "20 20" (two
+// tokens, matching a filename-derived title), not "2020" (one token, deleting
+// the separator). Deleting punctuation instead of spacing it out silently
+// breaks every equality/Contains-based title comparison in the codebase.
+func TestNormTitle_PunctuationIsWordBoundary(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"20/20", "20 20"},
+		{"20:20", "20 20"},
+		{"20-20", "20 20"},
+		{"Avatar: Fire and Ash", "avatar fire and ash"},
+		{"  Extra   Spaces  ", "extra spaces"},
+	}
+	for _, c := range cases {
+		if got := normTitle(c.in); got != c.want {
+			t.Errorf("normTitle(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 
