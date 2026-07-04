@@ -15,6 +15,7 @@ import (
 	"github.com/braydin72/mediaforge/internal/browse"
 	"github.com/braydin72/mediaforge/internal/config"
 	"github.com/braydin72/mediaforge/internal/ffmpeg"
+	"github.com/braydin72/mediaforge/internal/intake"
 	"github.com/braydin72/mediaforge/internal/jobs"
 	"github.com/braydin72/mediaforge/internal/store"
 )
@@ -552,5 +553,118 @@ func TestResolveReviewEntry_SourceMissing(t *testing.T) {
 	}
 	if ms.entries[entry.ID].Status != "pending" {
 		t.Errorf("expected entry still pending, got %s", ms.entries[entry.ID].Status)
+	}
+}
+
+func discardRequest(id string) *http.Request {
+	req := httptest.NewRequest("PUT", "/api/review/"+id+"/discard", nil)
+	req.SetPathValue("id", id)
+	return req
+}
+
+// TestDiscardReviewEntry_DuplicateDeletesIncomingFile covers the "Keep Existing"
+// action: discarding a duplicate-conflict entry must delete the incoming file
+// from disk, not just mark the entry discarded.
+func TestDiscardReviewEntry_DuplicateDeletesIncomingFile(t *testing.T) {
+	handler, tmpDir := setupTestHandler(t)
+
+	incoming := filepath.Join(tmpDir, "incoming", "Big Movie 2020.mkv")
+	if err := os.MkdirAll(filepath.Dir(incoming), 0755); err != nil {
+		t.Fatalf("mkdir incoming: %v", err)
+	}
+	if err := os.WriteFile(incoming, []byte("incoming bytes"), 0644); err != nil {
+		t.Fatalf("write incoming: %v", err)
+	}
+	existing := filepath.Join(tmpDir, "Library", "Big Movie (2020).mkv")
+	if err := os.MkdirAll(filepath.Dir(existing), 0755); err != nil {
+		t.Fatalf("mkdir library: %v", err)
+	}
+	if err := os.WriteFile(existing, []byte("existing bytes"), 0644); err != nil {
+		t.Fatalf("write existing: %v", err)
+	}
+
+	dupCtx := intake.DuplicateContext{
+		Incoming: intake.DuplicateFileInfo{Path: incoming},
+		Existing: intake.DuplicateFileInfo{Path: existing},
+	}
+	b, _ := json.Marshal(dupCtx)
+	entry := &store.ReviewEntry{
+		ID:            "entry-dup",
+		OriginalPath:  incoming,
+		Filename:      "Big Movie 2020.mkv",
+		Reason:        "duplicate: file already exists at destination",
+		DuplicateInfo: string(b),
+		Status:        "pending",
+	}
+	ms := newMockReviewStore(entry)
+	handler.SetReviewStore(ms)
+
+	w := httptest.NewRecorder()
+	handler.DiscardReviewEntry(w, discardRequest(entry.ID))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(incoming); !os.IsNotExist(err) {
+		t.Errorf("expected incoming file deleted, stat err: %v", err)
+	}
+	if _, err := os.Stat(existing); err != nil {
+		t.Errorf("expected existing library file untouched, stat err: %v", err)
+	}
+	if ms.entries[entry.ID].Status != "discarded" {
+		t.Errorf("expected entry discarded, got %s", ms.entries[entry.ID].Status)
+	}
+}
+
+// TestDiscardReviewEntry_NonDuplicateNoFileTouched ensures a plain (non-duplicate)
+// discard does not attempt to delete any file — there is no incoming path to delete
+// against, and the source file for a normal low-confidence entry should be left
+// alone (the user may want to Search Manually instead).
+func TestDiscardReviewEntry_NonDuplicateNoFileTouched(t *testing.T) {
+	handler, ms, entry, _ := resolveTestSetup(t)
+
+	w := httptest.NewRecorder()
+	handler.DiscardReviewEntry(w, discardRequest(entry.ID))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(entry.OriginalPath); err != nil {
+		t.Errorf("expected source file untouched, stat err: %v", err)
+	}
+	if ms.entries[entry.ID].Status != "discarded" {
+		t.Errorf("expected entry discarded, got %s", ms.entries[entry.ID].Status)
+	}
+}
+
+// TestDiscardReviewEntry_IncomingAlreadyGone ensures discarding a duplicate entry
+// whose incoming file was already removed (e.g. a repeat click) does not error.
+func TestDiscardReviewEntry_IncomingAlreadyGone(t *testing.T) {
+	handler, tmpDir := setupTestHandler(t)
+
+	incoming := filepath.Join(tmpDir, "incoming", "Gone Movie 2020.mkv")
+	dupCtx := intake.DuplicateContext{
+		Incoming: intake.DuplicateFileInfo{Path: incoming},
+		Existing: intake.DuplicateFileInfo{Path: filepath.Join(tmpDir, "Library", "Gone Movie (2020).mkv")},
+	}
+	b, _ := json.Marshal(dupCtx)
+	entry := &store.ReviewEntry{
+		ID:            "entry-gone",
+		OriginalPath:  incoming,
+		Filename:      "Gone Movie 2020.mkv",
+		DuplicateInfo: string(b),
+		Status:        "pending",
+	}
+	ms := newMockReviewStore(entry)
+	handler.SetReviewStore(ms)
+
+	w := httptest.NewRecorder()
+	handler.DiscardReviewEntry(w, discardRequest(entry.ID))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 even when incoming file is already gone, got %d body=%s", w.Code, w.Body.String())
+	}
+	if ms.entries[entry.ID].Status != "discarded" {
+		t.Errorf("expected entry discarded, got %s", ms.entries[entry.ID].Status)
 	}
 }

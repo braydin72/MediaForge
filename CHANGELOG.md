@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Files modified: web/templates/index.html, internal/api/handler.go
 
 ### Fixed
+- Review Queue "Keep Existing" (discard a duplicate-conflict entry) now deletes the
+  incoming file from disk. Previously DiscardReviewEntry only flipped the entry to
+  "discarded" and left the losing file sitting in the intake/staging directory
+  forever (a silent-failure bug — the file didn't reappear in the queue, but it
+  never got cleaned up either). Deletion is scoped to entries with duplicate info
+  (the incoming path from the stored DuplicateContext); a missing file is treated
+  as success, and non-duplicate discards are unaffected.
+  - Files modified: internal/api/handler.go, internal/api/handler_test.go
 - AVC intake now applies confidence gating identical to the HEVC path. Previously
   `stageAndEnqueue` logged the match confidence but never acted on it, so a
   low-confidence match (e.g. a 0.43 episode-title mismatch) was silently staged and

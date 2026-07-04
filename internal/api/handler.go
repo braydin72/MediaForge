@@ -1213,6 +1213,9 @@ func (h *Handler) RetryReviewEntry(w http.ResponseWriter, r *http.Request) {
 }
 
 // DiscardReviewEntry handles PUT /api/review/{id}/discard
+// For duplicate-conflict entries this is the "Keep Existing" action: the incoming
+// file (which lost out to the existing library file) is deleted from disk so it
+// does not linger in the intake/staging directory or reappear on restart.
 func (h *Handler) DiscardReviewEntry(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -1223,6 +1226,25 @@ func (h *Handler) DiscardReviewEntry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "review store not configured")
 		return
 	}
+
+	entry, err := h.reviewStore.GetReviewEntry(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if entry != nil && entry.DuplicateInfo != "" {
+		var dupCtx intake.DuplicateContext
+		if err := json.Unmarshal([]byte(entry.DuplicateInfo), &dupCtx); err == nil && dupCtx.Incoming.Path != "" {
+			if err := os.Remove(dupCtx.Incoming.Path); err != nil && !os.IsNotExist(err) {
+				logger.Warn("Review discard: failed to delete incoming duplicate file",
+					"path", dupCtx.Incoming.Path, "error", err)
+			} else {
+				logger.Info("Review discard: deleted incoming file",
+					"path", dupCtx.Incoming.Path, "reason", "duplicate: user selected keep existing")
+			}
+		}
+	}
+
 	if err := h.reviewStore.UpdateReviewQueueStatus(id, "discarded"); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

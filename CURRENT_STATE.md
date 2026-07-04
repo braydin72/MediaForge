@@ -1,6 +1,45 @@
 CURRENT STATE NOTE
 
-=== Latest session: AVC confidence gating + episode-name reconciliation ===
+=== Latest session: Keep Existing deletes incoming duplicate file (task 2 verified done) ===
+
+Task requested two fixes:
+
+1. DONE this session — "Keep Existing" on a duplicate-conflict Review Queue entry
+   now deletes the incoming file from disk. Root cause:
+   DiscardReviewEntry (internal/api/handler.go, PUT /api/review/{id}/discard —
+   the web UI's "Keep Existing" button calls this same endpoint via reviewDiscard())
+   only called UpdateReviewQueueStatus(id, "discarded"); it never touched the
+   filesystem. Fix: when the entry has DuplicateInfo set, unmarshal it and
+   os.Remove(dupCtx.Incoming.Path) before marking discarded (os.IsNotExist is
+   treated as success; a real remove error is logged as a warning but the discard
+   still proceeds). Logs "Review discard: deleted incoming file" with
+   reason="duplicate: user selected keep existing". Non-duplicate discards
+   (DuplicateInfo == "") are untouched — no file is deleted for a plain
+   low-confidence/failed-match entry.
+   - Files modified: internal/api/handler.go (DiscardReviewEntry),
+     internal/api/handler_test.go (+intake import; 3 new tests:
+     TestDiscardReviewEntry_DuplicateDeletesIncomingFile,
+     TestDiscardReviewEntry_NonDuplicateNoFileTouched,
+     TestDiscardReviewEntry_IncomingAlreadyGone), CHANGELOG.md.
+
+2. ALREADY DONE (no change needed) — TVDB episode-title-first reconciliation
+   (filename S/E wrong but episode title right, e.g. S48E30 "Her Last Call"
+   should be S49E30) was fully implemented in a prior session (commits e4fdfed,
+   bf95e97): internal/intake/tvdb.go Lookup() detects a title mismatch/miss at
+   the parsed S/E, calls findEpisodeByTitle() to paginate the whole series
+   (/v4/series/{id}/episodes/default/page/{n}), and accepts a correction only
+   when similarity >= 0.90 AND unambiguous (clear gap over runner-up). On
+   correction, confidence gets the same-name+episode-found override (up to 1.0
+   when title sim >= 0.90), comfortably clearing the >=0.85 bar. Logs "TVDB:
+   corrected season/episode by episode name" with old/new season+episode+title.
+   Existing test TestTVDBLookup_ReconcileWrongSeasonEpisode covers this. Verified
+   by reading the code this session; did not modify it.
+
+Verified: go build ./..., go vet ./..., go test ./... all pass; gofmt clean on
+changed files (internal/api/router.go and sse.go have pre-existing unrelated
+gofmt/gosec findings, not touched here).
+
+=== Prior session: AVC confidence gating + episode-name reconciliation ===
 
 Bug: An AVC file whose season/episode was numbered wrong (e.g. "20/20 - S48E30 -
 Her Last Call") was silently staged and added to the encode queue under the wrong
