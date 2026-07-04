@@ -1,6 +1,77 @@
 CURRENT STATE NOTE
 
-=== Latest session: TVDB/TMDB episode-name identification fix ===
+=== Latest session (cont.): fix manual-match "Pick Selected" not moving file ===
+
+Bug (long-standing, previously undocumented): Review Queue "Search Manually" →
+Pick Selected marked the entry resolved but NEVER moved the file to the library —
+ResolveReviewEntry (PUT /api/review/{id}/resolve) ignored the request body. File
+left stranded at its intake path; looked resolved in the UI (silent failure).
+
+Fix:
+- internal/intake/naming.go: added exported ResolveLibraryPath wrapper around the
+  unexported resolveLibraryPath (so the api package can build library paths).
+- internal/api/handler.go ResolveReviewEntry: now decodes {candidate:{title,year,
+  media_type,episode_title,season,episode}}, overlays it onto ParseFilename(entry
+  .Filename) (keeps season/episode from the filename), resolves the library path
+  (ext from the entry filename), and util.SafeMove's the file there. Guards:
+  400 if no candidate title; 400 for duplicate-conflict entries (they use
+  Replace/Keep Existing); 409 if the source file is gone; 409 if a file already
+  exists at the destination (never auto-overwrite, per spec); 500 on move error.
+  On any non-success the entry stays pending and its reason is updated. Marks
+  resolved only after a successful move. Added "os" import.
+- web/templates/index.html: added _reviewCandidates map so the selected candidate
+  object (from list OR manual search) is retained and its full metadata is POSTed
+  (previously read from entry.candidates, which the list response leaves empty, so
+  the picked candidate was effectively {} → backend now rejects that). reviewPick
+  now surfaces resolve errors and reloads the queue so an updated reason shows
+  instead of the card vanishing. Cleans up _reviewCandidates in reviewRemoveCard.
+- internal/api/handler_test.go: added mockReviewStore + 4 tests (moves file;
+  missing title 400; duplicate-at-destination 409 stays pending; source-missing
+  409 stays pending). All pass.
+
+Note: did NOT do the deep pipeline-Retry (#3) — re-running the same automated
+lookup yields the same failure unless parameters change; manual match is the
+right tool and now works end-to-end.
+
+Verified: go build ./..., go vet ./..., go test ./... all pass; gofmt clean;
+inline JS parses clean.
+
+=== Latest session: Review Queue UI + encode queue pause/resume ===
+
+Implemented four scoped items (#12/#3/#4/#13). Much of the backend already
+existed (per-item retry/resubmit endpoints, queue pause/start endpoints), so the
+work was mostly frontend plus small backend extensions.
+
+- #12 Scrollable Review Queue + pagination (web/templates/index.html):
+  .review-card now has flex-shrink:0 so cards keep their height and the list
+  scrolls. Added a #review-pager bar (per-page select 10/25/50/100, default 10;
+  Prev/Next). loadReviewQueue() now passes page+limit; the server already
+  paginated (page/pages in the response). Pager hides when pages<=1. When a page
+  empties (item resolved/discarded) it reloads and steps back a page.
+- #3 Retry individual items: already present (reviewRetry -> PUT
+  /api/review/{id}/retry, RetryReviewEntry handler). No change needed.
+- #4 Re-encode with custom settings (web/templates/index.html +
+  internal/api/handler.go): new "Re-encode Custom" button opens an inline form
+  (preset: compress-hevc | smartshrink-hevc; smartshrink quality tier; encoder
+  speed; output container). reviewResubmitCustom() PUTs to
+  /api/review/{id}/resubmit. ResubmitReviewEntry now accepts encode_speed,
+  encode_output_format (validated mkv|mp4|preserve), and smartshrink_quality
+  (validated), and applies them via queue.SetJobOverrides after AddMultiple.
+- #13 Encode queue pause/resume header toggle (both files): added a
+  "Pause/Resume Encode Queue" button + Running/Paused badge to the queue panel
+  header. New toggleQueuePause() hits /api/queue/pause | /api/queue/start.
+  updateStopResumeButton() syncs both the footer and header controls. To keep the
+  badge authoritative (the old updateJobs heuristic auto-clears queuePaused when
+  no jobs run), GET /api/stats now returns `paused` (workerPool.IsPaused()) and
+  updateStats() reconciles queuePaused from it each poll.
+
+Note: the scope named /api/review-queue/{id}/... endpoints; the repo already uses
+/api/review/{id}/... (PUT) so those were reused rather than adding duplicates.
+
+Verified: go build ./..., go vet ./internal/api, and go test ./... all pass;
+gofmt clean.
+
+=== Prior session: TVDB/TMDB episode-name identification fix ===
 
 Bug: "The Office (2005) - S01E01 - Pilot.mp4" was identified as the 2001 UK
 series. Root cause: selectBestSeries() scored candidates on show name + year

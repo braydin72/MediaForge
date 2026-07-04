@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Review Queue pagination with a "per page" selector (default 10, options
+  10/25/50/100) and Prev/Next controls; cards no longer shrink to fit, so a long
+  queue scrolls instead of squishing (Issue #12).
+- "Re-encode Custom" action on Review Queue entries: pick Standard HEVC or
+  SmartShrink (with quality tier), plus encoder speed and output container, then
+  resubmit to the encode queue. /api/review/{id}/resubmit now accepts
+  encode_speed, encode_output_format, and smartshrink_quality (Issue #4).
+- "Pause/Resume Encode Queue" toggle with a Running/Paused state badge in the
+  queue panel header. The badge is driven by the authoritative worker-pool state,
+  now exposed as `paused` in GET /api/stats (Issue #13).
+  - Files modified: web/templates/index.html, internal/api/handler.go
+
 ### Fixed
+- Review Queue "Pick Selected" (manual match) now actually files the movie.
+  Previously ResolveReviewEntry ignored the picked candidate and only flipped the
+  entry to "resolved" — the file was never moved into the library and was left
+  stranded at its intake path (a silent-failure bug). Resolve now builds the
+  library destination from the chosen candidate and moves the file there, marking
+  the entry resolved only on a successful move; it refuses to overwrite an
+  existing destination file and leaves the entry pending with an updated reason on
+  any failure (source missing, duplicate at destination, move error). The web UI
+  retains the selected candidate object (auto and manual-search results) so the
+  full metadata is sent, and surfaces resolve errors instead of dropping the card.
+  - Files modified: internal/api/handler.go, internal/intake/naming.go
+    (new exported ResolveLibraryPath), web/templates/index.html,
+    internal/api/handler_test.go
 - TVDB series misidentification for same-named shows (e.g. "The Office (2005)
   S01E01 Pilot" resolving to the 2001 UK series). selectBestSeries now fetches
   the target episode for each candidate and compares its TVDB episode title to

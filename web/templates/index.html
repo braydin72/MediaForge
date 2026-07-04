@@ -932,6 +932,22 @@
             margin-left: auto;
         }
 
+        /* Encode queue state badge (Issue #13) */
+        .queue-state-badge {
+            font-size: 0.6875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: rgba(34, 197, 94, 0.15);
+            color: #22c55e;
+        }
+        .queue-state-badge.paused {
+            background: rgba(234, 179, 8, 0.15);
+            color: #eab308;
+        }
+
         .dropdown-menu {
             position: relative;
         }
@@ -1456,8 +1472,34 @@
             border: 1px solid var(--border);
             border-radius: var(--radius-md);
             overflow: hidden;
+            flex-shrink: 0;
             transition: border-color var(--transition-fast);
         }
+
+        /* Review Queue pagination bar (Issue #12) */
+        .review-pager {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 8px 14px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            flex-shrink: 0;
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+        }
+        .review-pager select {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-size: 0.8125rem;
+            padding: 3px 6px;
+            cursor: pointer;
+        }
+        .review-pager .review-pager-info { min-width: 90px; text-align: center; }
 
         .review-card:hover { border-color: var(--border-hover); }
 
@@ -2502,6 +2544,8 @@
                             Queue
                         </span>
                         <div class="queue-controls">
+                            <span class="queue-state-badge" id="queue-state-badge" title="Encode queue state">Running</span>
+                            <button class="btn btn-secondary btn-sm" id="queue-pause-btn" onclick="toggleQueuePause()">Pause Encode Queue</button>
                             <label class="notify-label" id="notify-container" style="display: none">
                                 <input type="checkbox" id="notify-checkbox" onchange="updateNotifySetting(this.checked)">
                                 <span>Notify when done</span>
@@ -2588,6 +2632,19 @@
                 <div style="font-size:1rem;font-weight:500">No items in Review Queue</div>
                 <div style="font-size:0.875rem;color:var(--text-tertiary)">Files that need attention will appear here</div>
             </div>
+        </div>
+        <div class="review-pager" id="review-pager" style="display:none">
+            <label>Per page
+                <select id="review-per-page" onchange="reviewChangePerPage()">
+                    <option value="10" selected>10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+            </label>
+            <button class="btn btn-secondary btn-sm" id="review-prev" onclick="reviewGoPage(-1)">Prev</button>
+            <span class="review-pager-info" id="review-pager-info">Page 1</span>
+            <button class="btn btn-secondary btn-sm" id="review-next" onclick="reviewGoPage(1)">Next</button>
         </div>
     </div>
     </div>
@@ -3933,8 +3990,33 @@
 
         function updateStopResumeButton() {
             const btn = document.getElementById('stop-resume-btn');
-            if (!btn) return;
-            btn.textContent = queuePaused ? 'Resume' : 'Stop All';
+            if (btn) btn.textContent = queuePaused ? 'Resume' : 'Stop All';
+            // Keep the header pause/resume toggle and state badge in sync (Issue #13).
+            const hdrBtn = document.getElementById('queue-pause-btn');
+            if (hdrBtn) hdrBtn.textContent = queuePaused ? 'Resume Encode Queue' : 'Pause Encode Queue';
+            const badge = document.getElementById('queue-state-badge');
+            if (badge) {
+                badge.textContent = queuePaused ? 'Paused' : 'Running';
+                badge.classList.toggle('paused', queuePaused);
+            }
+        }
+
+        // Header toggle: pauses/resumes the encode queue regardless of whether jobs
+        // are currently running (unlike the footer Stop All, which needs a running job).
+        async function toggleQueuePause() {
+            try {
+                if (queuePaused) {
+                    await fetch('/api/queue/start', { method: 'POST' });
+                    queuePaused = false;
+                } else {
+                    await fetch('/api/queue/pause', { method: 'POST' });
+                    queuePaused = true;
+                }
+                updateStopResumeButton();
+                refreshJobs();
+            } catch (err) {
+                console.error('Queue pause toggle error:', err);
+            }
         }
 
         function toggleStopResume() {
@@ -4681,6 +4763,12 @@
         })();
 
         function updateStats(stats) {
+            // Sync the encode queue paused state from the authoritative backend
+            // flag so the header badge/toggle stays correct (Issue #13).
+            if (stats && typeof stats.paused === 'boolean' && stats.paused !== queuePaused) {
+                queuePaused = stats.paused;
+                updateStopResumeButton();
+            }
             // Queue dropdown values
             document.getElementById('stat-pending').textContent = stats.pending;
             document.getElementById('stat-running').textContent = stats.running;
@@ -5507,6 +5595,10 @@
 
         let _reviewEntries = [];
         let _reviewSelected = {}; // entryId → candidateIndex
+        let _reviewCandidates = {}; // entryId → candidate objects (from list or manual search)
+        let _reviewPage = 1;
+        let _reviewPages = 1;
+        let _reviewPerPage = 10;
 
         function switchView(view) {
             document.querySelectorAll('.view-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
@@ -5524,11 +5616,43 @@
 
         async function loadReviewQueue() {
             try {
-                const res = await fetch('/api/review?status=pending&limit=100');
+                const res = await fetch(`/api/review?status=pending&page=${_reviewPage}&limit=${_reviewPerPage}`);
                 const data = await res.json();
                 _reviewEntries = data.entries || [];
+                _reviewPages = data.pages || 1;
+                _reviewPage = data.page || 1;
+                // If the current page emptied out (e.g. last item resolved), step back.
+                if (_reviewEntries.length === 0 && _reviewPage > 1) {
+                    _reviewPage--;
+                    return loadReviewQueue();
+                }
                 renderReviewList();
+                renderReviewPager();
             } catch (e) { console.error('loadReviewQueue:', e); }
+        }
+
+        function renderReviewPager() {
+            const pager = document.getElementById('review-pager');
+            if (!pager) return;
+            // Hide the pager when everything fits on a single page.
+            if (_reviewPages <= 1) { pager.style.display = 'none'; return; }
+            pager.style.display = '';
+            document.getElementById('review-pager-info').textContent = `Page ${_reviewPage} of ${_reviewPages}`;
+            document.getElementById('review-prev').disabled = _reviewPage <= 1;
+            document.getElementById('review-next').disabled = _reviewPage >= _reviewPages;
+        }
+
+        function reviewGoPage(delta) {
+            const next = _reviewPage + delta;
+            if (next < 1 || next > _reviewPages) return;
+            _reviewPage = next;
+            loadReviewQueue();
+        }
+
+        function reviewChangePerPage() {
+            _reviewPerPage = parseInt(document.getElementById('review-per-page').value, 10) || 10;
+            _reviewPage = 1;
+            loadReviewQueue();
         }
 
         function renderReviewList() {
@@ -5546,6 +5670,7 @@
                     </div>`;
                 return;
             }
+            _reviewEntries.forEach(e => { _reviewCandidates[e.id] = e.candidates || []; });
             list.innerHTML = _reviewEntries.map(e => reviewCardHTML(e)).join('');
         }
 
@@ -5600,7 +5725,8 @@
                   <button class="btn btn-secondary btn-sm" onclick="reviewToggleSearch('${e.id}')">Search Manually</button>
                   <button class="btn btn-secondary btn-sm" onclick="reviewRetry('${e.id}')">Retry</button>
                   <button class="btn btn-secondary btn-sm" onclick="reviewDiscard('${e.id}')">Discard</button>
-                  <button class="btn btn-secondary btn-sm" onclick="reviewResubmit('${e.id}','${e.original_path.replace(/'/g,'\\x27')}')">Re-add</button>`;
+                  <button class="btn btn-secondary btn-sm" onclick="reviewResubmit('${e.id}','${e.original_path.replace(/'/g,'\\x27')}')">Re-add</button>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewToggleCustom('${e.id}')">Re-encode Custom</button>`;
 
             return `
             <div class="review-card" id="rcard-${e.id}">
@@ -5630,6 +5756,33 @@
                   </select>
                   <button class="btn btn-secondary btn-sm" onclick="reviewDoSearch('${e.id}')">Search</button>
                   <button class="btn btn-secondary btn-sm" onclick="reviewCloseSearch('${e.id}')">Cancel</button>
+                </div>` : ''}
+                ${!isDuplicate ? `<div id="rcustom-${e.id}" style="display:none" class="review-search-form">
+                  <select class="review-search-type" id="rcpreset-${e.id}" onchange="reviewCustomPresetChange('${e.id}')" title="Encode mode">
+                    <option value="compress-hevc">Standard HEVC</option>
+                    <option value="smartshrink-hevc">SmartShrink (VMAF)</option>
+                  </select>
+                  <select class="review-search-type" id="rcquality-${e.id}" style="display:none" title="SmartShrink quality">
+                    <option value="acceptable">Acceptable</option>
+                    <option value="good" selected>Good</option>
+                    <option value="excellent">Excellent</option>
+                  </select>
+                  <select class="review-search-type" id="rcspeed-${e.id}" title="Encode speed">
+                    <option value="">Speed: default</option>
+                    <option value="slowest">Slowest</option>
+                    <option value="slower">Slower</option>
+                    <option value="slow">Slow</option>
+                    <option value="medium">Medium</option>
+                    <option value="fast">Fast</option>
+                  </select>
+                  <select class="review-search-type" id="rcformat-${e.id}" title="Output container">
+                    <option value="">Format: default</option>
+                    <option value="mkv">MKV</option>
+                    <option value="mp4">MP4</option>
+                    <option value="preserve">Preserve</option>
+                  </select>
+                  <button class="btn btn-primary btn-sm" onclick="reviewResubmitCustom('${e.id}','${e.original_path.replace(/'/g,'\\x27')}')">Re-encode</button>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewToggleCustom('${e.id}')">Cancel</button>
                 </div>` : ''}
                 <div class="review-actions">${actionsHTML}
                 </div>
@@ -5697,6 +5850,7 @@
                 const res = await fetch(`/api/review/${id}/search?${params}`);
                 const data = await res.json();
                 const cands = data.candidates || [];
+                _reviewCandidates[id] = cands;
                 delete _reviewSelected[id];
                 box.innerHTML = cands.length
                     ? cands.map((c, i) => reviewCandHTML(id, c, i)).join('')
@@ -5710,14 +5864,22 @@
         async function reviewPick(id) {
             const idx = _reviewSelected[id];
             if (idx === undefined) { alert('Select a candidate first.'); return; }
-            const entry = _reviewEntries.find(e => e.id === id);
-            const cands = (entry && entry.candidates) || [];
-            const cand = cands[idx] || {index: idx};
+            const cand = (_reviewCandidates[id] || [])[idx];
+            if (!cand || !cand.title) { alert('Selected match is missing details. Search again and pick a result.'); return; }
             const res = await fetch(`/api/review/${id}/resolve`, {
                 method: 'PUT', headers: {'Content-Type':'application/json'},
                 body: JSON.stringify({candidate: cand})
             });
-            if (res.ok) { reviewRemoveCard(id); reviewUpdateBadge(); }
+            if (res.ok) {
+                reviewRemoveCard(id);
+                reviewUpdateBadge();
+            } else {
+                const d = await res.json().catch(() => ({}));
+                alert('Resolve failed: ' + (d.error || res.status));
+                // Reload so the card reflects the updated reason (e.g. move failed,
+                // duplicate at destination, source missing) instead of vanishing.
+                loadReviewQueue();
+            }
         }
 
         async function reviewRetry(id) {
@@ -5744,12 +5906,55 @@
             }
         }
 
+        function reviewToggleCustom(id) {
+            const f = document.getElementById('rcustom-'+id);
+            if (!f) return;
+            f.style.display = (f.style.display === 'none') ? '' : 'none';
+        }
+
+        function reviewCustomPresetChange(id) {
+            const preset = document.getElementById('rcpreset-'+id).value;
+            const q = document.getElementById('rcquality-'+id);
+            if (q) q.style.display = (preset === 'smartshrink-hevc') ? '' : 'none';
+        }
+
+        async function reviewResubmitCustom(id, originalPath) {
+            const preset = document.getElementById('rcpreset-'+id).value;
+            const body = {
+                preset_id: preset,
+                original_path: originalPath,
+                encode_speed: document.getElementById('rcspeed-'+id).value || '',
+                encode_output_format: document.getElementById('rcformat-'+id).value || '',
+            };
+            if (preset === 'smartshrink-hevc') {
+                body.smartshrink_quality = document.getElementById('rcquality-'+id).value || '';
+            }
+            const res = await fetch(`/api/review/${id}/resubmit`, {
+                method: 'PUT', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(body)
+            });
+            if (res.ok) {
+                reviewRemoveCard(id);
+                reviewUpdateBadge();
+                switchView('queue');
+            } else {
+                const d = await res.json().catch(()=>{});
+                alert('Re-encode failed: ' + (d && d.error || res.status));
+            }
+        }
+
         function reviewRemoveCard(id) {
             _reviewEntries = _reviewEntries.filter(e => e.id !== id);
             delete _reviewSelected[id];
+            delete _reviewCandidates[id];
             const card = document.getElementById('rcard-'+id);
             if (card) card.remove();
-            if (_reviewEntries.length === 0) renderReviewList();
+            // When the visible page empties, reload so pagination re-settles onto a
+            // page that still has entries (or shows the empty state).
+            if (_reviewEntries.length === 0) {
+                if (_reviewPages > 1) { loadReviewQueue(); }
+                else { renderReviewList(); document.getElementById('review-pager').style.display = 'none'; }
+            }
         }
 
         async function reviewRetryAll() {

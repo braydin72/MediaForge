@@ -16,6 +16,7 @@ import (
 	"github.com/braydin72/mediaforge/internal/config"
 	"github.com/braydin72/mediaforge/internal/ffmpeg"
 	"github.com/braydin72/mediaforge/internal/jobs"
+	"github.com/braydin72/mediaforge/internal/store"
 )
 
 func setupTestHandler(t *testing.T) (*Handler, string) {
@@ -392,8 +393,164 @@ type handlerTestNotifier struct {
 	sendFn func() error
 }
 
-func (n *handlerTestNotifier) Name() string        { return "test" }
-func (n *handlerTestNotifier) IsConfigured() bool  { return true }
+func (n *handlerTestNotifier) Name() string       { return "test" }
+func (n *handlerTestNotifier) IsConfigured() bool { return true }
 func (n *handlerTestNotifier) Send(_ context.Context, _, _ string) error {
 	return n.sendFn()
+}
+
+// mockReviewStore is a minimal in-memory ReviewQueueStore for handler tests.
+type mockReviewStore struct {
+	entries map[string]*store.ReviewEntry
+}
+
+func newMockReviewStore(entries ...*store.ReviewEntry) *mockReviewStore {
+	m := &mockReviewStore{entries: map[string]*store.ReviewEntry{}}
+	for _, e := range entries {
+		m.entries[e.ID] = e
+	}
+	return m
+}
+
+func (m *mockReviewStore) GetReviewQueue() ([]store.ReviewEntry, error) {
+	out := make([]store.ReviewEntry, 0, len(m.entries))
+	for _, e := range m.entries {
+		out = append(out, *e)
+	}
+	return out, nil
+}
+func (m *mockReviewStore) GetReviewEntry(id string) (*store.ReviewEntry, error) {
+	return m.entries[id], nil
+}
+func (m *mockReviewStore) GetReviewQueueCount() (int, error) { return len(m.entries), nil }
+func (m *mockReviewStore) UpdateReviewQueueStatus(id, status string) error {
+	if e := m.entries[id]; e != nil {
+		e.Status = status
+	}
+	return nil
+}
+func (m *mockReviewStore) UpdateReviewEntryReason(id, reason string) error {
+	if e := m.entries[id]; e != nil {
+		e.Reason = reason
+	}
+	return nil
+}
+
+// resolveTestSetup wires a handler with a library dir and a single pending review
+// entry whose source file exists on disk. Returns the handler, the mock store, the
+// entry, and the expected library destination.
+func resolveTestSetup(t *testing.T) (*Handler, *mockReviewStore, *store.ReviewEntry, string) {
+	t.Helper()
+	handler, tmpDir := setupTestHandler(t)
+
+	moviesDir := filepath.Join(tmpDir, "Library", "Movies")
+	handler.cfg.Intake.Library.Movies = moviesDir
+
+	src := filepath.Join(tmpDir, "incoming", "Big Movie 2020.mkv")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatalf("mkdir incoming: %v", err)
+	}
+	if err := os.WriteFile(src, []byte("hevc bytes"), 0644); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	entry := &store.ReviewEntry{
+		ID:           "entry-1",
+		OriginalPath: src,
+		Filename:     "Big Movie 2020.mkv",
+		Reason:       "low confidence match",
+		Status:       "pending",
+	}
+	ms := newMockReviewStore(entry)
+	handler.SetReviewStore(ms)
+
+	wantDst := filepath.Join(moviesDir, "Big Movie (2020)", "Big Movie (2020).mkv")
+	return handler, ms, entry, wantDst
+}
+
+func resolveRequest(id string, candidate map[string]interface{}) *http.Request {
+	body, _ := json.Marshal(map[string]interface{}{"candidate": candidate})
+	req := httptest.NewRequest("PUT", "/api/review/"+id+"/resolve", bytes.NewReader(body))
+	req.SetPathValue("id", id)
+	return req
+}
+
+func TestResolveReviewEntry_MovesFile(t *testing.T) {
+	handler, ms, entry, wantDst := resolveTestSetup(t)
+
+	req := resolveRequest(entry.ID, map[string]interface{}{
+		"title": "Big Movie", "year": 2020, "media_type": "movie",
+	})
+	w := httptest.NewRecorder()
+	handler.ResolveReviewEntry(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(wantDst); err != nil {
+		t.Errorf("expected file moved to %s, stat err: %v", wantDst, err)
+	}
+	if _, err := os.Stat(entry.OriginalPath); !os.IsNotExist(err) {
+		t.Errorf("expected source removed, stat err: %v", err)
+	}
+	if ms.entries[entry.ID].Status != "resolved" {
+		t.Errorf("expected entry resolved, got %s", ms.entries[entry.ID].Status)
+	}
+}
+
+func TestResolveReviewEntry_MissingTitle(t *testing.T) {
+	handler, _, entry, _ := resolveTestSetup(t)
+	req := resolveRequest(entry.ID, map[string]interface{}{"year": 2020})
+	w := httptest.NewRecorder()
+	handler.ResolveReviewEntry(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing title, got %d", w.Code)
+	}
+}
+
+func TestResolveReviewEntry_DuplicateAtDestination(t *testing.T) {
+	handler, ms, entry, wantDst := resolveTestSetup(t)
+
+	// Pre-create the destination file so the move must refuse.
+	if err := os.MkdirAll(filepath.Dir(wantDst), 0755); err != nil {
+		t.Fatalf("mkdir dst: %v", err)
+	}
+	if err := os.WriteFile(wantDst, []byte("existing"), 0644); err != nil {
+		t.Fatalf("write dst: %v", err)
+	}
+
+	req := resolveRequest(entry.ID, map[string]interface{}{
+		"title": "Big Movie", "year": 2020, "media_type": "movie",
+	})
+	w := httptest.NewRecorder()
+	handler.ResolveReviewEntry(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for duplicate destination, got %d body=%s", w.Code, w.Body.String())
+	}
+	// Entry stays pending; source is untouched (no silent loss).
+	if ms.entries[entry.ID].Status != "pending" {
+		t.Errorf("expected entry still pending, got %s", ms.entries[entry.ID].Status)
+	}
+	if _, err := os.Stat(entry.OriginalPath); err != nil {
+		t.Errorf("expected source untouched, stat err: %v", err)
+	}
+}
+
+func TestResolveReviewEntry_SourceMissing(t *testing.T) {
+	handler, ms, entry, _ := resolveTestSetup(t)
+	if err := os.Remove(entry.OriginalPath); err != nil {
+		t.Fatalf("remove src: %v", err)
+	}
+	req := resolveRequest(entry.ID, map[string]interface{}{
+		"title": "Big Movie", "year": 2020, "media_type": "movie",
+	})
+	w := httptest.NewRecorder()
+	handler.ResolveReviewEntry(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for missing source, got %d", w.Code)
+	}
+	if ms.entries[entry.ID].Status != "pending" {
+		t.Errorf("expected entry still pending, got %s", ms.entries[entry.ID].Status)
+	}
 }
