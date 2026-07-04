@@ -21,6 +21,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Files modified: web/templates/index.html, internal/api/handler.go
 
 ### Fixed
+- AVC intake now applies confidence gating identical to the HEVC path. Previously
+  `stageAndEnqueue` logged the match confidence but never acted on it, so a
+  low-confidence match (e.g. a 0.43 episode-title mismatch) was silently staged and
+  added to the encode queue under the wrong metadata instead of routing to the Review
+  Queue — a silent-failure bug. Metadata lookup and gating now run on the source file
+  BEFORE staging: below the review threshold → Review Queue; in the LLM gray zone →
+  LLM verification then Review; only an accepted match is staged and enqueued. The
+  gate is now a shared `resolveAndGate` helper used by both codec paths so they stay
+  in lockstep.
+- TVDB lookup now reconciles a wrong season/episode by episode name. When the
+  filename carries an episode title but the episode at the given S/E is missing or its
+  name disagrees (e.g. a streaming service that numbers seasons differently), the
+  whole series is searched for that episode name and, on a confident unambiguous hit,
+  the season/episode is corrected — so "S48E30 - Her Last Call" is filed at the real
+  S45E12 rather than under the wrong S48E30 title. If the name is found nowhere, the
+  low confidence routes the file to the Review Queue.
+  - Files modified: internal/intake/tvdb.go, internal/intake/orchestrator.go,
+    internal/intake/watcher.go, internal/intake/tvdb_test.go,
+    internal/intake/watcher_test.go
 - Review Queue "Pick Selected" (manual match) now actually files the movie.
   Previously ResolveReviewEntry ignored the picked candidate and only flipped the
   entry to "resolved" — the file was never moved into the library and was left

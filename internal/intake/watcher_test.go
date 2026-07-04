@@ -2,6 +2,7 @@ package intake
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -151,6 +152,49 @@ func TestWatcherStabilityCheck(t *testing.T) {
 	}
 	if e.Reason == "" {
 		t.Error("Reason is empty, want a codec detection failure message")
+	}
+}
+
+// TestResolveAndGateLowConfidenceToReview verifies the AVC/HEVC shared gate routes a
+// below-review-threshold match to the Review Queue and returns ok=false, so the file is
+// never staged or enqueued. A TV filename with only a series-name match (no episode, no
+// year, no episode title) scores 0.40 — below the 0.60 review threshold.
+func TestResolveAndGateLowConfidenceToReview(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.NewSQLiteStore(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer st.Close()
+
+	// TVDB mock: series matches, but the requested episode is absent (404) → no episode,
+	// no year → confidence 0.40.
+	tvdb := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
+		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, breakingBadSearchBody) },
+		"/v4/series": func(r *http.Request) *http.Response {
+			return jsonResp(http.StatusOK, map[string]interface{}{
+				"data": map[string]interface{}{"episodes": []map[string]interface{}{}},
+			})
+		},
+	}))
+
+	cfg := config.IntakeConfig{}
+	w := NewWatcher(&cfg, "ffprobe", st)
+	w.Orchestrator = &Orchestrator{TVDB: tvdb}
+
+	parsed := ParseFilename("Breaking Bad - S01E99.mkv")
+	result, ok := w.resolveAndGate(context.Background(), "/incoming/Breaking Bad - S01E99.mkv", &parsed, nil)
+	if ok {
+		t.Fatalf("resolveAndGate: want ok=false for low confidence, got true (result=%+v)", result)
+	}
+
+	count, err := st.GetReviewQueueCount()
+	if err != nil {
+		t.Fatalf("GetReviewQueueCount: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("review queue count: want 1, got %d", count)
 	}
 }
 

@@ -1,5 +1,38 @@
 CURRENT STATE NOTE
 
+=== Latest session: AVC confidence gating + episode-name reconciliation ===
+
+Bug: An AVC file whose season/episode was numbered wrong (e.g. "20/20 - S48E30 -
+Her Last Call") was silently staged and added to the encode queue under the wrong
+TVDB metadata (S48E30 = "I Have Killed For You", confidence 0.43). Two causes:
+(1) the AVC path (stageAndEnqueue) never gated on confidence — only the HEVC path
+did; (2) nothing trusted the filename's episode name when the given S/E disagreed.
+
+Fix:
+- internal/intake/watcher.go: extracted the HEVC gating logic into a shared
+  `resolveAndGate(ctx, path, *parsed, probe) (*LookupResult, bool)` helper (lookup
+  → <0.60 Review Queue → 0.60-0.85 LLM-then-Review → accept; merges confirmed
+  title/year/season/episode/episode-title into parsed on accept). moveHEVCToLibrary
+  now calls it. stageAndEnqueue now runs it on the SOURCE file BEFORE staging/
+  enqueue, so a rejected AVC file lands in the Review Queue untouched instead of
+  entering the encode queue.
+- internal/intake/tvdb.go: new `findEpisodeByTitle` paginates
+  /v4/series/{id}/episodes/default/page/{n} and returns the best-matching episode
+  only when sim >= 0.90 AND clearly ahead of the runner-up (unambiguous). Lookup now
+  calls it when the filename has an episode title but the S/E episode is missing or
+  mismatched (<0.60), correcting Season/Episode/EpisodeTitle. Added Season/Episode to
+  TVDBResult.
+- internal/intake/orchestrator.go: added Season/Episode to LookupResult; fromTVDB
+  populates them (zero for TMDB/OMDb).
+- Tests: tvdb_test.go TestTVDBLookup_ReconcileWrongSeasonEpisode (S48E30 → S45E12);
+  watcher_test.go TestResolveAndGateLowConfidenceToReview (0.40 match → Review Queue,
+  ok=false, not enqueued).
+
+Verified: go build ./..., go vet ./..., go test ./... all pass; golangci-lint on
+internal/intake reports 0 issues. Not yet exercised against a live TVDB/real file —
+recommend an end-to-end run of the original 20/20 file to confirm the log shows the
+"corrected season/episode by episode name" line or a Review Queue entry.
+
 === Latest session (cont.): fix manual-match "Pick Selected" not moving file ===
 
 Bug (long-standing, previously undocumented): Review Queue "Search Manually" →

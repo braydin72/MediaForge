@@ -14,6 +14,8 @@ type LookupResult struct {
 	Title          string // show or movie title
 	Year           int
 	RuntimeMinutes int    // movie only; 0 for TV
+	Season         int    // TV only; resolved season (may differ from parsed after reconciliation)
+	Episode        int    // TV only; resolved episode number (may differ from parsed after reconciliation)
 	EpisodeTitle   string // TV only
 	EpisodeAirDate string // TV only
 	ImdbID         string // populated from OMDb
@@ -159,6 +161,8 @@ func fromTVDB(r *TVDBResult, parsed *ParsedFilename) *LookupResult {
 		Year:           r.FirstAiredYear,
 		TVDBSeriesID:   r.SeriesID,
 		TVDBNetwork:    r.Network,
+		Season:         r.Season,
+		Episode:        r.Episode,
 		EpisodeTitle:   r.EpisodeTitle,
 		EpisodeAirDate: r.EpisodeAirDate,
 		Confidence:     r.Confidence,
