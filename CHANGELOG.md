@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Files modified: web/templates/index.html, internal/api/handler.go
 
 ### Added
+- TVDB episode-title reconciliation now tries the immediate season neighbors
+  (season+1, season-1, same episode number) before falling back to the
+  whole-series title scan. Confirmed real-world cause: a source numbers an
+  entire show's seasons one off from TVDB across the board (e.g. filename
+  S48E30 is actually TVDB's S49E30) — the direct neighbor check catches this in
+  at most 2 extra requests instead of depending on the paginated scan, which
+  can miss on long-running shows or when the runner-up title is close enough
+  to trip the "unambiguous" guard.
+  - Files modified: internal/intake/tvdb.go (new findAdjacentSeasonEpisode),
+    internal/intake/tvdb_test.go (new TestTVDBLookup_ReconcileAdjacentSeasonOffset)
 - TVDB episode-title reconciliation (findEpisodeByTitle) now logs its outcome at
   debug level even when it does NOT find a confident match — the best candidate
   name/similarity, the runner-up similarity, and how many pages/episodes were

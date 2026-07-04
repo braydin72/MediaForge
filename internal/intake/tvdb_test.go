@@ -643,6 +643,79 @@ func TestNormTitle_PunctuationIsWordBoundary(t *testing.T) {
 	}
 }
 
+// TestTVDBLookup_ReconcileAdjacentSeasonOffset reproduces the real-world report:
+// a source numbers an entire show's seasons one off from TVDB across the board
+// (filename says S48E30, TVDB's real episode is S49E30, same episode number).
+// The direct season+1 check must catch this without needing the whole-series
+// title scan (which the mock here would fail, since paging returns nothing —
+// if the test only passed via the page-scan fallback, that would prove the
+// fallback works but not the adjacent-season fast path).
+func TestTVDBLookup_ReconcileAdjacentSeasonOffset(t *testing.T) {
+	searchBody := map[string]interface{}{
+		"data": []map[string]interface{}{
+			{"tvdb_id": "72289", "name": "20/20", "year": "1978", "network": "ABC"},
+		},
+	}
+
+	client := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
+		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, searchBody) },
+		"/v4/series": func(r *http.Request) *http.Response {
+			if strings.Contains(r.URL.Path, "/page/") {
+				// Whole-series scan finds nothing — the adjacent-season check must
+				// be what resolves this, not the fallback.
+				return jsonResp(http.StatusOK, map[string]interface{}{
+					"data":  map[string]interface{}{"episodes": []map[string]interface{}{}},
+					"links": map[string]interface{}{"next": ""},
+				})
+			}
+			switch r.URL.Query().Get("season") {
+			case "48":
+				return jsonResp(http.StatusOK, map[string]interface{}{
+					"data": map[string]interface{}{
+						"episodes": []map[string]interface{}{
+							{"id": 1, "name": "I Have Killed For You", "aired": "2025-06-06", "seasonNumber": 48, "number": 30},
+						},
+					},
+				})
+			case "49":
+				return jsonResp(http.StatusOK, map[string]interface{}{
+					"data": map[string]interface{}{
+						"episodes": []map[string]interface{}{
+							{"id": 2, "name": "Her Last Call", "aired": "2023-03-10", "seasonNumber": 49, "number": 30},
+						},
+					},
+				})
+			default:
+				return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(bytes.NewReader(nil)), Header: make(http.Header)}
+			}
+		},
+	}))
+
+	parsed := &ParsedFilename{
+		Title:              "20 20",
+		Year:               1978,
+		IsTV:               true,
+		Season:             48,
+		Episode:            30,
+		ParsedEpisodeTitle: "Her Last Call",
+	}
+
+	result, err := client.Lookup(context.Background(), parsed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Season != 49 || result.Episode != 30 {
+		t.Errorf("season/episode: want S49E30, got S%02dE%02d", result.Season, result.Episode)
+	}
+	if result.EpisodeTitle != "Her Last Call" {
+		t.Errorf("EpisodeTitle: want %q, got %q", "Her Last Call", result.EpisodeTitle)
+	}
+	if !result.EpisodeFound {
+		t.Error("EpisodeFound: want true after reconciliation")
+	}
+}
+
 func TestTVDBError_ReviewQueueReason(t *testing.T) {
 	codes := []string{"no_api_key", "auth_failure", "rate_limit", "not_found", "api_error"}
 	for _, code := range codes {

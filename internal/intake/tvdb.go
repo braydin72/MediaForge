@@ -156,7 +156,14 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBR
 					"series", best.Name, "tvdb_id", best.intID(),
 					"filename_episode", parsed.ParsedEpisodeTitle,
 					"season_episode_title", result.EpisodeTitle)
-				match, ok := c.findEpisodeByTitle(ctx, best.intID(), parsed.ParsedEpisodeTitle)
+				// Try the immediate season neighbors first (cheap: at most 2 requests) —
+				// catches a whole show being numbered a season off across the board,
+				// which the whole-series scan can miss on shows with many episodes/pages
+				// or titles that are only near-identical.
+				match, ok := c.findAdjacentSeasonEpisode(ctx, best.intID(), parsed.Season, parsed.Episode, parsed.ParsedEpisodeTitle)
+				if !ok {
+					match, ok = c.findEpisodeByTitle(ctx, best.intID(), parsed.ParsedEpisodeTitle)
+				}
 				if ok {
 					logger.Info("TVDB: corrected season/episode by episode name",
 						"series", best.Name,
@@ -438,6 +445,30 @@ func (c *TVDBClient) selectBestSeries(ctx context.Context, candidates []tvdbSear
 	}
 
 	return candidates[bestIdx], bestScore
+}
+
+// findAdjacentSeasonEpisode checks season+1 and season-1 (same episode number)
+// for a strong title match. Some sources number an entire show's seasons off by
+// one across the board (e.g. a syndication numbering that doesn't match TVDB's
+// season boundaries) — trying the immediate neighbors first is cheap (at most 2
+// requests) and reliably catches that common case.
+func (c *TVDBClient) findAdjacentSeasonEpisode(ctx context.Context, seriesID, season, episode int, title string) (*tvdbEpisode, bool) {
+	for _, s := range []int{season + 1, season - 1} {
+		if s <= 0 {
+			continue
+		}
+		ep, err := c.fetchEpisode(ctx, seriesID, s, episode)
+		if err != nil {
+			continue
+		}
+		if sim := stringSimilarity(ep.Name, title); sim >= 0.90 {
+			logger.Debug("TVDB: adjacent-season episode name match",
+				"series_id", seriesID, "tried_season", s, "episode", episode,
+				"tvdb_episode", ep.Name, "similarity", fmt.Sprintf("%.2f", sim))
+			return ep, true
+		}
+	}
+	return nil, false
 }
 
 // tvdbEpisode is the per-episode shape from GET /v4/series/{id}/episodes/default/page/{n}.

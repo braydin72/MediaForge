@@ -1,6 +1,53 @@
 CURRENT STATE NOTE
 
-=== Latest session (cont. yet again): series selection now correct, but episode-title reconciliation still doesn't find "Her Last Call" — added diagnostics, NOT yet resolved ===
+=== Latest session (cont. once more): confirmed root cause + real fix — adjacent-season check ===
+
+User confirmed (while away from keyboard, so this fix was implemented and
+deployed unattended) the actual root cause: this specific source numbers this
+show's seasons ONE OFF FROM TVDB ACROSS THE BOARD. TVDB's real episode is
+S49E30 "Her Last Call"; the source file said S48E30. So this was never a
+title-matching precision problem — the whole-series title scan (findEpisodeByTitle)
+should have found it eventually, but apparently didn't (reason still not
+confirmed from a real log — could be pagination limits on a ~1200+ episode,
+48+ season show, or a title variant close enough to another episode to trip the
+"unambiguous" guard). Rather than debug the scan further blind, added a direct,
+cheap first-pass check that exactly matches the reported failure mode.
+
+Fix (internal/intake/tvdb.go):
+- New findAdjacentSeasonEpisode(ctx, seriesID, season, episode, title): fetches
+  season+1 and season-1 (same episode number) and accepts a match at
+  similarity >= 0.90. At most 2 HTTP requests.
+- Lookup() now tries this BEFORE falling back to findEpisodeByTitle (the
+  whole-series scan). Whichever succeeds first wins; behavior/logging for the
+  correction itself (result.Season/Episode/EpisodeTitle update, "TVDB: corrected
+  season/episode by episode name" info log) is unchanged either way.
+- Test: TestTVDBLookup_ReconcileAdjacentSeasonOffset — mocks season 48 (wrong
+  episode) and season 49 (right episode, "Her Last Call") via the season query
+  param, and makes the paginated whole-series scan return EMPTY, so the test
+  only passes if the new adjacent-season path is what resolves it (not a
+  fallback-masks-the-bug false positive like the previous session's weak test).
+
+Verified: go build ./..., go vet ./..., go test ./... all pass, including the
+new test and all pre-existing TVDB/selectBestSeries/normTitle tests.
+
+DEPLOYMENT (done this session, user was away from keyboard and asked me to
+build + deploy unattended): killed running mediaforge.exe/mediaforge-tray.exe,
+ran build.ps1 to produce dist/mediaforge.exe + dist/mediaforge-tray.exe with
+the fix, copied both over C:\apps\mediaforge\ (the live install directory —
+confirmed via existing config/logo.png/uninstaller there), and relaunched
+mediaforge-tray.exe from that directory so it starts mediaforge.exe as usual.
+User is deleting the stale Review Queue entry / destination file and re-copying
+the source file into the incoming folder via Remote Desktop themselves.
+
+STILL NOT independently confirmed against the live TVDB API for this exact
+file (only via the unit test mock) — this is now the third round of "should be
+fixed," and the last two both had real gaps despite passing tests, so treat
+this as high-confidence but NOT verified until the user reports the next real
+run succeeded. Ask them to check the log for either "TVDB: adjacent-season
+episode name match" or "TVDB: corrected season/episode by episode name" and a
+final destination containing "Her Last Call".
+
+=== Prior session: series selection now correct, but episode-title reconciliation still doesn't find "Her Last Call" — added diagnostics, NOT yet resolved ===
 
 Re-ran the actual file after the normTitle fix. Real progress: TVDB now correctly
 selects the real "20/20" series (tvdb_id=72289, selection_score=0.60) instead of
