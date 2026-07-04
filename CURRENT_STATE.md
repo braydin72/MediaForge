@@ -1,6 +1,55 @@
 CURRENT STATE NOTE
 
-=== Latest session (cont. again): normTitle deleted punctuation instead of spacing it — the previous fix was a no-op in prod ===
+=== Latest session (cont. yet again): series selection now correct, but episode-title reconciliation still doesn't find "Her Last Call" — added diagnostics, NOT yet resolved ===
+
+Re-ran the actual file after the normTitle fix. Real progress: TVDB now correctly
+selects the real "20/20" series (tvdb_id=72289, selection_score=0.60) instead of
+a decoy — the normTitle fix worked as intended. However, the episode at S48E30 is
+still "I Have Killed For You" per TVDB, and findEpisodeByTitle apparently did NOT
+correct it to "Her Last Call" — confidence computed as 0.88 using the WRONG
+episode title (titleScore component reflects sim=0.19, i.e. result.EpisodeTitle
+was never overwritten). The file got queued to Review Queue this run only because
+a stale destination file from an earlier (pre-fix) bad run already existed there
+— the duplicate-conflict path, not the confidence gate, is what caught it this
+time. If that stale file weren't there, this would have auto-moved under the
+wrong title again.
+
+Root cause NOT yet identified — could be either:
+(a) a real code bug in the mismatch-detection or reconciliation call path, or
+(b) TVDB genuinely doesn't have an episode titled "Her Last Call" anywhere in
+    this series (i.e. the source file's own episode title metadata is wrong,
+    not a MediaForge bug at all — "I Have Killed For You" may just be correct).
+The previous log had NO visibility into which of these it is: findEpisodeByTitle
+only logged on success, so a failed/no-match search was indistinguishable from
+"never attempted."
+
+This session only added diagnostics, did NOT change the reconciliation logic:
+- internal/intake/tvdb.go Lookup(): added a debug log right before calling
+  findEpisodeByTitle ("TVDB: episode name mismatch, searching series for
+  title") so the log can confirm reconciliation was actually attempted.
+- internal/intake/tvdb.go findEpisodeByTitle(): now logs a debug line on every
+  failure path (request build/send error, non-200, decode error) and, when no
+  confident match is found, logs "TVDB: findEpisodeByTitle no confident match"
+  with pages_scanned, episodes_scanned, the best candidate name + similarity,
+  and the runner-up similarity — so a future run will show either "reconciled"
+  or exactly why it didn't (best match too weak / ambiguous / API error / not
+  enough pages scanned).
+
+NEXT STEP for a future session: re-run the file once more with debug logging
+enabled and read the new "TVDB: findEpisodeByTitle no confident match" (or
+success) line. If best_similarity is well below 0.90 even for the correct
+episode, this may be case (b) above — a genuine metadata mismatch in the source
+file, not a bug — and no code change would be appropriate. If pages_scanned is
+suspiciously low (e.g. hit maxPages=20 without reaching this show's later
+seasons — 48 seasons at ~25 eps/season is ~1200 episodes, so 20 pages must cover
+enough per page to reach it; page size is TVDB-controlled, not configured here),
+that points to a real pagination-limit bug worth revisiting.
+
+Verified: go build ./..., go vet ./..., go test ./... all pass. This is a
+diagnostics-only change — no behavior change to confidence scoring, gating, or
+file moves. Do not report this bug as fixed; it is still open.
+
+=== Prior session: normTitle deleted punctuation instead of spacing it — the previous fix was a no-op in prod ===
 
 The user re-ran the same file after the selectBestSeries fix below and got the
 IDENTICAL wrong result from a fresh log. Root cause of why that fix didn't work:

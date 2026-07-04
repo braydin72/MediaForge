@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now exposed as `paused` in GET /api/stats (Issue #13).
   - Files modified: web/templates/index.html, internal/api/handler.go
 
+### Added
+- TVDB episode-title reconciliation (findEpisodeByTitle) now logs its outcome at
+  debug level even when it does NOT find a confident match — the best candidate
+  name/similarity, the runner-up similarity, and how many pages/episodes were
+  scanned. Previously a failed reconciliation was silent (only the success path
+  logged), so there was no way to tell from the log whether reconciliation ran
+  and found nothing usable, or didn't run at all.
+  - Files modified: internal/intake/tvdb.go
+
 ### Fixed
 - `normTitle` (internal/intake/tmdb.go, shared by TMDB and — as of this same
   session — TVDB series scoring) deleted punctuation instead of treating it as a

@@ -152,7 +152,12 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBR
 			mismatch := !result.EpisodeFound ||
 				stringSimilarity(result.EpisodeTitle, parsed.ParsedEpisodeTitle) < 0.60
 			if mismatch {
-				if match, ok := c.findEpisodeByTitle(ctx, best.intID(), parsed.ParsedEpisodeTitle); ok {
+				logger.Debug("TVDB: episode name mismatch, searching series for title",
+					"series", best.Name, "tvdb_id", best.intID(),
+					"filename_episode", parsed.ParsedEpisodeTitle,
+					"season_episode_title", result.EpisodeTitle)
+				match, ok := c.findEpisodeByTitle(ctx, best.intID(), parsed.ParsedEpisodeTitle)
+				if ok {
 					logger.Info("TVDB: corrected season/episode by episode name",
 						"series", best.Name,
 						"filename_episode", parsed.ParsedEpisodeTitle,
@@ -509,17 +514,20 @@ func (c *TVDBClient) findEpisodeByTitle(ctx context.Context, seriesID int, title
 
 	var best tvdbEpisode
 	bestSim, runnerUpSim := -1.0, -1.0
+	pagesScanned, episodesScanned := 0, 0
 
 	for page := 0; page < maxPages; page++ {
 		url := fmt.Sprintf("%s/v4/series/%d/episodes/default/page/%d", tvdbBaseURL, seriesID, page)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
+			logger.Debug("TVDB: findEpisodeByTitle request build failed", "series_id", seriesID, "page", page, "error", err)
 			return nil, false
 		}
 		req.Header.Set("Authorization", "Bearer "+c.token)
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
+			logger.Debug("TVDB: findEpisodeByTitle request failed", "series_id", seriesID, "page", page, "error", err)
 			return nil, false
 		}
 		var payload struct {
@@ -531,15 +539,19 @@ func (c *TVDBClient) findEpisodeByTitle(ctx context.Context, seriesID int, title
 			} `json:"links"`
 		}
 		if resp.StatusCode != http.StatusOK {
+			logger.Debug("TVDB: findEpisodeByTitle non-200 response", "series_id", seriesID, "page", page, "status", resp.StatusCode)
 			resp.Body.Close()
 			return nil, false
 		}
 		decErr := json.NewDecoder(resp.Body).Decode(&payload)
 		resp.Body.Close()
 		if decErr != nil {
+			logger.Debug("TVDB: findEpisodeByTitle response decode failed", "series_id", seriesID, "page", page, "error", decErr)
 			return nil, false
 		}
 
+		pagesScanned++
+		episodesScanned += len(payload.Data.Episodes)
 		for i := range payload.Data.Episodes {
 			ep := &payload.Data.Episodes[i]
 			if ep.SeasonNumber <= 0 || ep.Name == "" {
@@ -565,5 +577,10 @@ func (c *TVDBClient) findEpisodeByTitle(ctx context.Context, seriesID int, title
 	if bestSim >= 0.90 && (runnerUpSim < 0 || bestSim-runnerUpSim >= 0.10) {
 		return &best, true
 	}
+	logger.Debug("TVDB: findEpisodeByTitle no confident match",
+		"series_id", seriesID, "title", title,
+		"pages_scanned", pagesScanned, "episodes_scanned", episodesScanned,
+		"best_match", best.Name, "best_similarity", fmt.Sprintf("%.2f", bestSim),
+		"runner_up_similarity", fmt.Sprintf("%.2f", runnerUpSim))
 	return nil, false
 }
