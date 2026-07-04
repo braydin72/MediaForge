@@ -563,6 +563,58 @@ func TestTVDBLookup_ReconcileWrongSeasonEpisode(t *testing.T) {
 	}
 }
 
+// TestSelectBestSeries_PunctuationNormalizedForNameMatch reproduces a real
+// production bug: the filename parser turns "20_20" into the title "20 20"
+// (space), but TVDB lists the real show as "20/20" (slash). Comparing raw
+// lowercased strings (no punctuation stripping) missed the exact-name match,
+// so the real show scored the same low base score as unrelated decoys — and a
+// decoy whose season 48 doesn't exist at all (a fetchEpisode 404, penalized
+// -0.20) outscored the real show, whose season 48 exists but disagrees on
+// episode name at E30 (penalized -0.30 for the mismatch). The real show must
+// win once name comparison is punctuation-normalized, regardless of episode
+// mismatch penalties, so the later episode-name reconciliation step (which
+// operates on whichever series selectBestSeries picks) has a chance to run
+// against the correct series.
+func TestSelectBestSeries_PunctuationNormalizedForNameMatch(t *testing.T) {
+	candidates := []tvdbSearchResult{
+		// The real show: name has different punctuation than the parsed title,
+		// and its season 48 exists but the wrong episode is at E30.
+		{TVDBIDStr: "72289", Name: "20/20", Year: "1978"},
+		// A decoy with a garbage year that trivially satisfies "seriesYear <=
+		// parsed.Year" and has no season 48 at all (fetchEpisode 404s).
+		{TVDBIDStr: "353196", Name: "20 Tage im 20. Jahrhundert", Year: "0099"},
+	}
+
+	client := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/series": func(r *http.Request) *http.Response {
+			if strings.Contains(r.URL.Path, "/72289/") {
+				return jsonResp(http.StatusOK, map[string]interface{}{
+					"data": map[string]interface{}{
+						"episodes": []map[string]interface{}{
+							{"id": 1, "name": "I Have Killed For You", "aired": "2026-06-27", "seasonNumber": 48, "number": 30},
+						},
+					},
+				})
+			}
+			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(bytes.NewReader(nil)), Header: make(http.Header)}
+		},
+	}))
+
+	parsed := &ParsedFilename{
+		Title:              "20 20",
+		Year:               1978,
+		IsTV:               true,
+		Season:             48,
+		Episode:            30,
+		ParsedEpisodeTitle: "Her Last Call",
+	}
+
+	best, _ := client.selectBestSeries(context.Background(), candidates, parsed)
+	if best.TVDBIDStr != "72289" {
+		t.Errorf("expected real show (72289) to win despite episode mismatch, got %q (%s)", best.Name, best.TVDBIDStr)
+	}
+}
+
 func TestTVDBError_ReviewQueueReason(t *testing.T) {
 	codes := []string{"no_api_key", "auth_failure", "rate_limit", "not_found", "api_error"}
 	for _, code := range codes {

@@ -21,6 +21,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Files modified: web/templates/index.html, internal/api/handler.go
 
 ### Fixed
+- TVDB series candidate selection (selectBestSeries) now normalizes punctuation
+  before comparing names, e.g. "20 20" (parsed from a filename) vs "20/20" (TVDB's
+  listing) — previously a raw case-only comparison missed this as an exact match,
+  so the real show scored no better than unrelated decoys. Combined with the
+  episode-mismatch penalty (-0.30, applied when a show's season/episode exists but
+  the name disagrees) being harsher than the fetch-failure penalty (-0.20, applied
+  when a show doesn't have that season at all), an unrelated decoy with a garbage/
+  mis-parsed year outscored the real "20/20" and won selection — so the later
+  episode-title reconciliation ran against the wrong series and always failed,
+  falling back to TMDB with no reconciliation and the wrong episode ("Her Last
+  Call" filed as "I Have Killed For You"). Also added a sanity floor (year >= 1900)
+  on the premiere-year bonus so implausible years can no longer earn it for free.
+  - Files modified: internal/intake/tvdb.go, internal/intake/tvdb_test.go
 - Review Queue "Keep Existing" (discard a duplicate-conflict entry) now deletes the
   incoming file from disk. Previously DiscardReviewEntry only flipped the entry to
   "discarded" and left the losing file sitting in the intake/staging directory

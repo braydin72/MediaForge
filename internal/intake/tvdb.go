@@ -347,20 +347,25 @@ func (c *TVDBClient) searchSeries(ctx context.Context, name string) ([]tvdbSearc
 }
 
 // baseSeriesScore scores a candidate on show name and premiere year only.
-func baseSeriesScore(s tvdbSearchResult, parsed *ParsedFilename, queryLower string) float64 {
+// queryNorm must already be normalized via normTitle — comparing raw lowercased
+// strings misses matches like "20/20" vs "20 20" (punctuation-only differences),
+// which let unrelated candidates with a bogus/garbage year outscore the real show.
+func baseSeriesScore(s tvdbSearchResult, parsed *ParsedFilename, queryNorm string) float64 {
 	score := 0.50
-	nameLower := strings.ToLower(s.Name)
+	nameNorm := normTitle(s.Name)
 
-	if nameLower == queryLower {
+	if nameNorm == queryNorm {
 		score += 0.30
-	} else if strings.Contains(nameLower, queryLower) || strings.Contains(queryLower, nameLower) {
+	} else if strings.Contains(nameNorm, queryNorm) || strings.Contains(queryNorm, nameNorm) {
 		score += 0.10
 	}
 
 	// Award the year bonus when the series premiere year <= the filename year.
 	// The year in a TV filename is the episode/season year, not the premiere year,
 	// so an exact match is not expected — we only need the series to have existed.
-	if seriesYear := s.parsedYear(); parsed.Year > 0 && seriesYear > 0 && seriesYear <= parsed.Year {
+	// Guard against implausible/garbage years (e.g. a mis-parsed "0099") getting a
+	// free bonus just because they're trivially <= the filename year.
+	if seriesYear := s.parsedYear(); parsed.Year > 0 && seriesYear >= 1900 && seriesYear <= parsed.Year {
 		score += 0.10
 	}
 
@@ -379,14 +384,14 @@ func baseSeriesScore(s tvdbSearchResult, parsed *ParsedFilename, queryLower stri
 //
 // The base name+year score is used alone when no episode title is available.
 func (c *TVDBClient) selectBestSeries(ctx context.Context, candidates []tvdbSearchResult, parsed *ParsedFilename) (tvdbSearchResult, float64) {
-	queryLower := strings.ToLower(parsed.Title)
+	queryNorm := normTitle(parsed.Title)
 	validateEpisode := parsed.IsTV && parsed.Season > 0 && parsed.Episode > 0 && parsed.ParsedEpisodeTitle != ""
 
 	bestIdx := 0
 	bestScore := -1.0
 
 	for i, s := range candidates {
-		score := baseSeriesScore(s, parsed, queryLower)
+		score := baseSeriesScore(s, parsed, queryNorm)
 
 		if validateEpisode {
 			ep, err := c.fetchEpisode(ctx, s.intID(), parsed.Season, parsed.Episode)

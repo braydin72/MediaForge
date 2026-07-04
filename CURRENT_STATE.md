@@ -1,6 +1,53 @@
 CURRENT STATE NOTE
 
-=== Latest session: Keep Existing deletes incoming duplicate file (task 2 verified done) ===
+=== Latest session (cont.): fix TVDB selectBestSeries picking wrong series (real prod log) ===
+
+After the "task 2 verified done" note below, the user hit the exact same failure
+live: "20_20 (1978) - S48E30 - Her Last Call.mp4" got moved to the library as
+"...S48E30 - I Have Killed For You.mp4" — the episode-title reconciliation never
+kicked in. Root cause found in the real intake log (debug level): TVDB's
+selectBestSeries (internal/intake/tvdb.go) compared candidate names with a raw
+`strings.ToLower` — no punctuation stripping. The parsed filename title is
+"20 20" (space; underscore-to-space during parsing) but TVDB lists the show as
+"20/20" (slash), so the exact-match branch never fired for the real show. With
+no name bonus, the real show's score after the episode-mismatch penalty (-0.30,
+its season 48 exists but E30 disagrees) was 0.30 — while a garbage decoy series
+("20 Tage im 20. Jahrhundert", year "0099") got a false year bonus (0099 <= 1978
+trivially) and only the smaller fetch-failure penalty (-0.20, no season 48 at
+all), scoring 0.40 and winning selection. Lookup() then ran the episode-name
+reconciliation against the WRONG (decoy) series, which obviously doesn't have
+"Her Last Call" anywhere, so it failed, TVDB confidence came back 0.00, and the
+pipeline fell back to TMDB — which has no episode-title reconciliation logic at
+all, so it accepted "I Have Killed For You" uncorrected and moved the file.
+
+Fix (internal/intake/tvdb.go):
+- baseSeriesScore now compares `normTitle(s.Name)` against a `normTitle`-
+  normalized query (was raw `strings.ToLower`), so punctuation-only differences
+  ("20/20" vs "20 20") no longer suppress the exact-match bonus. normTitle
+  already existed in tmdb.go (same package) — reused as-is.
+  selectBestSeries's queryLower var renamed queryNorm, built via normTitle.
+- Added a sanity floor (seriesYear >= 1900) on the premiere-year bonus so a
+  mis-parsed/garbage year like "0099" can no longer satisfy the "<=" check for
+  free.
+- Did NOT touch TMDB's selectBestTV/selectBestMovie (already use normTitle) or
+  add episode-title reconciliation to the TMDB path — with the TVDB fix, TVDB
+  now wins this exact scenario correctly and its existing reconciliation
+  (findEpisodeByTitle) handles the correction, so the TMDB fallback path wasn't
+  exercised here. A TMDB-side reconciliation gap still exists for
+  TVDB-key-not-configured setups but is out of scope for this fix (not the
+  reported bug; would need its own design/confirmation before implementing).
+- Test: TestSelectBestSeries_PunctuationNormalizedForNameMatch — reproduces the
+  exact two-candidate scenario (real "20/20" vs decoy garbage-year series) and
+  asserts the real show wins selectBestSeries.
+
+Verified: go build ./..., go vet ./..., go test ./... all pass (including the
+existing TestTVDBLookup_ReconcileWrongSeasonEpisode, TestSelectBestSeries_*).
+NOT re-verified against a live TVDB API call for the literal 20/20 file — only
+via the unit test reproduction. Recommend re-running the original file through
+intake once and confirming the log shows "TVDB: corrected season/episode by
+episode name" instead of a direct library move under the wrong title.
+
+=== Prior session: Keep Existing deletes incoming duplicate file (task 2 verified done) ===
 
 Task requested two fixes:
 
