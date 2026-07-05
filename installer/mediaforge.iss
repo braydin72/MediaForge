@@ -19,11 +19,15 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/issues
 AppUpdatesURL={#MyAppURL}/releases
-DefaultDirName={autopf}\MediaForge
-; Force the "Select Destination Location" page to appear. Without this,
-; DisableDirPage defaults to "auto", which suppresses the page for per-user
-; {auto...} installs (PrivilegesRequired=lowest). "no" restores the choice
-; while keeping the per-user, no-elevation model.
+; Default to C:\MediaForge ({sd} = system drive). We intentionally keep the
+; per-user, no-elevation model below, so the app's logs stay writable without
+; UAC side effects. Caveat: a locked-down standard (non-admin) user may not be
+; able to create a folder directly under the drive root without elevation; the
+; user can pick a writable location on the destination page in that case.
+DefaultDirName={sd}\MediaForge
+; Force the "Select Destination Location" page to appear so the user can change
+; the install directory. Without this, DisableDirPage can suppress the page for
+; per-user {auto...} installs.
 DisableDirPage=no
 DefaultGroupName=MediaForge
 DisableProgramGroupPage=yes
