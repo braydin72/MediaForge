@@ -29,23 +29,38 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
-      - name: Build Windows binaries
+      - name: Determine app version
+        id: appver
+        shell: pwsh
         run: |
-          go build -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=${{ github.run_number }}" -o mediaforge.exe ./cmd/mediaforge
-          go build -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=${{ github.run_number }} -H windowsgui" -o mediaforge-tray.exe ./cmd/tray
+          # Derive the app version from the git tag (vX.Y.Z -> X.Y.Z);
+          # empty on non-tag runs so builds fall back to the hardcoded
+          # default in internal/version/version.go.
+          $ref = "${{ github.ref }}"
+          if ($ref -like 'refs/tags/*') {
+            $version = "${{ github.ref_name }}" -replace '^v', ''
+          } else {
+            $version = ''
+          }
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Build Windows binaries
+        shell: pwsh
+        run: |
+          $ldflags = "-X github.com/braydin72/mediaforge/internal/version.Build=${{ github.run_number }}"
+          if ("${{ steps.appver.outputs.version }}") {
+            $ldflags = "$ldflags -X github.com/braydin72/mediaforge/internal/version.Version=${{ steps.appver.outputs.version }}"
+          }
+          go build -ldflags $ldflags -o mediaforge.exe ./cmd/mediaforge
+          go build -ldflags "$ldflags -H windowsgui" -o mediaforge-tray.exe ./cmd/tray
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
       - name: Compile installer
         shell: pwsh
         run: |
-          # Derive the installer version from the git tag (vX.Y.Z -> X.Y.Z);
-          # fall back to the default baked into the .iss for non-tag runs.
-          $ref = "${{ github.ref }}"
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
-          if ($ref -like 'refs/tags/*') {
-            $version = "${{ github.ref_name }}" -replace '^v', ''
-            & $iscc "/DMyAppVersion=$version" installer\mediaforge.iss
+          if ("${{ steps.appver.outputs.version }}") {
+            & $iscc "/DMyAppVersion=${{ steps.appver.outputs.version }}" installer\mediaforge.iss
           } else {
             & $iscc installer\mediaforge.iss
           }
@@ -88,14 +103,18 @@ jobs:
       - name: Extract version from tag
         id: version
         if: startsWith(github.ref, 'refs/tags/')
-        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: |
+          echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          echo "semver=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: BUILD_NUMBER=${{ github.run_number }}
+          build-args: |
+            BUILD_NUMBER=${{ github.run_number }}
+            APP_VERSION=${{ steps.version.outputs.semver }}
           tags: |
             ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest
             ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}', env.REGISTRY, steps.image.outputs.name, steps.version.outputs.tag) || '' }}

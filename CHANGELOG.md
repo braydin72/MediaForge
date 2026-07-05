@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+- App-reported version was hardcoded to `1.0.0` in `internal/version/version.go`
+  and never bumped for tagged releases, so a binary built from the `v1.1.0` tag
+  still logged `version=v1.0.0+build.N`. `Version` is now injected via
+  `-ldflags` (same mechanism already used for `Build`), derived from the git
+  tag in CI (`.github/workflows/release.yml`), the Docker build
+  (`Dockerfile`, new `APP_VERSION` build-arg), and local builds
+  (`build.ps1`, via `git describe --tags`). The hardcoded constant remains
+  only as a fallback for non-tagged/dev builds.
+- Files modified: internal/version/version.go, build.ps1, Dockerfile,
+  .github/workflows/release.yml
+
 ## V1.1.0
 
 ### Added

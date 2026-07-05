@@ -2,7 +2,10 @@ package version
 
 import "fmt"
 
-const Version = "1.0.0"
+// Version is overridden at release build time via:
+// -ldflags "-X github.com/braydin72/mediaforge/internal/version.Version=<X.Y.Z>"
+// derived from the git tag. This fallback is used for non-tagged/dev builds.
+var Version = "1.1.0"
 
 // Build is overridden at compile time via:
 // -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=<number>"

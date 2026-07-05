@@ -1,6 +1,33 @@
 CURRENT STATE NOTE
 
-=== Latest session: removed dead/redundant Review Queue Retry and Re-add buttons ===
+=== Latest session: fixed app-reported version not matching git tag ===
+
+User reported the running app logged `version=v1.0.0+build.12` despite being
+built from the `v1.1.0` tag. Root cause: `internal/version.Version` was a
+hardcoded Go constant, never tied to the git tag — only `Build` was ever
+injected via `-ldflags`. The installer version (`.iss`) and Docker image tag
+were already correctly derived from the git tag, but the binary's own
+self-reported version was not.
+
+Fix: made `Version` a `var` with the same fallback-constant pattern as
+`Build`, and wired it through `-ldflags -X .../version.Version=<X.Y.Z>` in:
+- `.github/workflows/release.yml` — windows-installer job now computes the
+  version once (`steps.appver.outputs.version`, empty on non-tag runs) and
+  reuses it for both the Go build and the installer's `/DMyAppVersion`; the
+  docker job now also extracts a `semver` (no `v` prefix) output and passes it
+  as the new `APP_VERSION` build-arg.
+- `Dockerfile` — new `APP_VERSION` build-arg, conditionally added to ldflags
+  only if non-empty.
+- `build.ps1` — new `-Version` param, defaults to `git describe --tags
+  --abbrev=0` (v-prefix stripped); falls back to the hardcoded default in
+  version.go if no tag is found (e.g. shallow clone).
+
+Verified: `go build ./...` and `go test ./...` pass; ran `build.ps1` locally
+and confirmed the built binary logs `MediaForge v1.1.0+build.12 starting`.
+
+Nothing outstanding — this was scoped to the version-reporting bug only.
+
+=== Prior session: removed dead/redundant Review Queue Retry and Re-add buttons ===
 
 User reported: Retry did nothing but remove the item from the queue, and
 Re-add did nothing at all. Confirmed by reading the code:

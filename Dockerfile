@@ -6,7 +6,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG BUILD_NUMBER=dev
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X github.com/braydin72/mediaforge/internal/version.Build=${BUILD_NUMBER}" -o mediaforge ./cmd/mediaforge
+ARG APP_VERSION=""
+RUN LDFLAGS="-X github.com/braydin72/mediaforge/internal/version.Build=${BUILD_NUMBER}"; \
+    if [ -n "$APP_VERSION" ]; then LDFLAGS="$LDFLAGS -X github.com/braydin72/mediaforge/internal/version.Version=${APP_VERSION}"; fi; \
+    CGO_ENABLED=0 GOOS=linux go build -ldflags "$LDFLAGS" -o mediaforge ./cmd/mediaforge
 
 # Runtime stage - linuxserver/ffmpeg already has s6-overlay + hardware accel
 FROM linuxserver/ffmpeg:latest

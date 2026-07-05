@@ -4,17 +4,26 @@
 # matching the scheme used by the Dockerfile and CI. Locally we derive it from
 # the git commit count (CI uses the GitHub Actions run number instead).
 #
+# Version is derived from the nearest git tag (vX.Y.Z -> X.Y.Z) when available,
+# so local builds report the same version CI would for that commit. Falls back
+# to the hardcoded default in internal/version/version.go if no tag is found.
+#
 # Usage:
-#   .\build.ps1            # build number = git commit count
+#   .\build.ps1            # build number = git commit count, version = nearest tag
 #   .\build.ps1 -Build 42  # explicit build number
 
 param(
-    [string]$Build = (git rev-list --count HEAD)
+    [string]$Build = (git rev-list --count HEAD),
+    [string]$Version = ((git describe --tags --abbrev=0 2>$null) -replace '^v', '')
 )
 
 $ErrorActionPreference = 'Stop'
-$pkg = 'github.com/braydin72/mediaforge/internal/version.Build'
-$ldflags = "-X $pkg=$Build"
+$buildPkg = 'github.com/braydin72/mediaforge/internal/version.Build'
+$ldflags = "-X $buildPkg=$Build"
+if ($Version) {
+    $versionPkg = 'github.com/braydin72/mediaforge/internal/version.Version'
+    $ldflags = "$ldflags -X $versionPkg=$Version"
+}
 
 New-Item -ItemType Directory -Force -Path dist | Out-Null
 
