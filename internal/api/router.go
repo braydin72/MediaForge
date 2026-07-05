@@ -48,7 +48,6 @@ func registerAPIRoutes(mux *http.ServeMux, h *Handler) {
 	mux.HandleFunc("GET /api/review/count", h.GetReviewQueueCount)
 	mux.HandleFunc("GET /api/review/{id}/search", h.SearchReviewEntry)
 	mux.HandleFunc("PUT /api/review/{id}/resolve", h.ResolveReviewEntry)
-	mux.HandleFunc("PUT /api/review/{id}/retry", h.RetryReviewEntry)
 	mux.HandleFunc("PUT /api/review/{id}/discard", h.DiscardReviewEntry)
 	mux.HandleFunc("PUT /api/review/{id}/replace", h.ReplaceReviewEntry)
 	mux.HandleFunc("PUT /api/review/{id}/resubmit", h.ResubmitReviewEntry)

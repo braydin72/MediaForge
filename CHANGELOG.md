@@ -40,6 +40,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Files modified: internal/intake/tvdb.go
 
 ### Fixed
+- Removed the Review Queue "Retry" and "Re-add" actions: Retry only marked the
+  entry resolved without re-running identification or re-enqueuing anything
+  (a no-op for non-post-encode entries — it just removed the card), and Re-add
+  duplicated the same /api/review/{id}/resubmit call that "Re-encode Custom"
+  already covers, but without its error feedback. "Re-encode Custom" is now the
+  single re-processing action on a Review Queue entry.
+  - Files modified: web/templates/index.html (removed reviewRetry,
+    reviewRetryAll, reviewResubmit, their buttons, and the "Retry All" bulk
+    action), internal/api/handler.go (removed RetryReviewEntry),
+    internal/api/router.go (removed PUT /api/review/{id}/retry)
 - `normTitle` (internal/intake/tmdb.go, shared by TMDB and — as of this same
   session — TVDB series scoring) deleted punctuation instead of treating it as a
   word boundary, so "20/20" collapsed to "2020" while a filename-derived title

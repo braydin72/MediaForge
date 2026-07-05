@@ -2619,7 +2619,6 @@
                 <span>Select all</span>
             </label>
             <div style="flex:1"></div>
-            <button class="btn btn-secondary btn-sm" onclick="reviewRetryAll()">Retry All</button>
             <button class="btn btn-secondary btn-sm" onclick="reviewDiscardSelected()">Discard Selected</button>
         </div>
         <div class="review-list" id="review-list">
@@ -5723,9 +5722,7 @@
                   <button class="btn btn-secondary btn-sm" onclick="reviewDiscard('${e.id}')">Keep Existing</button>` : `
                   <button class="btn btn-primary btn-sm" onclick="reviewPick('${e.id}')">Pick Selected</button>
                   <button class="btn btn-secondary btn-sm" onclick="reviewToggleSearch('${e.id}')">Search Manually</button>
-                  <button class="btn btn-secondary btn-sm" onclick="reviewRetry('${e.id}')">Retry</button>
                   <button class="btn btn-secondary btn-sm" onclick="reviewDiscard('${e.id}')">Discard</button>
-                  <button class="btn btn-secondary btn-sm" onclick="reviewResubmit('${e.id}','${e.original_path.replace(/'/g,'\\x27')}')">Re-add</button>
                   <button class="btn btn-secondary btn-sm" onclick="reviewToggleCustom('${e.id}')">Re-encode Custom</button>`;
 
             return `
@@ -5882,28 +5879,10 @@
             }
         }
 
-        async function reviewRetry(id) {
-            const res = await fetch(`/api/review/${id}/retry`, {method:'PUT'});
-            if (res.ok) { reviewRemoveCard(id); reviewUpdateBadge(); }
-        }
-
         async function reviewDiscard(id) {
             if (!confirm('Discard this file from the Review Queue?')) return;
             const res = await fetch(`/api/review/${id}/discard`, {method:'PUT'});
             if (res.ok) { reviewRemoveCard(id); reviewUpdateBadge(); }
-        }
-
-        async function reviewResubmit(id, originalPath) {
-            const presetId = selectedPreset || 'compress-hevc';
-            const res = await fetch(`/api/review/${id}/resubmit`, {
-                method: 'PUT', headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({preset_id: presetId, original_path: originalPath})
-            });
-            if (res.ok) {
-                reviewRemoveCard(id);
-                reviewUpdateBadge();
-                switchView('queue');
-            }
         }
 
         function reviewToggleCustom(id) {
@@ -5955,15 +5934,6 @@
                 if (_reviewPages > 1) { loadReviewQueue(); }
                 else { renderReviewList(); document.getElementById('review-pager').style.display = 'none'; }
             }
-        }
-
-        async function reviewRetryAll() {
-            if (!_reviewEntries.length) return;
-            if (!confirm(`Retry all ${_reviewEntries.length} item${_reviewEntries.length===1?'':'s'}?`)) return;
-            for (const e of [..._reviewEntries]) await fetch(`/api/review/${e.id}/retry`, {method:'PUT'});
-            _reviewEntries = [];
-            renderReviewList();
-            reviewUpdateBadge();
         }
 
         function reviewGetSelected() {

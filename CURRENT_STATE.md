@@ -1,6 +1,31 @@
 CURRENT STATE NOTE
 
-=== Latest session (cont. once more): confirmed root cause + real fix — adjacent-season check ===
+=== Latest session: removed dead/redundant Review Queue Retry and Re-add buttons ===
+
+User reported: Retry did nothing but remove the item from the queue, and
+Re-add did nothing at all. Confirmed by reading the code:
+- RetryReviewEntry (internal/api/handler.go) only had real behavior for
+  post-encode entries (job.LibraryPath set) — for the normal case it just
+  called UpdateReviewQueueStatus(id, "resolved") with no re-identification or
+  re-enqueue, i.e. exactly the "removes the item, does nothing else" the user
+  saw.
+- reviewResubmit ("Re-add", web/templates/index.html) hit the same
+  /api/review/{id}/resubmit endpoint as "Re-encode Custom" but with no error
+  handling, so a failure was silent — and the working, better-UX version
+  already existed as "Re-encode Custom".
+
+Removed both entirely rather than fixing them, since "Re-encode Custom"
+already covers the same functionality correctly:
+- web/templates/index.html: deleted reviewRetry, reviewRetryAll, reviewResubmit
+  JS functions; removed the per-card "Retry"/"Re-add" buttons and the bulk
+  "Retry All" button.
+- internal/api/handler.go: deleted RetryReviewEntry.
+- internal/api/router.go: removed the PUT /api/review/{id}/retry route.
+
+Verified: go build ./... and go test ./... both pass. Nothing outstanding from
+this change.
+
+=== Prior session (cont. once more): confirmed root cause + real fix — adjacent-season check ===
 
 User confirmed (while away from keyboard, so this fix was implemented and
 deployed unattended) the actual root cause: this specific source numbers this
