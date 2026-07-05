@@ -50,6 +50,13 @@ func resolveLibraryPath(cfg *config.IntakeConfig, parsed *ParsedFilename, ext st
 	}
 }
 
+// ResolveLibraryPath is an exported wrapper around resolveLibraryPath for callers
+// outside the package (e.g. the API resolving a manually-picked match to a
+// destination path). Returns "" when there is not enough metadata to build a path.
+func ResolveLibraryPath(cfg *config.IntakeConfig, parsed *ParsedFilename, ext string) string {
+	return resolveLibraryPath(cfg, parsed, ext)
+}
+
 // applyNamingTemplate replaces template tokens in tmpl with values from parsed.
 // Supported tokens: {title}, {show}, {year}, {season:02d}, {episode:02d}, {episode_title}.
 func applyNamingTemplate(tmpl string, parsed *ParsedFilename) string {

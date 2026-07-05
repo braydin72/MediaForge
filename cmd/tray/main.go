@@ -6,6 +6,7 @@
 package main
 
 import (
+	"log"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,7 +18,7 @@ import (
 	"time"
 
 	"github.com/braydin72/mediaforge/internal/config"
-	"github.com/getlantern/systray"
+	"fyne.io/systray"
 )
 
 // hideConsole is the Windows CreateProcess flag (CREATE_NO_WINDOW) that starts
@@ -26,6 +27,31 @@ const hideConsole = 0x08000000
 
 // baseURL is the local MediaForge server the tray talks to.
 const baseURL = "http://127.0.0.1:8080"
+
+// init routes the tray's own diagnostics to %APPDATA%\MediaForge\logs\tray.log.
+// The tray is linked with -H windowsgui (no console), so stderr goes nowhere;
+// without this file there is no way to see why the tray misbehaves. The log dir
+// is created first because on a fresh install it may not exist yet, and we keep
+// the default stderr output if the file can't be opened (SetOutput(nil) would
+// make every later log call panic on a nil writer).
+func init() {
+	logDir := filepath.Join(os.Getenv("APPDATA"), "MediaForge", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return
+	}
+	logFile, err := os.OpenFile(
+		filepath.Join(logDir, "tray.log"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+		0o644,
+	)
+	if err != nil {
+		return
+	}
+	log.SetOutput(logFile)
+	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
+	log.SetPrefix("tray: ")
+	log.Println("----- tray started -----")
+}
 
 func main() {
 	// 1-3. Ensure a config exists; run first-run setup if it doesn't.
@@ -47,6 +73,10 @@ func onReady() {
 		systray.SetIcon(icon)
 	}
 	systray.SetTooltip("MediaForge")
+	// Left-click (primary tap) opens the dashboard. Right-click still opens the
+	// menu (systray falls back to showing the menu when no secondary handler is
+	// set).
+	systray.SetOnTapped(func() { openBrowser(baseURL) })
 	buildTrayMenu()
 }
 
@@ -72,7 +102,7 @@ func launchMediaForge() {
 	// Windows only: start the server without allocating a console window.
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: hideConsole}
 	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "tray: failed to start mediaforge.exe: %v\n", err)
+		log.Printf("failed to start mediaforge.exe: %v", err)
 		return
 	}
 	// Give the server time to bind its port, then open the web UI.
@@ -172,12 +202,12 @@ func buildTrayMenu() {
 			case <-mConfig.ClickedCh:
 				openFile(configPath())
 			case <-mRestart.ClickedCh:
-				fmt.Fprintln(os.Stderr, "tray: restarting mediaforge.exe")
+				log.Println("restarting mediaforge.exe")
 				killMediaForge()
 				time.Sleep(1 * time.Second)
 				launchMediaForge()
 			case <-mLogs.ClickedCh:
-				openFile(logsPath())
+				openLog()
 			case <-mExit.ClickedCh:
 				killMediaForge()
 				systray.Quit()
@@ -193,18 +223,43 @@ func logsPath() string {
 	return filepath.Join(filepath.Dir(configPath()), "logs", "mediaforge.log")
 }
 
+// openLog opens the current session log with its default handler. If the log
+// file (or its parent directory) does not yet exist, it creates the directory
+// and shows an explanatory error dialog with the full path instead of failing
+// silently with "exit status 1".
+func openLog() {
+	path := logsPath()
+	if !fileExists(path) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			log.Printf("could not create log dir %s: %v", filepath.Dir(path), err)
+		}
+		showMessage("MediaForge — Logs",
+			fmt.Sprintf("No log file exists yet at:\n\n%s\n\n"+
+				"It will be created once MediaForge writes its first log entry.", path))
+		return
+	}
+	// Open with Notepad directly rather than via "start". The .log extension
+	// usually has no default file association, so "cmd /c start" just flashes a
+	// console window and opens nothing. Notepad always handles a text log.
+	if err := exec.Command("notepad.exe", path).Start(); err != nil {
+		log.Printf("openLog notepad %s failed: %v", path, err)
+		showMessage("MediaForge — Logs",
+			fmt.Sprintf("Could not open the log file:\n\n%s\n\n%v", path, err))
+	}
+}
+
 // callQueueAPI POSTs to /api/queue/{endpoint}. It fails silently (logging to
 // stderr) so a missing server never surfaces a dialog to the user.
 func callQueueAPI(endpoint string) error {
 	url := baseURL + "/api/queue/" + endpoint
 	resp, err := http.Post(url, "application/json", nil) //nolint:noctx
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "tray: POST %s failed: %v\n", url, err)
+		log.Printf("POST %s failed: %v", url, err)
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintf(os.Stderr, "tray: POST %s returned HTTP %d\n", url, resp.StatusCode)
+		log.Printf("POST %s returned HTTP %d", url, resp.StatusCode)
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return nil
@@ -228,34 +283,48 @@ func getQueueCount() int {
 	return s.Pending + s.Running
 }
 
-// openFile opens a file with its default handler (Explorer's "start").
+// openFile opens a text file (config, logs) in Notepad. We invoke notepad.exe
+// directly rather than "cmd /c start": the tray is a -H windowsgui process with
+// no console, so the "start" builtin just spawns a throwaway cmd that flashes
+// and dies before handing off. Notepad has no console dependency.
 func openFile(path string) {
-	if err := exec.Command("cmd", "/c", "start", "", path).Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "tray: openFile %s failed: %v\n", path, err)
+	if err := exec.Command("notepad.exe", path).Start(); err != nil {
+		log.Printf("openFile %s failed: %v", path, err)
 	}
 }
 
 // openBrowser opens a URL in the default web browser.
 func openBrowser(url string) {
 	if err := exec.Command("cmd", "/c", "start", "", url).Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "tray: openBrowser %s failed: %v\n", url, err)
+		log.Printf("openBrowser %s failed: %v", url, err)
 	}
 }
 
 // killMediaForge force-terminates any running mediaforge.exe and waits up to
-// 3 seconds for it to exit. Failures are logged to stderr.
+// 5 seconds, confirming the process is actually gone before returning. taskkill
+// is retried on each poll in case a child/respawned process is still holding on.
+// Failures are logged to stderr. Callers (Exit, Restart) rely on this so the
+// server is never left orphaned.
 func killMediaForge() {
-	if out, err := exec.Command("taskkill", "/F", "/IM", "mediaforge.exe").CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "tray: taskkill mediaforge.exe failed: %v: %s\n", err, strings.TrimSpace(string(out)))
-		return
-	}
-	for i := 0; i < 15; i++ {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if out, err := exec.Command("taskkill", "/F", "/IM", "mediaforge.exe").CombinedOutput(); err != nil {
+			// A non-zero exit usually means "process not found" — treat a
+			// confirmed-absent process as success.
+			if !mediaForgeRunning() {
+				return
+			}
+			log.Printf("taskkill mediaforge.exe: %v: %s", err, strings.TrimSpace(string(out)))
+		}
 		if !mediaForgeRunning() {
+			return
+		}
+		if time.Now().After(deadline) {
+			log.Println("mediaforge.exe still running after 5s kill timeout")
 			return
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	fmt.Fprintln(os.Stderr, "tray: mediaforge.exe still running after kill timeout")
 }
 
 // mediaForgeRunning reports whether a mediaforge.exe process is currently alive.

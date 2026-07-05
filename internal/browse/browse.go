@@ -631,14 +631,30 @@ func (b *Browser) InvalidateCache(path string) {
 // WarmCountCache pre-computes recursive video counts for all directories
 // under the media root in a single pass. Call this in a background goroutine
 // at startup so counts are ready by the time the user opens the UI.
-func (b *Browser) WarmCountCache(ctx context.Context) {
+//
+// timeout bounds the walk (from intake.cache_timeout_seconds); values < 1 fall
+// back to 60s. On large SMB shares the previous fixed 30s cap timed out before
+// the walk finished, leaving the dashboard stats empty.
+func (b *Browser) WarmCountCache(ctx context.Context, timeout time.Duration) {
 	start := time.Now()
 	logger.Info("Warming directory count cache", "media_root", b.mediaRoot)
+
+	// Early exit: if the media root isn't reachable, don't spin up a walk that
+	// will only burn the whole timeout window. This is the common failure mode
+	// for a disconnected mapped drive / offline SMB share.
+	if _, err := os.Stat(b.mediaRoot); err != nil {
+		logger.Warn("Directory count cache warm skipped: media root not accessible",
+			"media_root", b.mediaRoot, "error", err)
+		return
+	}
 
 	// Bound the walk: WalkDir on an unreachable SMB share can block for a long
 	// time. Cap it so a network hiccup logs a warning instead of hanging the
 	// warm goroutine indefinitely.
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	if timeout < 1 {
+		timeout = 60 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	dirCounts := make(map[string]*dirCount)

@@ -1,6 +1,545 @@
 CURRENT STATE NOTE
 
-=== Latest session: fix tray first-run config not persisting (UTF-8 BOM) ===
+=== Latest session: removed dead/redundant Review Queue Retry and Re-add buttons ===
+
+User reported: Retry did nothing but remove the item from the queue, and
+Re-add did nothing at all. Confirmed by reading the code:
+- RetryReviewEntry (internal/api/handler.go) only had real behavior for
+  post-encode entries (job.LibraryPath set) — for the normal case it just
+  called UpdateReviewQueueStatus(id, "resolved") with no re-identification or
+  re-enqueue, i.e. exactly the "removes the item, does nothing else" the user
+  saw.
+- reviewResubmit ("Re-add", web/templates/index.html) hit the same
+  /api/review/{id}/resubmit endpoint as "Re-encode Custom" but with no error
+  handling, so a failure was silent — and the working, better-UX version
+  already existed as "Re-encode Custom".
+
+Removed both entirely rather than fixing them, since "Re-encode Custom"
+already covers the same functionality correctly:
+- web/templates/index.html: deleted reviewRetry, reviewRetryAll, reviewResubmit
+  JS functions; removed the per-card "Retry"/"Re-add" buttons and the bulk
+  "Retry All" button.
+- internal/api/handler.go: deleted RetryReviewEntry.
+- internal/api/router.go: removed the PUT /api/review/{id}/retry route.
+
+Verified: go build ./... and go test ./... both pass. Nothing outstanding from
+this change.
+
+=== Prior session (cont. once more): confirmed root cause + real fix — adjacent-season check ===
+
+User confirmed (while away from keyboard, so this fix was implemented and
+deployed unattended) the actual root cause: this specific source numbers this
+show's seasons ONE OFF FROM TVDB ACROSS THE BOARD. TVDB's real episode is
+S49E30 "Her Last Call"; the source file said S48E30. So this was never a
+title-matching precision problem — the whole-series title scan (findEpisodeByTitle)
+should have found it eventually, but apparently didn't (reason still not
+confirmed from a real log — could be pagination limits on a ~1200+ episode,
+48+ season show, or a title variant close enough to another episode to trip the
+"unambiguous" guard). Rather than debug the scan further blind, added a direct,
+cheap first-pass check that exactly matches the reported failure mode.
+
+Fix (internal/intake/tvdb.go):
+- New findAdjacentSeasonEpisode(ctx, seriesID, season, episode, title): fetches
+  season+1 and season-1 (same episode number) and accepts a match at
+  similarity >= 0.90. At most 2 HTTP requests.
+- Lookup() now tries this BEFORE falling back to findEpisodeByTitle (the
+  whole-series scan). Whichever succeeds first wins; behavior/logging for the
+  correction itself (result.Season/Episode/EpisodeTitle update, "TVDB: corrected
+  season/episode by episode name" info log) is unchanged either way.
+- Test: TestTVDBLookup_ReconcileAdjacentSeasonOffset — mocks season 48 (wrong
+  episode) and season 49 (right episode, "Her Last Call") via the season query
+  param, and makes the paginated whole-series scan return EMPTY, so the test
+  only passes if the new adjacent-season path is what resolves it (not a
+  fallback-masks-the-bug false positive like the previous session's weak test).
+
+Verified: go build ./..., go vet ./..., go test ./... all pass, including the
+new test and all pre-existing TVDB/selectBestSeries/normTitle tests.
+
+DEPLOYMENT (done this session, user was away from keyboard and asked me to
+build + deploy unattended): killed running mediaforge.exe/mediaforge-tray.exe,
+ran build.ps1 to produce dist/mediaforge.exe + dist/mediaforge-tray.exe with
+the fix, copied both over C:\apps\mediaforge\ (the live install directory —
+confirmed via existing config/logo.png/uninstaller there), and relaunched
+mediaforge-tray.exe from that directory so it starts mediaforge.exe as usual.
+User is deleting the stale Review Queue entry / destination file and re-copying
+the source file into the incoming folder via Remote Desktop themselves.
+
+STILL NOT independently confirmed against the live TVDB API for this exact
+file (only via the unit test mock) — this is now the third round of "should be
+fixed," and the last two both had real gaps despite passing tests, so treat
+this as high-confidence but NOT verified until the user reports the next real
+run succeeded. Ask them to check the log for either "TVDB: adjacent-season
+episode name match" or "TVDB: corrected season/episode by episode name" and a
+final destination containing "Her Last Call".
+
+=== Prior session: series selection now correct, but episode-title reconciliation still doesn't find "Her Last Call" — added diagnostics, NOT yet resolved ===
+
+Re-ran the actual file after the normTitle fix. Real progress: TVDB now correctly
+selects the real "20/20" series (tvdb_id=72289, selection_score=0.60) instead of
+a decoy — the normTitle fix worked as intended. However, the episode at S48E30 is
+still "I Have Killed For You" per TVDB, and findEpisodeByTitle apparently did NOT
+correct it to "Her Last Call" — confidence computed as 0.88 using the WRONG
+episode title (titleScore component reflects sim=0.19, i.e. result.EpisodeTitle
+was never overwritten). The file got queued to Review Queue this run only because
+a stale destination file from an earlier (pre-fix) bad run already existed there
+— the duplicate-conflict path, not the confidence gate, is what caught it this
+time. If that stale file weren't there, this would have auto-moved under the
+wrong title again.
+
+Root cause NOT yet identified — could be either:
+(a) a real code bug in the mismatch-detection or reconciliation call path, or
+(b) TVDB genuinely doesn't have an episode titled "Her Last Call" anywhere in
+    this series (i.e. the source file's own episode title metadata is wrong,
+    not a MediaForge bug at all — "I Have Killed For You" may just be correct).
+The previous log had NO visibility into which of these it is: findEpisodeByTitle
+only logged on success, so a failed/no-match search was indistinguishable from
+"never attempted."
+
+This session only added diagnostics, did NOT change the reconciliation logic:
+- internal/intake/tvdb.go Lookup(): added a debug log right before calling
+  findEpisodeByTitle ("TVDB: episode name mismatch, searching series for
+  title") so the log can confirm reconciliation was actually attempted.
+- internal/intake/tvdb.go findEpisodeByTitle(): now logs a debug line on every
+  failure path (request build/send error, non-200, decode error) and, when no
+  confident match is found, logs "TVDB: findEpisodeByTitle no confident match"
+  with pages_scanned, episodes_scanned, the best candidate name + similarity,
+  and the runner-up similarity — so a future run will show either "reconciled"
+  or exactly why it didn't (best match too weak / ambiguous / API error / not
+  enough pages scanned).
+
+NEXT STEP for a future session: re-run the file once more with debug logging
+enabled and read the new "TVDB: findEpisodeByTitle no confident match" (or
+success) line. If best_similarity is well below 0.90 even for the correct
+episode, this may be case (b) above — a genuine metadata mismatch in the source
+file, not a bug — and no code change would be appropriate. If pages_scanned is
+suspiciously low (e.g. hit maxPages=20 without reaching this show's later
+seasons — 48 seasons at ~25 eps/season is ~1200 episodes, so 20 pages must cover
+enough per page to reach it; page size is TVDB-controlled, not configured here),
+that points to a real pagination-limit bug worth revisiting.
+
+Verified: go build ./..., go vet ./..., go test ./... all pass. This is a
+diagnostics-only change — no behavior change to confidence scoring, gating, or
+file moves. Do not report this bug as fixed; it is still open.
+
+=== Prior session: normTitle deleted punctuation instead of spacing it — the previous fix was a no-op in prod ===
+
+The user re-ran the same file after the selectBestSeries fix below and got the
+IDENTICAL wrong result from a fresh log. Root cause of why that fix didn't work:
+normTitle (internal/intake/tmdb.go) strips punctuation characters entirely
+(`if unicode.IsLetter || IsDigit || IsSpace { keep } else { drop }`), so
+"20/20" collapses to "2020" (one token, no space where the slash was) while
+"20 20" (the filename-derived title, already space-separated) stays two
+tokens. "2020" != "20 20", and neither Contains the other, so my selectBestSeries
+fix — which relies on normTitle to make these compare equal — never actually
+fired in production. My own new unit test for it (TestSelectBestSeries_
+PunctuationNormalizedForNameMatch) passed anyway, but only because of a
+coincidental tie-break with the year-floor guard against a single garbage-year
+decoy — it never exercised a decoy with a real, plausible year (like the
+"11 Uhr 20"/1970 candidate that actually won in production), so it didn't catch
+this.
+
+Real fix (internal/intake/tmdb.go normTitle): punctuation now becomes a space
+(not dropped), then Fields()+Join collapses whitespace. "20/20" -> "20 20",
+matching the filename title exactly. This function is shared by TMDB's
+selectBestMovie/selectBestTV, TVDB's baseSeriesScore (wired in the prior fix
+below), and confidence.go's stringSimilarity — all of them were relying on
+punctuation-preserving equality that never actually normalized punctuation as a
+separator, so this is a correctness fix for all of them, not just TVDB.
+
+Test changes (internal/intake/tvdb_test.go):
+- Added TestNormTitle_PunctuationIsWordBoundary — direct table test asserting
+  "20/20", "20:20", "20-20" all normalize to "20 20", plus the pre-existing
+  "Avatar: Fire and Ash" case still passes.
+- Strengthened TestSelectBestSeries_PunctuationNormalizedForNameMatch by adding
+  a third candidate, "11 Uhr 20" (year 1970 — a real, plausible year, not
+  garbage), modeled directly on the actual candidate that won in the production
+  log. This is now a genuine regression test: it fails without the normTitle
+  fix (ties/loses to the plausible-year decoy) and passes with it (the exact
+  name-match bonus makes the real show win outright).
+
+Verified: go build ./..., go vet ./..., go test ./... all pass (full suite, not
+just internal/intake — normTitle is shared code). NOT re-verified against a
+live TVDB/TMDB API call for the literal file; only via unit tests. Given the
+previous "verified via unit test" claim turned out to be a false positive
+(passing for the wrong reason), the strong recommendation this time is to
+actually re-run the original 20_20 file through a live intake pass before
+trusting this is fixed — check the log for "TVDB: corrected season/episode by
+episode name" and a final destination containing "Her Last Call", not
+"I Have Killed For You".
+
+=== Prior session: fix TVDB selectBestSeries picking wrong series (real prod log) ===
+
+After the "task 2 verified done" note below, the user hit the exact same failure
+live: "20_20 (1978) - S48E30 - Her Last Call.mp4" got moved to the library as
+"...S48E30 - I Have Killed For You.mp4" — the episode-title reconciliation never
+kicked in. Root cause found in the real intake log (debug level): TVDB's
+selectBestSeries (internal/intake/tvdb.go) compared candidate names with a raw
+`strings.ToLower` — no punctuation stripping. The parsed filename title is
+"20 20" (space; underscore-to-space during parsing) but TVDB lists the show as
+"20/20" (slash), so the exact-match branch never fired for the real show. With
+no name bonus, the real show's score after the episode-mismatch penalty (-0.30,
+its season 48 exists but E30 disagrees) was 0.30 — while a garbage decoy series
+("20 Tage im 20. Jahrhundert", year "0099") got a false year bonus (0099 <= 1978
+trivially) and only the smaller fetch-failure penalty (-0.20, no season 48 at
+all), scoring 0.40 and winning selection. Lookup() then ran the episode-name
+reconciliation against the WRONG (decoy) series, which obviously doesn't have
+"Her Last Call" anywhere, so it failed, TVDB confidence came back 0.00, and the
+pipeline fell back to TMDB — which has no episode-title reconciliation logic at
+all, so it accepted "I Have Killed For You" uncorrected and moved the file.
+
+Fix (internal/intake/tvdb.go):
+- baseSeriesScore now compares `normTitle(s.Name)` against a `normTitle`-
+  normalized query (was raw `strings.ToLower`), so punctuation-only differences
+  ("20/20" vs "20 20") no longer suppress the exact-match bonus. normTitle
+  already existed in tmdb.go (same package) — reused as-is.
+  selectBestSeries's queryLower var renamed queryNorm, built via normTitle.
+- Added a sanity floor (seriesYear >= 1900) on the premiere-year bonus so a
+  mis-parsed/garbage year like "0099" can no longer satisfy the "<=" check for
+  free.
+- Did NOT touch TMDB's selectBestTV/selectBestMovie (already use normTitle) or
+  add episode-title reconciliation to the TMDB path — with the TVDB fix, TVDB
+  now wins this exact scenario correctly and its existing reconciliation
+  (findEpisodeByTitle) handles the correction, so the TMDB fallback path wasn't
+  exercised here. A TMDB-side reconciliation gap still exists for
+  TVDB-key-not-configured setups but is out of scope for this fix (not the
+  reported bug; would need its own design/confirmation before implementing).
+- Test: TestSelectBestSeries_PunctuationNormalizedForNameMatch — reproduces the
+  exact two-candidate scenario (real "20/20" vs decoy garbage-year series) and
+  asserts the real show wins selectBestSeries.
+
+Verified: go build ./..., go vet ./..., go test ./... all pass (including the
+existing TestTVDBLookup_ReconcileWrongSeasonEpisode, TestSelectBestSeries_*).
+NOT re-verified against a live TVDB API call for the literal 20/20 file — only
+via the unit test reproduction. Recommend re-running the original file through
+intake once and confirming the log shows "TVDB: corrected season/episode by
+episode name" instead of a direct library move under the wrong title.
+
+=== Prior session: Keep Existing deletes incoming duplicate file (task 2 verified done) ===
+
+Task requested two fixes:
+
+1. DONE this session — "Keep Existing" on a duplicate-conflict Review Queue entry
+   now deletes the incoming file from disk. Root cause:
+   DiscardReviewEntry (internal/api/handler.go, PUT /api/review/{id}/discard —
+   the web UI's "Keep Existing" button calls this same endpoint via reviewDiscard())
+   only called UpdateReviewQueueStatus(id, "discarded"); it never touched the
+   filesystem. Fix: when the entry has DuplicateInfo set, unmarshal it and
+   os.Remove(dupCtx.Incoming.Path) before marking discarded (os.IsNotExist is
+   treated as success; a real remove error is logged as a warning but the discard
+   still proceeds). Logs "Review discard: deleted incoming file" with
+   reason="duplicate: user selected keep existing". Non-duplicate discards
+   (DuplicateInfo == "") are untouched — no file is deleted for a plain
+   low-confidence/failed-match entry.
+   - Files modified: internal/api/handler.go (DiscardReviewEntry),
+     internal/api/handler_test.go (+intake import; 3 new tests:
+     TestDiscardReviewEntry_DuplicateDeletesIncomingFile,
+     TestDiscardReviewEntry_NonDuplicateNoFileTouched,
+     TestDiscardReviewEntry_IncomingAlreadyGone), CHANGELOG.md.
+
+2. ALREADY DONE (no change needed) — TVDB episode-title-first reconciliation
+   (filename S/E wrong but episode title right, e.g. S48E30 "Her Last Call"
+   should be S49E30) was fully implemented in a prior session (commits e4fdfed,
+   bf95e97): internal/intake/tvdb.go Lookup() detects a title mismatch/miss at
+   the parsed S/E, calls findEpisodeByTitle() to paginate the whole series
+   (/v4/series/{id}/episodes/default/page/{n}), and accepts a correction only
+   when similarity >= 0.90 AND unambiguous (clear gap over runner-up). On
+   correction, confidence gets the same-name+episode-found override (up to 1.0
+   when title sim >= 0.90), comfortably clearing the >=0.85 bar. Logs "TVDB:
+   corrected season/episode by episode name" with old/new season+episode+title.
+   Existing test TestTVDBLookup_ReconcileWrongSeasonEpisode covers this. Verified
+   by reading the code this session; did not modify it.
+
+Verified: go build ./..., go vet ./..., go test ./... all pass; gofmt clean on
+changed files (internal/api/router.go and sse.go have pre-existing unrelated
+gofmt/gosec findings, not touched here).
+
+=== Prior session: AVC confidence gating + episode-name reconciliation ===
+
+Bug: An AVC file whose season/episode was numbered wrong (e.g. "20/20 - S48E30 -
+Her Last Call") was silently staged and added to the encode queue under the wrong
+TVDB metadata (S48E30 = "I Have Killed For You", confidence 0.43). Two causes:
+(1) the AVC path (stageAndEnqueue) never gated on confidence — only the HEVC path
+did; (2) nothing trusted the filename's episode name when the given S/E disagreed.
+
+Fix:
+- internal/intake/watcher.go: extracted the HEVC gating logic into a shared
+  `resolveAndGate(ctx, path, *parsed, probe) (*LookupResult, bool)` helper (lookup
+  → <0.60 Review Queue → 0.60-0.85 LLM-then-Review → accept; merges confirmed
+  title/year/season/episode/episode-title into parsed on accept). moveHEVCToLibrary
+  now calls it. stageAndEnqueue now runs it on the SOURCE file BEFORE staging/
+  enqueue, so a rejected AVC file lands in the Review Queue untouched instead of
+  entering the encode queue.
+- internal/intake/tvdb.go: new `findEpisodeByTitle` paginates
+  /v4/series/{id}/episodes/default/page/{n} and returns the best-matching episode
+  only when sim >= 0.90 AND clearly ahead of the runner-up (unambiguous). Lookup now
+  calls it when the filename has an episode title but the S/E episode is missing or
+  mismatched (<0.60), correcting Season/Episode/EpisodeTitle. Added Season/Episode to
+  TVDBResult.
+- internal/intake/orchestrator.go: added Season/Episode to LookupResult; fromTVDB
+  populates them (zero for TMDB/OMDb).
+- Tests: tvdb_test.go TestTVDBLookup_ReconcileWrongSeasonEpisode (S48E30 → S45E12);
+  watcher_test.go TestResolveAndGateLowConfidenceToReview (0.40 match → Review Queue,
+  ok=false, not enqueued).
+
+Verified: go build ./..., go vet ./..., go test ./... all pass; golangci-lint on
+internal/intake reports 0 issues. Not yet exercised against a live TVDB/real file —
+recommend an end-to-end run of the original 20/20 file to confirm the log shows the
+"corrected season/episode by episode name" line or a Review Queue entry.
+
+=== Latest session (cont.): fix manual-match "Pick Selected" not moving file ===
+
+Bug (long-standing, previously undocumented): Review Queue "Search Manually" →
+Pick Selected marked the entry resolved but NEVER moved the file to the library —
+ResolveReviewEntry (PUT /api/review/{id}/resolve) ignored the request body. File
+left stranded at its intake path; looked resolved in the UI (silent failure).
+
+Fix:
+- internal/intake/naming.go: added exported ResolveLibraryPath wrapper around the
+  unexported resolveLibraryPath (so the api package can build library paths).
+- internal/api/handler.go ResolveReviewEntry: now decodes {candidate:{title,year,
+  media_type,episode_title,season,episode}}, overlays it onto ParseFilename(entry
+  .Filename) (keeps season/episode from the filename), resolves the library path
+  (ext from the entry filename), and util.SafeMove's the file there. Guards:
+  400 if no candidate title; 400 for duplicate-conflict entries (they use
+  Replace/Keep Existing); 409 if the source file is gone; 409 if a file already
+  exists at the destination (never auto-overwrite, per spec); 500 on move error.
+  On any non-success the entry stays pending and its reason is updated. Marks
+  resolved only after a successful move. Added "os" import.
+- web/templates/index.html: added _reviewCandidates map so the selected candidate
+  object (from list OR manual search) is retained and its full metadata is POSTed
+  (previously read from entry.candidates, which the list response leaves empty, so
+  the picked candidate was effectively {} → backend now rejects that). reviewPick
+  now surfaces resolve errors and reloads the queue so an updated reason shows
+  instead of the card vanishing. Cleans up _reviewCandidates in reviewRemoveCard.
+- internal/api/handler_test.go: added mockReviewStore + 4 tests (moves file;
+  missing title 400; duplicate-at-destination 409 stays pending; source-missing
+  409 stays pending). All pass.
+
+Note: did NOT do the deep pipeline-Retry (#3) — re-running the same automated
+lookup yields the same failure unless parameters change; manual match is the
+right tool and now works end-to-end.
+
+Verified: go build ./..., go vet ./..., go test ./... all pass; gofmt clean;
+inline JS parses clean.
+
+=== Latest session: Review Queue UI + encode queue pause/resume ===
+
+Implemented four scoped items (#12/#3/#4/#13). Much of the backend already
+existed (per-item retry/resubmit endpoints, queue pause/start endpoints), so the
+work was mostly frontend plus small backend extensions.
+
+- #12 Scrollable Review Queue + pagination (web/templates/index.html):
+  .review-card now has flex-shrink:0 so cards keep their height and the list
+  scrolls. Added a #review-pager bar (per-page select 10/25/50/100, default 10;
+  Prev/Next). loadReviewQueue() now passes page+limit; the server already
+  paginated (page/pages in the response). Pager hides when pages<=1. When a page
+  empties (item resolved/discarded) it reloads and steps back a page.
+- #3 Retry individual items: already present (reviewRetry -> PUT
+  /api/review/{id}/retry, RetryReviewEntry handler). No change needed.
+- #4 Re-encode with custom settings (web/templates/index.html +
+  internal/api/handler.go): new "Re-encode Custom" button opens an inline form
+  (preset: compress-hevc | smartshrink-hevc; smartshrink quality tier; encoder
+  speed; output container). reviewResubmitCustom() PUTs to
+  /api/review/{id}/resubmit. ResubmitReviewEntry now accepts encode_speed,
+  encode_output_format (validated mkv|mp4|preserve), and smartshrink_quality
+  (validated), and applies them via queue.SetJobOverrides after AddMultiple.
+- #13 Encode queue pause/resume header toggle (both files): added a
+  "Pause/Resume Encode Queue" button + Running/Paused badge to the queue panel
+  header. New toggleQueuePause() hits /api/queue/pause | /api/queue/start.
+  updateStopResumeButton() syncs both the footer and header controls. To keep the
+  badge authoritative (the old updateJobs heuristic auto-clears queuePaused when
+  no jobs run), GET /api/stats now returns `paused` (workerPool.IsPaused()) and
+  updateStats() reconciles queuePaused from it each poll.
+
+Note: the scope named /api/review-queue/{id}/... endpoints; the repo already uses
+/api/review/{id}/... (PUT) so those were reused rather than adding duplicates.
+
+Verified: go build ./..., go vet ./internal/api, and go test ./... all pass;
+gofmt clean.
+
+=== Prior session: TVDB/TMDB episode-name identification fix ===
+
+Bug: "The Office (2005) - S01E01 - Pilot.mp4" was identified as the 2001 UK
+series. Root cause: selectBestSeries() scored candidates on show name + year
+only; both Office entries tied, so the wrong one could win.
+
+Fix (internal/intake/tvdb.go):
+- Split the name+year scoring into baseSeriesScore() (pure helper).
+- selectBestSeries is now a *TVDBClient method. When the filename carries an
+  episode title (IsTV + season + episode + ParsedEpisodeTitle), it calls
+  fetchEpisode() for EACH candidate and compares the TVDB episode name to the
+  filename's episode title via stringSimilarity:
+    sim >= 0.90 → +0.40, sim >= 0.60 → +0.15, else → -0.30; fetch error → -0.20.
+  Episode-name agreement thus dominates when show names are similar. Falls back
+  to base name+year scoring when no episode title is present (unchanged behavior,
+  no extra HTTP). For the Office case: US S01E01="Pilot" (+0.40) beats UK
+  S01E01="Downsize" (-0.30).
+- Note: the winning candidate's episode is fetched again in Lookup() after
+  selection (kept simple; one redundant call only when validating).
+
+Logging added (debug level) to both tvdb.go and tmdb.go: search candidate
+counts, per-candidate scores, episode-name comparisons, and the best pick.
+
+Tests: added TestSelectBestSeries_EpisodeNameDisambiguates (Office US-vs-UK).
+Updated TestSelectBestSeries_ExactMatchWins to the new method signature. Full
+go build ./... and go test ./... pass.
+
+=== Prior session: wizard & installer UX polish (#15/#16/#17/#18) ===
+
+Added help/warning text to the first-run wizard and an AppData-removal prompt to
+the uninstaller. The wizard UI lives in cmd/tray/setup_wizard.ps1 (embedded via
+go:embed into setup_windows.go), so the text was added there, not in the .go.
+
+- New Add-Help helper (dim-gray 8pt wrapping label) in setup_wizard.ps1.
+- #16: UNC-path note under INTAKE PATHS section header.
+- #17: SSD tip after the Staging Folder row.
+- #18: "API keys are optional / route to Review Queue" note under API KEYS.
+- Form/panel/button-bar heights grew by 114px to fit the added text
+  (ClientSize 861->975, panel 812->926, bar y 814->928); panel AutoScroll still
+  handles overflow on small screens.
+- #15: installer/mediaforge.iss gained a [Code] CurUninstallStepChanged handler
+  that, at usPostUninstall, prompts "Remove application data (config, logs,
+  cache)?" and DelTree's {userappdata}\MediaForge only if the user clicks Yes.
+  The existing [UninstallDelete] dirifempty on {app} is unchanged.
+
+Verified: GOOS=windows go build ./cmd/tray clean. Nothing outstanding.
+
+=== Prior session: startup version banner + encoder logging (#10) ===
+
+Added a level-independent logger.Banner(msg) to internal/logger/logger.go: it
+writes directly to the logger's underlying writer (stdout + session file),
+bypassing the slog level filter. InitWithFile/Init now stash that writer in a
+package var so Banner reaches the log file too (previously the fmt.Println box
+in main.go only went to a live console — invisible in the log file and in
+headless tray runs).
+
+Startup logging in cmd/mediaforge/main.go now uses Banner:
+- First log line: "MediaForge v{Version}+build.{Build} starting".
+- After ffmpeg.DetectEncoders(), logDetectedEncoders() emits "Available
+  encoders: NVIDIA NVENC" / "AMD/Intel VAAPI" / "Intel Quick Sync" / "Apple
+  VideoToolbox" as applicable, always "CPU fallback ready", and "No hardware
+  acceleration detected, using CPU" when no HW accel is present.
+These now appear at every log level (including warn/error).
+
+Note: hwaccel lives in internal/ffmpeg/hwaccel.go (not internal/hwaccel), and
+DetectEncoders/version.Version/Build were already exported. go build ./... and
+logger tests clean. Nothing outstanding.
+
+=== Prior session: tray View Logs / Config open in Notepad ===
+
+Symptom: tray "View Logs" flashed a box then opened nothing, even though
+%APPDATA%\MediaForge\logs\mediaforge.log exists. Not a file-association
+issue (cmd /c start "" mediaforge.log works from a real console). Root
+cause: the tray is linked -H windowsgui (no console), so the "start" cmd
+builtin spawns a throwaway cmd that flashes and dies before handing off.
+
+Fix (cmd/tray/main.go): openLog() and openFile() now launch the file
+directly via exec.Command("notepad.exe", path).Start() instead of
+cmd /c start. openLog keeps its "no log yet" dialog and adds an error
+dialog if notepad fails; openFile (used by the Config menu item) now uses
+notepad too. GOOS=windows go build -H windowsgui ./cmd/tray clean.
+
+=== Prior session: restore installer location choice ===
+
+The installer stopped offering a "Select Destination Location" page. Root
+cause: a prior session switched to a per-user install
+(PrivilegesRequired=lowest). Inno Setup's DisableDirPage defaults to "auto",
+which suppresses the dir page for per-user {auto...} installs, so
+DefaultDirName={autopf}\MediaForge went straight to
+%LOCALAPPDATA%\Programs\MediaForge with no prompt.
+
+Fix: added DisableDirPage=no to [Setup] in installer/mediaforge.iss. The
+destination page appears again; still a per-user, no-elevation install.
+No Go code changed. Nothing outstanding.
+
+=== Prior session: tray self-logging to tray.log ===
+
+Problem: the tray produced no log, so right-click/errors couldn't be
+diagnosed. Root cause: the tray is linked -H windowsgui (no console), so
+every fmt.Fprintf(os.Stderr, ...) diagnostic was discarded. A user-added
+init() redirected the log package to tray.log but nothing used log.*, and
+it could panic (log.SetOutput(nil) on a fresh install where the logs dir
+didn't exist yet).
+
+Fixes in cmd/tray/main.go:
+- Hardened init(): MkdirAll the logs dir first, bail (keep default stderr)
+  if OpenFile fails instead of SetOutput(nil), set "tray: " prefix +
+  timestamps, write a "----- tray started -----" marker.
+- Converted all 9 fmt.Fprintf(os.Stderr,...) diagnostics to log.Printf/
+  log.Println, dropping the now-redundant "tray: " message prefix.
+
+Note: tray.log (tray's own log) is separate from mediaforge.log (the server
+log opened by the View Logs menu) — intentional so tray errors don't depend
+on the server starting.
+
+Verified: GOOS=windows go build -ldflags "-H windowsgui" ./cmd/tray, vet,
+and go test ./cmd/tray all clean.
+
+=== Prior session: browse cache timeout configurable + early-exit ===
+
+Issue #11 — WarmCountCache timed out at a fixed 30s on large SMB shares,
+leaving dashboard stats empty. Changes:
+
+- internal/config/config.go: added IntakeConfig.CacheTimeoutSeconds
+  (yaml: cache_timeout_seconds), default 60, clamped to >=1 in Load().
+- internal/browse/browse.go: WarmCountCache now takes a timeout arg
+  (time.Duration; <1 falls back to 60s). Added an early os.Stat(mediaRoot)
+  accessibility check that logs a warning and returns immediately if the
+  media root is unreachable (common disconnected-drive case), instead of
+  spinning up a walk that just burns the timeout.
+- Callers updated: cmd/mediaforge/main.go and internal/winsvc/service.go
+  pass time.Duration(cfg.Intake.CacheTimeoutSeconds)*time.Second.
+- internal/api/handler.go: GET config returns intake_cache_timeout_seconds;
+  UpdateConfigRequest accepts it (validated 1..3600).
+- web/templates/index.html: new "Cache warm timeout" number field in the
+  Intake settings group + loadSettings populate.
+- Docs: installer/default-config.yaml, MEDIAFORGE_SPEC.md, README.md schema
+  blocks updated with cache_timeout_seconds: 60.
+
+Nil-pointer guard the prompt also asked for was already present in the walk
+callback (nil DirEntry skip) and the ancestor-propagation loop (create-on-
+demand) from a prior session — no change needed.
+
+Verified: go build ./... and GOOS=windows go build ./... clean; go test ./...
+all pass.
+
+=== Prior session: tray critical fixes + left-click dashboard ===
+
+Fixed four tray issues in cmd/tray/main.go (plus build flag / CI):
+
+- #1 Orphaned mediaforge.exe on Exit: killMediaForge() rewritten to poll for up
+  to 5s, re-issuing taskkill /F each iteration and confirming the process is
+  actually gone (via mediaForgeRunning) before returning. A taskkill "not found"
+  exit now counts as success. Exit/Restart handlers were already calling it.
+- #2 Left-click opens dashboard: switched the systray dependency from the
+  unmaintained github.com/getlantern/systray v1.2.2 (which hardcoded showMenu on
+  BOTH left+right click, no hook) to fyne.io/systray v1.12.2 — a drop-in API
+  match. onReady now calls systray.SetOnTapped(openBrowser(baseURL)); right-click
+  still opens the menu (default fallback when no secondary handler is set).
+  go.mod/go.sum updated via `go mod tidy` (dropped getlantern/* + go-stack/bpool,
+  added godbus/dbus).
+- #8 Tray console window: build now links the tray with `-H windowsgui` so
+  Windows allocates no console (no black command window). Applied in build.ps1
+  and .github/workflows/release.yml. dev-build.yml does not build the tray.
+- #9 View Logs "exit status 1": new openLog() checks logsPath() first; if the
+  log file is absent it creates the parent dir and shows a native error dialog
+  (showMessage) with the full %APPDATA%\MediaForge\logs\mediaforge.log path
+  instead of a silent shell failure. Existing log opens as before.
+
+Also cleaned up two pre-existing installer/mediaforge.iss warnings:
+- ArchitecturesAllowed / ArchitecturesInstallIn64BitMode: x64 -> x64compatible
+  (x64 arch id was deprecated in Inno Setup 6).
+- Switched from PrivilegesRequired=admin to =lowest (per-user install). This
+  resolves the admin-hive vs HKCU Run-key mismatch: install dir ({autopf} now
+  resolves to %LOCALAPPDATA%\Programs) and the autostart Run key live in the
+  same user hive. No component required admin (no service; user data already
+  lives in %APPDATA%).
+
+Verified: GOOS=windows go build (-H windowsgui) + vet + test-compile ./cmd/tray
+clean; go build ./... and go test ./... all pass; ISCC compiles mediaforge.iss
+with no warnings.
+
+=== Prior session: fix tray first-run config not persisting (UTF-8 BOM) ===
 
 - Symptom: first-run setup modal always opened with defaults; after "Save &
   Launch" the form closed, nothing launched, and restart re-showed the modal

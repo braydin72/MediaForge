@@ -17,6 +17,11 @@ This file is read automatically at the start of every Claude Code session in thi
 
 ## Before committing
 
+When done, update CHANGELOG.md with:
+- Fixed: [issue description]
+- Files modified: [list]
+
+
 Update `CURRENT_STATE.md` at the repo root with:
 - A short note on what was changed in this session
 - What (if anything) is still incomplete or needs follow-up in a future session

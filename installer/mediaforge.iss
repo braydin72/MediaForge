@@ -20,17 +20,28 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/issues
 AppUpdatesURL={#MyAppURL}/releases
 DefaultDirName={autopf}\MediaForge
+; Force the "Select Destination Location" page to appear. Without this,
+; DisableDirPage defaults to "auto", which suppresses the page for per-user
+; {auto...} installs (PrivilegesRequired=lowest). "no" restores the choice
+; while keeping the per-user, no-elevation model.
+DisableDirPage=no
 DefaultGroupName=MediaForge
 DisableProgramGroupPage=yes
-PrivilegesRequired=admin
+; Per-user install (no elevation). This keeps the install location and the HKCU
+; autostart entry in the same user hive, so the "MediaForge" Run key always
+; belongs to the user who installed — avoiding the admin-hive mismatch that a
+; PrivilegesRequired=admin install could produce when a standard user installs
+; with separate admin credentials. With lowest privileges {autopf} resolves to
+; the per-user Programs folder (%LOCALAPPDATA%\Programs).
+PrivilegesRequired=lowest
 OutputDir=installer-output
 OutputBaseFilename=MediaForge-Setup-{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#MyAppExeName}
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 ; No [Dirs] section: the installer does NOT pre-create %APPDATA%\MediaForge or
@@ -59,5 +70,27 @@ Filename: "taskkill.exe"; Parameters: "/F /IM {#MyTrayExeName}"; Flags: runhidde
 Filename: "taskkill.exe"; Parameters: "/F /IM {#MyAppExeName}"; Flags: runhidden; RunOnceId: "KillServer"
 [UninstallDelete]
 ; Remove the install dir if empty after installed files are deleted. User data
-; in %APPDATA%\MediaForge (config, logs, database) is intentionally preserved.
+; in %APPDATA%\MediaForge (config, logs, database) is preserved unless the user
+; opts to remove it during uninstall (see [Code] below).
 Type: dirifempty; Name: "{app}"
+[Code]
+// On uninstall, offer to remove the user's application data (config, logs,
+// cache, database) from %APPDATA%\MediaForge. Defaults to keeping it so an
+// accidental uninstall/reinstall doesn't wipe the user's configuration.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  AppData: string;
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    AppData := ExpandConstant('{userappdata}\MediaForge');
+    if DirExists(AppData) then
+    begin
+      if MsgBox('Remove application data (config, logs, cache)?' + #13#10 + #13#10 +
+                AppData, mbConfirmation, MB_YESNO) = IDYES then
+      begin
+        DelTree(AppData, True, True, True);
+      end;
+    end;
+  end;
+end;

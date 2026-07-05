@@ -320,7 +320,8 @@ func TestSelectBestSeries_ExactMatchWins(t *testing.T) {
 	}
 	parsed := &ParsedFilename{Title: "Breaking Bad", Year: 2008}
 
-	best, score := selectBestSeries(candidates, parsed)
+	// No episode title in parsed → base name+year scoring only (no HTTP).
+	best, score := (&TVDBClient{}).selectBestSeries(context.Background(), candidates, parsed)
 
 	if best.TVDBIDStr != "2" {
 		t.Errorf("expected exact match to win, got %q", best.Name)
@@ -329,6 +330,64 @@ func TestSelectBestSeries_ExactMatchWins(t *testing.T) {
 	// exact (0.50+0.30) + year (0.10) = 0.90
 	if !approxEqual(score, 0.90) {
 		t.Errorf("score: want ~0.90, got %f", score)
+	}
+}
+
+// TestSelectBestSeries_EpisodeNameDisambiguates verifies that when two shows
+// share a name, the candidate whose S01E01 episode title matches the filename
+// wins — "The Office (2005) S01E01 Pilot" must resolve to the US series
+// (S01E01="Pilot"), not the 2001 UK series (S01E01="Downsize").
+func TestSelectBestSeries_EpisodeNameDisambiguates(t *testing.T) {
+	officeSearchBody := map[string]interface{}{
+		"data": []map[string]interface{}{
+			{"tvdb_id": "78107", "name": "The Office", "year": "2001", "network": "BBC"},
+			{"tvdb_id": "73244", "name": "The Office", "year": "2005", "network": "NBC"},
+		},
+	}
+	ukEp := map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 1, "name": "Downsize", "aired": "2001-07-09", "seasonNumber": 1, "number": 1},
+			},
+		},
+	}
+	usEp := map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 2, "name": "Pilot", "aired": "2005-03-24", "seasonNumber": 1, "number": 1},
+			},
+		},
+	}
+
+	client := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
+		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, officeSearchBody) },
+		"/v4/series": func(r *http.Request) *http.Response {
+			if strings.Contains(r.URL.Path, "/78107/") {
+				return jsonResp(http.StatusOK, ukEp)
+			}
+			return jsonResp(http.StatusOK, usEp)
+		},
+	}))
+
+	parsed := &ParsedFilename{
+		Title:              "The Office",
+		Year:               2005,
+		IsTV:               true,
+		Season:             1,
+		Episode:            1,
+		ParsedEpisodeTitle: "Pilot",
+	}
+
+	result, err := client.Lookup(context.Background(), parsed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.SeriesID != 73244 {
+		t.Errorf("expected US series (73244) to win via episode-name match, got %d", result.SeriesID)
+	}
+	if result.EpisodeTitle != "Pilot" {
+		t.Errorf("EpisodeTitle: want %q, got %q", "Pilot", result.EpisodeTitle)
 	}
 }
 
@@ -437,6 +496,223 @@ func TestTVDBLookup_TWD_NoYearNoTitle(t *testing.T) {
 	}
 	if !approxEqual(result.Confidence, 0.80) {
 		t.Errorf("Confidence: want ~0.80, got %f", result.Confidence)
+	}
+}
+
+// TestTVDBLookup_ReconcileWrongSeasonEpisode: the filename numbers the episode as
+// S48E30 (a streaming service numbered the season wrong), but the episode at S48E30
+// is a different title. "Her Last Call" actually lives at S45E12. Reconciliation must
+// search the series by episode name, correct the season/episode, and file it there.
+func TestTVDBLookup_ReconcileWrongSeasonEpisode(t *testing.T) {
+	searchBody := map[string]interface{}{
+		"data": []map[string]interface{}{
+			{"tvdb_id": "72231", "name": "20/20", "year": "1978", "network": "ABC"},
+		},
+	}
+	// Season-48 fetch returns the wrong-named episode at E30.
+	s48Body := map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 1, "name": "I Have Killed For You", "aired": "2026-06-27", "seasonNumber": 48, "number": 30},
+			},
+		},
+	}
+	// Full paginated episode list contains "Her Last Call" at S45E12.
+	pagedBody := map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 1, "name": "I Have Killed For You", "aired": "2026-06-27", "seasonNumber": 48, "number": 30},
+				{"id": 2, "name": "Her Last Call", "aired": "2023-03-10", "seasonNumber": 45, "number": 12},
+				{"id": 3, "name": "The Reckoning", "aired": "2023-03-17", "seasonNumber": 45, "number": 13},
+			},
+		},
+		"links": map[string]interface{}{"next": ""},
+	}
+
+	client := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
+		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, searchBody) },
+		"/v4/series": func(r *http.Request) *http.Response {
+			if strings.Contains(r.URL.Path, "/page/") {
+				return jsonResp(http.StatusOK, pagedBody)
+			}
+			return jsonResp(http.StatusOK, s48Body)
+		},
+	}))
+
+	parsed := &ParsedFilename{
+		Title:              "20/20",
+		IsTV:               true,
+		Season:             48,
+		Episode:            30,
+		ParsedEpisodeTitle: "Her Last Call",
+	}
+
+	result, err := client.Lookup(context.Background(), parsed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Season != 45 || result.Episode != 12 {
+		t.Errorf("season/episode: want S45E12, got S%02dE%02d", result.Season, result.Episode)
+	}
+	if result.EpisodeTitle != "Her Last Call" {
+		t.Errorf("EpisodeTitle: want %q, got %q", "Her Last Call", result.EpisodeTitle)
+	}
+	if !result.EpisodeFound {
+		t.Error("EpisodeFound: want true after reconciliation")
+	}
+}
+
+// TestSelectBestSeries_PunctuationNormalizedForNameMatch reproduces a real
+// production bug: the filename parser turns "20_20" into the title "20 20"
+// (space), but TVDB lists the real show as "20/20" (slash). Comparing raw
+// lowercased strings (no punctuation stripping) missed the exact-name match,
+// so the real show scored the same low base score as unrelated decoys — and a
+// decoy whose season 48 doesn't exist at all (a fetchEpisode 404, penalized
+// -0.20) outscored the real show, whose season 48 exists but disagrees on
+// episode name at E30 (penalized -0.30 for the mismatch). The real show must
+// win once name comparison is punctuation-normalized, regardless of episode
+// mismatch penalties, so the later episode-name reconciliation step (which
+// operates on whichever series selectBestSeries picks) has a chance to run
+// against the correct series.
+func TestSelectBestSeries_PunctuationNormalizedForNameMatch(t *testing.T) {
+	candidates := []tvdbSearchResult{
+		// The real show: name has different punctuation than the parsed title,
+		// and its season 48 exists but the wrong episode is at E30.
+		{TVDBIDStr: "72289", Name: "20/20", Year: "1978"},
+		// A decoy with a garbage/implausible year — blocked by the year-bonus
+		// floor regardless of name matching.
+		{TVDBIDStr: "353196", Name: "20 Tage im 20. Jahrhundert", Year: "0099"},
+		// A decoy with a perfectly plausible year (<= parsed.Year, real, not
+		// garbage) and no season 48 at all (fetchEpisode 404s, -0.20 penalty —
+		// smaller than the real show's -0.30 episode-mismatch penalty). This is
+		// the case that actually beat the real show in production ("11 Uhr 20",
+		// year 1970): it must NOT win on penalty size alone once name matching
+		// works correctly, because it gets no name-match bonus at all while the
+		// real show gets the full exact-match bonus.
+		{TVDBIDStr: "205481", Name: "11 Uhr 20", Year: "1970"},
+	}
+
+	client := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/series": func(r *http.Request) *http.Response {
+			if strings.Contains(r.URL.Path, "/72289/") {
+				return jsonResp(http.StatusOK, map[string]interface{}{
+					"data": map[string]interface{}{
+						"episodes": []map[string]interface{}{
+							{"id": 1, "name": "I Have Killed For You", "aired": "2026-06-27", "seasonNumber": 48, "number": 30},
+						},
+					},
+				})
+			}
+			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(bytes.NewReader(nil)), Header: make(http.Header)}
+		},
+	}))
+
+	parsed := &ParsedFilename{
+		Title:              "20 20",
+		Year:               1978,
+		IsTV:               true,
+		Season:             48,
+		Episode:            30,
+		ParsedEpisodeTitle: "Her Last Call",
+	}
+
+	best, _ := client.selectBestSeries(context.Background(), candidates, parsed)
+	if best.TVDBIDStr != "72289" {
+		t.Errorf("expected real show (72289) to win despite episode mismatch, got %q (%s)", best.Name, best.TVDBIDStr)
+	}
+}
+
+// TestNormTitle_PunctuationIsWordBoundary guards the specific behavior the
+// production bug depended on: normTitle must turn "20/20" into "20 20" (two
+// tokens, matching a filename-derived title), not "2020" (one token, deleting
+// the separator). Deleting punctuation instead of spacing it out silently
+// breaks every equality/Contains-based title comparison in the codebase.
+func TestNormTitle_PunctuationIsWordBoundary(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"20/20", "20 20"},
+		{"20:20", "20 20"},
+		{"20-20", "20 20"},
+		{"Avatar: Fire and Ash", "avatar fire and ash"},
+		{"  Extra   Spaces  ", "extra spaces"},
+	}
+	for _, c := range cases {
+		if got := normTitle(c.in); got != c.want {
+			t.Errorf("normTitle(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestTVDBLookup_ReconcileAdjacentSeasonOffset reproduces the real-world report:
+// a source numbers an entire show's seasons one off from TVDB across the board
+// (filename says S48E30, TVDB's real episode is S49E30, same episode number).
+// The direct season+1 check must catch this without needing the whole-series
+// title scan (which the mock here would fail, since paging returns nothing —
+// if the test only passed via the page-scan fallback, that would prove the
+// fallback works but not the adjacent-season fast path).
+func TestTVDBLookup_ReconcileAdjacentSeasonOffset(t *testing.T) {
+	searchBody := map[string]interface{}{
+		"data": []map[string]interface{}{
+			{"tvdb_id": "72289", "name": "20/20", "year": "1978", "network": "ABC"},
+		},
+	}
+
+	client := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
+		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, searchBody) },
+		"/v4/series": func(r *http.Request) *http.Response {
+			if strings.Contains(r.URL.Path, "/page/") {
+				// Whole-series scan finds nothing — the adjacent-season check must
+				// be what resolves this, not the fallback.
+				return jsonResp(http.StatusOK, map[string]interface{}{
+					"data":  map[string]interface{}{"episodes": []map[string]interface{}{}},
+					"links": map[string]interface{}{"next": ""},
+				})
+			}
+			switch r.URL.Query().Get("season") {
+			case "48":
+				return jsonResp(http.StatusOK, map[string]interface{}{
+					"data": map[string]interface{}{
+						"episodes": []map[string]interface{}{
+							{"id": 1, "name": "I Have Killed For You", "aired": "2025-06-06", "seasonNumber": 48, "number": 30},
+						},
+					},
+				})
+			case "49":
+				return jsonResp(http.StatusOK, map[string]interface{}{
+					"data": map[string]interface{}{
+						"episodes": []map[string]interface{}{
+							{"id": 2, "name": "Her Last Call", "aired": "2023-03-10", "seasonNumber": 49, "number": 30},
+						},
+					},
+				})
+			default:
+				return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(bytes.NewReader(nil)), Header: make(http.Header)}
+			}
+		},
+	}))
+
+	parsed := &ParsedFilename{
+		Title:              "20 20",
+		Year:               1978,
+		IsTV:               true,
+		Season:             48,
+		Episode:            30,
+		ParsedEpisodeTitle: "Her Last Call",
+	}
+
+	result, err := client.Lookup(context.Background(), parsed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Season != 49 || result.Episode != 30 {
+		t.Errorf("season/episode: want S49E30, got S%02dE%02d", result.Season, result.Episode)
+	}
+	if result.EpisodeTitle != "Her Last Call" {
+		t.Errorf("EpisodeTitle: want %q, got %q", "Her Last Call", result.EpisodeTitle)
+	}
+	if !result.EpisodeFound {
+		t.Error("EpisodeFound: want true after reconciliation")
 	}
 }
 

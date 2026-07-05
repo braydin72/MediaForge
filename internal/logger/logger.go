@@ -12,6 +12,10 @@ import (
 // Log is the global logger instance
 var Log *slog.Logger
 
+// output is the underlying writer the logger writes to (stdout, or stdout+file).
+// Banner writes here directly so it bypasses the level filter.
+var output io.Writer = os.Stdout
+
 // level is the dynamic log level, changeable at runtime via SetLevel.
 // Uses slog.LevelVar which is backed by atomic.Int64 — safe for concurrent use.
 var level slog.LevelVar
@@ -19,6 +23,7 @@ var level slog.LevelVar
 // Init initializes the global logger writing only to stdout.
 func Init(levelStr string) {
 	SetLevel(levelStr)
+	output = os.Stdout
 	Log = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: &level,
 	}))
@@ -54,9 +59,17 @@ func InitWithFile(levelStr, logDir string) {
 	}
 
 	w := io.MultiWriter(os.Stdout, f)
+	output = w
 	Log = slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
 		Level: &level,
 	}))
+}
+
+// Banner writes a message directly to the log output (stdout + file), bypassing
+// the level filter so it is always recorded regardless of the configured log
+// level. Use for startup banners and the encoder summary.
+func Banner(msg string) {
+	fmt.Fprintln(output, msg)
 }
 
 // SetLevel changes the log level at runtime. Valid values: debug, info, warn, error.

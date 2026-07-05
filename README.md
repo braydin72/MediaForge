@@ -108,6 +108,7 @@ intake:
     passes_required: 6
   confidence_threshold: 0.85
   review_threshold: 0.60
+  cache_timeout_seconds: 60   # max seconds to warm the directory count cache at startup
 
 apis:
   tmdb_key: ""       # required — tmdb.org (free)

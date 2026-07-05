@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/braydin72/mediaforge/internal/config"
 	"github.com/braydin72/mediaforge/internal/ffmpeg"
 	"github.com/braydin72/mediaforge/internal/jobs"
 	"github.com/braydin72/mediaforge/internal/logger"
 	"github.com/braydin72/mediaforge/internal/store"
 	"github.com/braydin72/mediaforge/internal/util"
+	"github.com/google/uuid"
 )
 
 // defaultScanInterval is how often the watch folder is polled in production.
@@ -279,6 +279,20 @@ func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpe
 		return
 	}
 
+	// Run metadata lookup and confidence gating on the source file BEFORE staging or
+	// enqueuing, so a low-confidence match routes to the Review Queue with the file left
+	// untouched at its source rather than silently entering the encode queue.
+	parsed := ParseFilename(filename)
+	result, ok := w.resolveAndGate(ctx, path, &parsed, probe)
+	if !ok {
+		return
+	}
+	if result != nil {
+		logger.Info("Intake: AVC metadata lookup succeeded",
+			"file", filename, "title", result.Title,
+			"episode_title", result.EpisodeTitle, "confidence", result.Confidence)
+	}
+
 	stagingPath := filepath.Join(w.cfg.StagingFolder, filename)
 	if err := util.SafeMove(path, stagingPath); err != nil {
 		reason := fmt.Sprintf("staging move failed: %v", err)
@@ -302,38 +316,6 @@ func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpe
 		logger.Warn("Intake: failed to enqueue AVC file", "file", filename, "error", err)
 		w.sendToReviewQueue(stagingPath, reason, probe)
 		return
-	}
-
-	// Parse filename then run metadata lookup to populate EpisodeTitle and confirmed
-	// title/year before resolving the library destination path.
-	parsed := ParseFilename(filename)
-	if w.Orchestrator != nil {
-		reviewThreshold := w.cfg.ReviewThreshold
-		if reviewThreshold == 0 {
-			reviewThreshold = 0.60
-		}
-		var (
-			result    *LookupResult
-			lookupErr error
-		)
-		if parsed.IsTV {
-			result, lookupErr = w.Orchestrator.LookupTV(ctx, &parsed, reviewThreshold)
-		} else {
-			result, lookupErr = w.Orchestrator.LookupMovie(ctx, &parsed, probe.Duration, reviewThreshold)
-		}
-		if lookupErr != nil {
-			logger.Warn("Intake: AVC metadata lookup failed — library path will be set without episode title",
-				"file", filename, "error", lookupErr)
-		} else {
-			logger.Info("Intake: AVC metadata lookup succeeded",
-				"file", filename, "title", result.Title,
-				"episode_title", result.EpisodeTitle, "confidence", result.Confidence)
-			parsed.Title = result.Title
-			if result.Year > 0 {
-				parsed.Year = result.Year
-			}
-			parsed.EpisodeTitle = result.EpisodeTitle
-		}
 	}
 
 	// Resolve output extension: "preserve" inherits the source container; otherwise
@@ -360,77 +342,101 @@ func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpe
 // moveHEVCToLibrary runs metadata lookup, applies confidence gating, and moves
 // the file to the library. Any failure routes the file to the Review Queue with
 // a specific reason; the source file is never left stranded.
+// resolveAndGate runs the tiered metadata lookup for parsed and applies confidence
+// gating identically for every codec path: a match below the review threshold, or one
+// in the LLM gray zone that the LLM cannot confirm, is routed to the Review Queue (the
+// function returns ok=false with path left untouched at its current location). On
+// acceptance the confirmed title/year/season/episode/episode-title are merged into
+// parsed and the result is returned with ok=true. When no Orchestrator is configured it
+// returns (nil, true) so callers proceed without metadata.
+func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *ParsedFilename, probe *ffmpeg.ProbeResult) (*LookupResult, bool) {
+	if w.Orchestrator == nil {
+		return nil, true
+	}
+	filename := filepath.Base(path)
+
+	confThreshold := w.cfg.ConfidenceThreshold
+	if confThreshold == 0 {
+		confThreshold = 0.85
+	}
+	reviewThreshold := w.cfg.ReviewThreshold
+	if reviewThreshold == 0 {
+		reviewThreshold = 0.60
+	}
+
+	var (
+		result *LookupResult
+		err    error
+	)
+	if parsed.IsTV {
+		result, err = w.Orchestrator.LookupTV(ctx, parsed, reviewThreshold)
+	} else {
+		result, err = w.Orchestrator.LookupMovie(ctx, parsed, probe.Duration, reviewThreshold)
+	}
+	if err != nil {
+		reason := "no metadata match found: " + err.Error()
+		logger.Warn("Intake: metadata lookup failed", "file", filename, "error", err)
+		w.sendToReviewQueue(path, reason, probe)
+		return nil, false
+	}
+
+	if result.Confidence < reviewThreshold {
+		reason := fmt.Sprintf("low confidence match (%.0f%%) for %q", result.Confidence*100, result.Title)
+		logger.Warn("Intake: confidence below review threshold", "file", filename, "confidence", result.Confidence)
+		w.sendToReviewQueue(path, reason, probe)
+		return nil, false
+	}
+
+	if result.Confidence < confThreshold {
+		// Confidence is between review_threshold and confidence_threshold — try LLM.
+		if w.LLMClient == nil {
+			reason := fmt.Sprintf("confidence %.0f%% requires LLM verification — LLM not configured", result.Confidence*100)
+			w.sendToReviewQueue(path, reason, probe)
+			return nil, false
+		}
+		llmResult, llmErr := w.LLMClient.Verify(ctx, parsed, []*LookupResult{result})
+		if llmErr != nil {
+			reason := fmt.Sprintf("LLM verification failed: %v", llmErr)
+			logger.Warn("Intake: LLM verification error", "file", filename, "error", llmErr)
+			w.sendToReviewQueue(path, reason, probe)
+			return nil, false
+		}
+		if llmResult.Disabled {
+			reason := fmt.Sprintf("confidence %.0f%% requires LLM verification — LLM not configured", result.Confidence*100)
+			w.sendToReviewQueue(path, reason, probe)
+			return nil, false
+		}
+		if llmResult.CandidateID == "none" || llmResult.Confidence < reviewThreshold {
+			reason := fmt.Sprintf("LLM verification rejected match: %s", llmResult.Reasoning)
+			logger.Warn("Intake: LLM rejected match", "file", filename)
+			w.sendToReviewQueue(path, reason, probe)
+			return nil, false
+		}
+		result.Confidence = llmResult.Confidence
+	}
+
+	// Merge confirmed metadata into parsed for path resolution. Season/Episode may have
+	// been corrected by episode-name reconciliation during lookup.
+	parsed.Title = result.Title
+	if result.Year > 0 {
+		parsed.Year = result.Year
+	}
+	if result.Season > 0 {
+		parsed.Season = result.Season
+	}
+	if result.Episode > 0 {
+		parsed.Episode = result.Episode
+	}
+	parsed.EpisodeTitle = result.EpisodeTitle
+	return result, true
+}
+
 func (w *Watcher) moveHEVCToLibrary(ctx context.Context, path string, probe *ffmpeg.ProbeResult) {
 	filename := filepath.Base(path)
 	parsed := ParseFilename(filename)
 
-	if w.Orchestrator != nil {
-		confThreshold := w.cfg.ConfidenceThreshold
-		if confThreshold == 0 {
-			confThreshold = 0.85
-		}
-		reviewThreshold := w.cfg.ReviewThreshold
-		if reviewThreshold == 0 {
-			reviewThreshold = 0.60
-		}
-
-		var (
-			result *LookupResult
-			err    error
-		)
-		if parsed.IsTV {
-			result, err = w.Orchestrator.LookupTV(ctx, &parsed, reviewThreshold)
-		} else {
-			result, err = w.Orchestrator.LookupMovie(ctx, &parsed, probe.Duration, reviewThreshold)
-		}
-		if err != nil {
-			reason := "no metadata match found: " + err.Error()
-			logger.Warn("Intake: HEVC metadata lookup failed", "file", filename, "error", err)
-			w.sendToReviewQueue(path, reason, probe)
-			return
-		}
-
-		if result.Confidence < reviewThreshold {
-			reason := fmt.Sprintf("low confidence match (%.0f%%) for %q", result.Confidence*100, result.Title)
-			logger.Warn("Intake: HEVC confidence below review threshold", "file", filename, "confidence", result.Confidence)
-			w.sendToReviewQueue(path, reason, probe)
-			return
-		}
-
-		if result.Confidence < confThreshold {
-			// Confidence is between review_threshold and confidence_threshold — try LLM.
-			if w.LLMClient == nil {
-				reason := fmt.Sprintf("confidence %.0f%% requires LLM verification — LLM not configured", result.Confidence*100)
-				w.sendToReviewQueue(path, reason, probe)
-				return
-			}
-			llmResult, llmErr := w.LLMClient.Verify(ctx, &parsed, []*LookupResult{result})
-			if llmErr != nil {
-				reason := fmt.Sprintf("LLM verification failed: %v", llmErr)
-				logger.Warn("Intake: HEVC LLM verification error", "file", filename, "error", llmErr)
-				w.sendToReviewQueue(path, reason, probe)
-				return
-			}
-			if llmResult.Disabled {
-				reason := fmt.Sprintf("confidence %.0f%% requires LLM verification — LLM not configured", result.Confidence*100)
-				w.sendToReviewQueue(path, reason, probe)
-				return
-			}
-			if llmResult.CandidateID == "none" || llmResult.Confidence < reviewThreshold {
-				reason := fmt.Sprintf("LLM verification rejected match: %s", llmResult.Reasoning)
-				logger.Warn("Intake: HEVC LLM rejected match", "file", filename)
-				w.sendToReviewQueue(path, reason, probe)
-				return
-			}
-			result.Confidence = llmResult.Confidence
-		}
-
-		// Merge confirmed metadata into parsed for path resolution.
-		parsed.Title = result.Title
-		if result.Year > 0 {
-			parsed.Year = result.Year
-		}
-		parsed.EpisodeTitle = result.EpisodeTitle
+	if _, ok := w.resolveAndGate(ctx, path, &parsed, probe); !ok {
+		return
 	}
 
 	ext := filepath.Ext(filename)

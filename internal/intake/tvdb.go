@@ -25,6 +25,8 @@ type TVDBResult struct {
 	FirstAiredYear int
 	Network        string
 	EpisodeFound   bool
+	Season         int // resolved season (may differ from parsed after reconciliation)
+	Episode        int // resolved episode number (may differ from parsed after reconciliation)
 	EpisodeTitle   string
 	EpisodeAirDate string
 	Confidence     float64
@@ -105,7 +107,12 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBR
 		}
 	}
 
-	best, selScore := selectBestSeries(candidates, parsed)
+	logger.Debug("TVDB: series candidates returned",
+		"query", parsed.Title, "count", len(candidates),
+		"filename_episode", parsed.ParsedEpisodeTitle,
+		"season", parsed.Season, "episode", parsed.Episode)
+
+	best, selScore := c.selectBestSeries(ctx, candidates, parsed)
 	logger.Debug("TVDB: best series candidate",
 		"name", best.Name, "year", best.Year,
 		"tvdb_id", best.TVDBIDStr, "selection_score", fmt.Sprintf("%.2f", selScore))
@@ -129,9 +136,48 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBR
 			}
 		} else {
 			result.EpisodeFound = true
+			result.Season = ep.SeasonNumber
+			result.Episode = ep.Number
 			result.EpisodeTitle = ep.Name
 			result.EpisodeAirDate = ep.Aired
 			logger.Debug("TVDB: episode found", "title", ep.Name, "aired", ep.Aired)
+		}
+
+		// Episode-name reconciliation: when the filename carries an episode title but the
+		// episode at the given S/E is missing or its name disagrees, the source S/E number
+		// is likely wrong (e.g. a streaming service that numbers seasons differently). Trust
+		// the episode name: search the whole series for it and, on a confident unambiguous
+		// hit, correct the season/episode rather than filing under the wrong episode.
+		if parsed.ParsedEpisodeTitle != "" {
+			mismatch := !result.EpisodeFound ||
+				stringSimilarity(result.EpisodeTitle, parsed.ParsedEpisodeTitle) < 0.60
+			if mismatch {
+				logger.Debug("TVDB: episode name mismatch, searching series for title",
+					"series", best.Name, "tvdb_id", best.intID(),
+					"filename_episode", parsed.ParsedEpisodeTitle,
+					"season_episode_title", result.EpisodeTitle)
+				// Try the immediate season neighbors first (cheap: at most 2 requests) —
+				// catches a whole show being numbered a season off across the board,
+				// which the whole-series scan can miss on shows with many episodes/pages
+				// or titles that are only near-identical.
+				match, ok := c.findAdjacentSeasonEpisode(ctx, best.intID(), parsed.Season, parsed.Episode, parsed.ParsedEpisodeTitle)
+				if !ok {
+					match, ok = c.findEpisodeByTitle(ctx, best.intID(), parsed.ParsedEpisodeTitle)
+				}
+				if ok {
+					logger.Info("TVDB: corrected season/episode by episode name",
+						"series", best.Name,
+						"filename_episode", parsed.ParsedEpisodeTitle,
+						"old_season", parsed.Season, "old_episode", parsed.Episode,
+						"new_season", match.SeasonNumber, "new_episode", match.Number,
+						"matched_title", match.Name)
+					result.EpisodeFound = true
+					result.Season = match.SeasonNumber
+					result.Episode = match.Number
+					result.EpisodeTitle = match.Name
+					result.EpisodeAirDate = match.Aired
+				}
+			}
 		}
 	}
 
@@ -312,30 +358,85 @@ func (c *TVDBClient) searchSeries(ctx context.Context, name string) ([]tvdbSearc
 	return payload.Data, nil
 }
 
-// selectBestSeries picks the candidate with the highest base confidence score.
-// Episode lookup adjusts the returned score further.
-func selectBestSeries(candidates []tvdbSearchResult, parsed *ParsedFilename) (tvdbSearchResult, float64) {
-	queryLower := strings.ToLower(parsed.Title)
+// baseSeriesScore scores a candidate on show name and premiere year only.
+// queryNorm must already be normalized via normTitle — comparing raw lowercased
+// strings misses matches like "20/20" vs "20 20" (punctuation-only differences),
+// which let unrelated candidates with a bogus/garbage year outscore the real show.
+func baseSeriesScore(s tvdbSearchResult, parsed *ParsedFilename, queryNorm string) float64 {
+	score := 0.50
+	nameNorm := normTitle(s.Name)
+
+	if nameNorm == queryNorm {
+		score += 0.30
+	} else if strings.Contains(nameNorm, queryNorm) || strings.Contains(queryNorm, nameNorm) {
+		score += 0.10
+	}
+
+	// Award the year bonus when the series premiere year <= the filename year.
+	// The year in a TV filename is the episode/season year, not the premiere year,
+	// so an exact match is not expected — we only need the series to have existed.
+	// Guard against implausible/garbage years (e.g. a mis-parsed "0099") getting a
+	// free bonus just because they're trivially <= the filename year.
+	if seriesYear := s.parsedYear(); parsed.Year > 0 && seriesYear >= 1900 && seriesYear <= parsed.Year {
+		score += 0.10
+	}
+
+	return score
+}
+
+// selectBestSeries picks the candidate with the highest confidence score.
+//
+// When the filename carries an episode title (and a season/episode number), the
+// episode name is the primary differentiator between similarly-named shows: for
+// each candidate the target episode is fetched from TVDB and its name compared
+// to the filename's episode title. A close match strongly boosts the candidate;
+// a mismatch (or a missing episode) penalizes it. This is what distinguishes
+// e.g. "The Office (2005) S01E01 Pilot" (US, S01E01="Pilot") from the 2001 UK
+// series (S01E01="Downsize").
+//
+// The base name+year score is used alone when no episode title is available.
+func (c *TVDBClient) selectBestSeries(ctx context.Context, candidates []tvdbSearchResult, parsed *ParsedFilename) (tvdbSearchResult, float64) {
+	queryNorm := normTitle(parsed.Title)
+	validateEpisode := parsed.IsTV && parsed.Season > 0 && parsed.Episode > 0 && parsed.ParsedEpisodeTitle != ""
 
 	bestIdx := 0
 	bestScore := -1.0
 
 	for i, s := range candidates {
-		score := 0.50
-		nameLower := strings.ToLower(s.Name)
+		score := baseSeriesScore(s, parsed, queryNorm)
 
-		if nameLower == queryLower {
-			score += 0.30
-		} else if strings.Contains(nameLower, queryLower) || strings.Contains(queryLower, nameLower) {
-			score += 0.10
+		if validateEpisode {
+			ep, err := c.fetchEpisode(ctx, s.intID(), parsed.Season, parsed.Episode)
+			switch {
+			case err != nil:
+				// Missing episode is evidence against this being the right series.
+				score -= 0.20
+				logger.Debug("TVDB: candidate episode fetch failed, penalizing",
+					"candidate", s.Name, "year", s.Year, "tvdb_id", s.TVDBIDStr,
+					"season", parsed.Season, "episode", parsed.Episode, "error", err)
+			default:
+				sim := stringSimilarity(ep.Name, parsed.ParsedEpisodeTitle)
+				var epAdj float64
+				switch {
+				case sim >= 0.90:
+					epAdj = 0.40 // exact / near-exact episode name match
+				case sim >= 0.60:
+					epAdj = 0.15 // partial match
+				default:
+					epAdj = -0.30 // episode name disagrees → wrong series
+				}
+				score += epAdj
+				logger.Debug("TVDB: candidate episode name compared",
+					"candidate", s.Name, "year", s.Year, "tvdb_id", s.TVDBIDStr,
+					"filename_episode", parsed.ParsedEpisodeTitle, "tvdb_episode", ep.Name,
+					"similarity", fmt.Sprintf("%.2f", sim),
+					"episode_score_adj", fmt.Sprintf("%+.2f", epAdj))
+			}
 		}
 
-		// Award the year bonus when the series premiere year <= the filename year.
-		// The year in a TV filename is the episode/season year, not the premiere year,
-		// so an exact match is not expected — we only need the series to have existed.
-		if seriesYear := s.parsedYear(); parsed.Year > 0 && seriesYear > 0 && seriesYear <= parsed.Year {
-			score += 0.10
-		}
+		logger.Debug("TVDB: candidate scored",
+			"candidate", s.Name, "year", s.Year, "tvdb_id", s.TVDBIDStr,
+			"score", fmt.Sprintf("%.2f", score))
 
 		if score > bestScore {
 			bestScore = score
@@ -344,6 +445,30 @@ func selectBestSeries(candidates []tvdbSearchResult, parsed *ParsedFilename) (tv
 	}
 
 	return candidates[bestIdx], bestScore
+}
+
+// findAdjacentSeasonEpisode checks season+1 and season-1 (same episode number)
+// for a strong title match. Some sources number an entire show's seasons off by
+// one across the board (e.g. a syndication numbering that doesn't match TVDB's
+// season boundaries) — trying the immediate neighbors first is cheap (at most 2
+// requests) and reliably catches that common case.
+func (c *TVDBClient) findAdjacentSeasonEpisode(ctx context.Context, seriesID, season, episode int, title string) (*tvdbEpisode, bool) {
+	for _, s := range []int{season + 1, season - 1} {
+		if s <= 0 {
+			continue
+		}
+		ep, err := c.fetchEpisode(ctx, seriesID, s, episode)
+		if err != nil {
+			continue
+		}
+		if sim := stringSimilarity(ep.Name, title); sim >= 0.90 {
+			logger.Debug("TVDB: adjacent-season episode name match",
+				"series_id", seriesID, "tried_season", s, "episode", episode,
+				"tvdb_episode", ep.Name, "similarity", fmt.Sprintf("%.2f", sim))
+			return ep, true
+		}
+	}
+	return nil, false
 }
 
 // tvdbEpisode is the per-episode shape from GET /v4/series/{id}/episodes/default/page/{n}.
@@ -407,4 +532,86 @@ func (c *TVDBClient) fetchEpisode(ctx context.Context, seriesID, season, episode
 		Code:   "not_found",
 		Reason: fmt.Sprintf("S%02dE%02d not found in TVDB series %d", season, episode, seriesID),
 	}
+}
+
+// findEpisodeByTitle searches every episode of a series for one whose name matches
+// title, paginating GET /v4/series/{id}/episodes/default/page/{n}. It returns the
+// single best match only when its similarity is strong (>= 0.90) and unambiguous
+// (clearly ahead of the runner-up) — otherwise ok is false and the caller should
+// fall back to the Review Queue rather than guess. Special/season-0 episodes are
+// ignored so they don't shadow the real numbered episode.
+func (c *TVDBClient) findEpisodeByTitle(ctx context.Context, seriesID int, title string) (*tvdbEpisode, bool) {
+	const maxPages = 20
+
+	var best tvdbEpisode
+	bestSim, runnerUpSim := -1.0, -1.0
+	pagesScanned, episodesScanned := 0, 0
+
+	for page := 0; page < maxPages; page++ {
+		url := fmt.Sprintf("%s/v4/series/%d/episodes/default/page/%d", tvdbBaseURL, seriesID, page)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			logger.Debug("TVDB: findEpisodeByTitle request build failed", "series_id", seriesID, "page", page, "error", err)
+			return nil, false
+		}
+		req.Header.Set("Authorization", "Bearer "+c.token)
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			logger.Debug("TVDB: findEpisodeByTitle request failed", "series_id", seriesID, "page", page, "error", err)
+			return nil, false
+		}
+		var payload struct {
+			Data struct {
+				Episodes []tvdbEpisode `json:"episodes"`
+			} `json:"data"`
+			Links struct {
+				Next string `json:"next"`
+			} `json:"links"`
+		}
+		if resp.StatusCode != http.StatusOK {
+			logger.Debug("TVDB: findEpisodeByTitle non-200 response", "series_id", seriesID, "page", page, "status", resp.StatusCode)
+			resp.Body.Close()
+			return nil, false
+		}
+		decErr := json.NewDecoder(resp.Body).Decode(&payload)
+		resp.Body.Close()
+		if decErr != nil {
+			logger.Debug("TVDB: findEpisodeByTitle response decode failed", "series_id", seriesID, "page", page, "error", decErr)
+			return nil, false
+		}
+
+		pagesScanned++
+		episodesScanned += len(payload.Data.Episodes)
+		for i := range payload.Data.Episodes {
+			ep := &payload.Data.Episodes[i]
+			if ep.SeasonNumber <= 0 || ep.Name == "" {
+				continue // skip specials / unnamed
+			}
+			sim := stringSimilarity(ep.Name, title)
+			switch {
+			case sim > bestSim:
+				runnerUpSim = bestSim
+				best, bestSim = *ep, sim
+			case sim > runnerUpSim:
+				runnerUpSim = sim
+			}
+		}
+
+		if payload.Links.Next == "" || len(payload.Data.Episodes) == 0 {
+			break
+		}
+	}
+
+	// Require a strong match that is clearly ahead of the next-best candidate so we
+	// don't silently pick one of several similarly-named episodes.
+	if bestSim >= 0.90 && (runnerUpSim < 0 || bestSim-runnerUpSim >= 0.10) {
+		return &best, true
+	}
+	logger.Debug("TVDB: findEpisodeByTitle no confident match",
+		"series_id", seriesID, "title", title,
+		"pages_scanned", pagesScanned, "episodes_scanned", episodesScanned,
+		"best_match", best.Name, "best_similarity", fmt.Sprintf("%.2f", bestSim),
+		"runner_up_similarity", fmt.Sprintf("%.2f", runnerUpSim))
+	return nil, false
 }

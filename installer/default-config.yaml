@@ -10,6 +10,7 @@ intake:
         passes_required: 3
     confidence_threshold: 0.85
     review_threshold: 0.6
+    cache_timeout_seconds: 60
     naming:
         movie_folder: '{title} ({year})'
         movie_file: '{title} ({year})'

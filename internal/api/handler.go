@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -42,17 +43,17 @@ type ReviewQueueStore interface {
 
 // Handler provides HTTP API handlers
 type Handler struct {
-	browser      *browse.Browser
-	queue        *jobs.Queue
-	workerPool   *jobs.WorkerPool
-	cfg          *config.Config
-	cfgPath      string
-	pushover     *pushover.Client
-	dispatcher   *notify.Dispatcher
-	notifyMu     sync.Mutex       // Protects notification sending to prevent duplicates
-	store        StatsStore       // For stats operations (may be nil)
-	reviewStore  ReviewQueueStore // For Review Queue operations (may be nil)
-	watcher      *intake.Watcher  // For full_pipeline mode (may be nil)
+	browser     *browse.Browser
+	queue       *jobs.Queue
+	workerPool  *jobs.WorkerPool
+	cfg         *config.Config
+	cfgPath     string
+	pushover    *pushover.Client
+	dispatcher  *notify.Dispatcher
+	notifyMu    sync.Mutex       // Protects notification sending to prevent duplicates
+	store       StatsStore       // For stats operations (may be nil)
+	reviewStore ReviewQueueStore // For Review Queue operations (may be nil)
+	watcher     *intake.Watcher  // For full_pipeline mode (may be nil)
 }
 
 // NewHandler creates a new API handler
@@ -189,12 +190,12 @@ func (h *Handler) Encoders(w http.ResponseWriter, r *http.Request) {
 //   - "encode_only_custom": encode queue with per-job speed and output container overrides
 //   - "full_pipeline": routed through the intake identification pipeline
 type CreateJobsRequest struct {
-	Paths               []string `json:"paths"`
-	PresetID            string   `json:"preset_id"`
-	SmartShrinkQuality  string   `json:"smartshrink_quality,omitempty"`
-	PipelineMode        string   `json:"pipeline_mode,omitempty"`         // "full_pipeline" | "encode_only" | "encode_only_custom"
-	EncodeSpeed         string   `json:"encode_speed,omitempty"`          // encode_only_custom: override encoder speed preset
-	EncodeOutputFormat  string   `json:"encode_output_format,omitempty"`  // encode_only_custom: override output container
+	Paths              []string `json:"paths"`
+	PresetID           string   `json:"preset_id"`
+	SmartShrinkQuality string   `json:"smartshrink_quality,omitempty"`
+	PipelineMode       string   `json:"pipeline_mode,omitempty"`        // "full_pipeline" | "encode_only" | "encode_only_custom"
+	EncodeSpeed        string   `json:"encode_speed,omitempty"`         // encode_only_custom: override encoder speed preset
+	EncodeOutputFormat string   `json:"encode_output_format,omitempty"` // encode_only_custom: override output container
 }
 
 // CreateJobs handles POST /api/jobs
@@ -471,19 +472,20 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		"log_level":               h.cfg.LogLevel,
 		"allow_same_codec":        h.cfg.AllowSameCodec,
 		// Intake pipeline
-		"intake_enabled":             h.cfg.Intake.Enabled,
-		"intake_watch_folder":        h.cfg.Intake.WatchFolder,
-		"intake_staging_folder":      h.cfg.Intake.StagingFolder,
-		"intake_library_movies":      h.cfg.Intake.Library.Movies,
-		"intake_library_tv_shows":    h.cfg.Intake.Library.TVShows,
-		"intake_stability_interval":  h.cfg.Intake.StabilityCheck.IntervalSeconds,
-		"intake_stability_passes":    h.cfg.Intake.StabilityCheck.PassesRequired,
-		"intake_confidence_threshold": h.cfg.Intake.ConfidenceThreshold,
-		"intake_review_threshold":    h.cfg.Intake.ReviewThreshold,
-		"intake_naming_movie_folder": h.cfg.Intake.Naming.MovieFolder,
-		"intake_naming_movie_file":   h.cfg.Intake.Naming.MovieFile,
-		"intake_naming_show_folder":  h.cfg.Intake.Naming.ShowFolder,
-		"intake_naming_episode_file": h.cfg.Intake.Naming.EpisodeFile,
+		"intake_enabled":               h.cfg.Intake.Enabled,
+		"intake_watch_folder":          h.cfg.Intake.WatchFolder,
+		"intake_staging_folder":        h.cfg.Intake.StagingFolder,
+		"intake_library_movies":        h.cfg.Intake.Library.Movies,
+		"intake_library_tv_shows":      h.cfg.Intake.Library.TVShows,
+		"intake_stability_interval":    h.cfg.Intake.StabilityCheck.IntervalSeconds,
+		"intake_stability_passes":      h.cfg.Intake.StabilityCheck.PassesRequired,
+		"intake_confidence_threshold":  h.cfg.Intake.ConfidenceThreshold,
+		"intake_review_threshold":      h.cfg.Intake.ReviewThreshold,
+		"intake_cache_timeout_seconds": h.cfg.Intake.CacheTimeoutSeconds,
+		"intake_naming_movie_folder":   h.cfg.Intake.Naming.MovieFolder,
+		"intake_naming_movie_file":     h.cfg.Intake.Naming.MovieFile,
+		"intake_naming_show_folder":    h.cfg.Intake.Naming.ShowFolder,
+		"intake_naming_episode_file":   h.cfg.Intake.Naming.EpisodeFile,
 		// Metadata API keys
 		"apis_tmdb_key": h.cfg.APIs.TMDBKey,
 		"apis_tvdb_key": h.cfg.APIs.TVDBKey,
@@ -496,21 +498,21 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		"poster_cache_enabled": h.cfg.PosterCache.Enabled,
 		"poster_cache_path":    h.cfg.PosterCache.Path,
 		// Notifications
-		"notify_base_url":                  h.cfg.Notifications.BaseURL,
-		"notify_events_encode_complete":    h.cfg.Notifications.Events.EncodeComplete,
-		"notify_events_encode_failed":      h.cfg.Notifications.Events.EncodeFailed,
-		"notify_events_review_queue_item":  h.cfg.Notifications.Events.ReviewQueueItem,
-		"notify_events_daily_summary":      h.cfg.Notifications.Events.DailySummary,
-		"notify_events_weekly_summary":     h.cfg.Notifications.Events.WeeklySummary,
-		"notify_email_enabled":             h.cfg.Notifications.Email.Enabled,
-		"notify_email_smtp_host":           h.cfg.Notifications.Email.SMTPHost,
-		"notify_email_smtp_port":           h.cfg.Notifications.Email.SMTPPort,
-		"notify_email_smtp_tls":            h.cfg.Notifications.Email.SMTPTLS,
-		"notify_email_username":            h.cfg.Notifications.Email.Username,
-		"notify_email_from":                h.cfg.Notifications.Email.From,
-		"notify_email_to":                  h.cfg.Notifications.Email.To,
-		"notify_email_mode":                h.cfg.Notifications.Email.Mode,
-		"notify_email_interval_minutes":    h.cfg.Notifications.Email.IntervalMinutes,
+		"notify_base_url":                 h.cfg.Notifications.BaseURL,
+		"notify_events_encode_complete":   h.cfg.Notifications.Events.EncodeComplete,
+		"notify_events_encode_failed":     h.cfg.Notifications.Events.EncodeFailed,
+		"notify_events_review_queue_item": h.cfg.Notifications.Events.ReviewQueueItem,
+		"notify_events_daily_summary":     h.cfg.Notifications.Events.DailySummary,
+		"notify_events_weekly_summary":    h.cfg.Notifications.Events.WeeklySummary,
+		"notify_email_enabled":            h.cfg.Notifications.Email.Enabled,
+		"notify_email_smtp_host":          h.cfg.Notifications.Email.SMTPHost,
+		"notify_email_smtp_port":          h.cfg.Notifications.Email.SMTPPort,
+		"notify_email_smtp_tls":           h.cfg.Notifications.Email.SMTPTLS,
+		"notify_email_username":           h.cfg.Notifications.Email.Username,
+		"notify_email_from":               h.cfg.Notifications.Email.From,
+		"notify_email_to":                 h.cfg.Notifications.Email.To,
+		"notify_email_mode":               h.cfg.Notifications.Email.Mode,
+		"notify_email_interval_minutes":   h.cfg.Notifications.Email.IntervalMinutes,
 	})
 }
 
@@ -535,19 +537,20 @@ type UpdateConfigRequest struct {
 	LogLevel              *string `json:"log_level,omitempty"`
 	AllowSameCodec        *bool   `json:"allow_same_codec,omitempty"`
 	// Intake pipeline
-	IntakeEnabled            *bool    `json:"intake_enabled,omitempty"`
-	IntakeWatchFolder        *string  `json:"intake_watch_folder,omitempty"`
-	IntakeStagingFolder      *string  `json:"intake_staging_folder,omitempty"`
-	IntakeLibraryMovies      *string  `json:"intake_library_movies,omitempty"`
-	IntakeLibraryTVShows     *string  `json:"intake_library_tv_shows,omitempty"`
-	IntakeStabilityInterval  *int     `json:"intake_stability_interval,omitempty"`
-	IntakeStabilityPasses    *int     `json:"intake_stability_passes,omitempty"`
+	IntakeEnabled             *bool    `json:"intake_enabled,omitempty"`
+	IntakeWatchFolder         *string  `json:"intake_watch_folder,omitempty"`
+	IntakeStagingFolder       *string  `json:"intake_staging_folder,omitempty"`
+	IntakeLibraryMovies       *string  `json:"intake_library_movies,omitempty"`
+	IntakeLibraryTVShows      *string  `json:"intake_library_tv_shows,omitempty"`
+	IntakeStabilityInterval   *int     `json:"intake_stability_interval,omitempty"`
+	IntakeStabilityPasses     *int     `json:"intake_stability_passes,omitempty"`
 	IntakeConfidenceThreshold *float64 `json:"intake_confidence_threshold,omitempty"`
-	IntakeReviewThreshold    *float64 `json:"intake_review_threshold,omitempty"`
-	IntakeNamingMovieFolder  *string  `json:"intake_naming_movie_folder,omitempty"`
-	IntakeNamingMovieFile    *string  `json:"intake_naming_movie_file,omitempty"`
-	IntakeNamingShowFolder   *string  `json:"intake_naming_show_folder,omitempty"`
-	IntakeNamingEpisodeFile  *string  `json:"intake_naming_episode_file,omitempty"`
+	IntakeReviewThreshold     *float64 `json:"intake_review_threshold,omitempty"`
+	IntakeCacheTimeoutSeconds *int     `json:"intake_cache_timeout_seconds,omitempty"`
+	IntakeNamingMovieFolder   *string  `json:"intake_naming_movie_folder,omitempty"`
+	IntakeNamingMovieFile     *string  `json:"intake_naming_movie_file,omitempty"`
+	IntakeNamingShowFolder    *string  `json:"intake_naming_show_folder,omitempty"`
+	IntakeNamingEpisodeFile   *string  `json:"intake_naming_episode_file,omitempty"`
 	// Metadata API keys
 	APIsTMDBKey *string `json:"apis_tmdb_key,omitempty"`
 	APIsTVDBKey *string `json:"apis_tvdb_key,omitempty"`
@@ -764,6 +767,14 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		h.cfg.Intake.ReviewThreshold = val
 	}
+	if req.IntakeCacheTimeoutSeconds != nil {
+		val := *req.IntakeCacheTimeoutSeconds
+		if val < 1 || val > 3600 {
+			writeError(w, http.StatusBadRequest, "intake_cache_timeout_seconds must be between 1 and 3600")
+			return
+		}
+		h.cfg.Intake.CacheTimeoutSeconds = val
+	}
 	if req.IntakeNamingMovieFolder != nil {
 		h.cfg.Intake.Naming.MovieFolder = *req.IntakeNamingMovieFolder
 	}
@@ -893,7 +904,12 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 // Stats handles GET /api/stats
 func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
 	stats := h.queue.Stats()
-	writeJSON(w, http.StatusOK, stats)
+	// Include the encode queue's paused state so the UI badge/toggle (Issue #13)
+	// reflects the authoritative backend state rather than inferring from jobs.
+	writeJSON(w, http.StatusOK, struct {
+		jobs.Stats
+		Paused bool `json:"paused"`
+	}{Stats: stats, Paused: h.workerPool.IsPaused()})
 }
 
 // ResetSession handles POST /api/stats/reset-session
@@ -1028,6 +1044,11 @@ func (h *Handler) GetReviewQueueCount(w http.ResponseWriter, r *http.Request) {
 }
 
 // ResolveReviewEntry handles PUT /api/review/{id}/resolve
+// Body: {"candidate": {title, year, media_type, episode_title, season, episode}}
+// The picked candidate is used to build the library destination path; the file is
+// then moved there. Only on a successful move is the entry marked resolved — a
+// failed move (or a duplicate at the destination) leaves the entry pending with an
+// updated reason so nothing is silently lost.
 func (h *Handler) ResolveReviewEntry(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -1038,15 +1059,109 @@ func (h *Handler) ResolveReviewEntry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "review store not configured")
 		return
 	}
+
+	var req struct {
+		Candidate struct {
+			Title        string `json:"title"`
+			Year         int    `json:"year"`
+			MediaType    string `json:"media_type"`
+			EpisodeTitle string `json:"episode_title"`
+			Season       int    `json:"season"`
+			Episode      int    `json:"episode"`
+		} `json:"candidate"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Candidate.Title == "" {
+		writeError(w, http.StatusBadRequest, "candidate title required")
+		return
+	}
+
+	entry, err := h.reviewStore.GetReviewEntry(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if entry == nil {
+		writeError(w, http.StatusNotFound, "review entry not found")
+		return
+	}
+	if entry.DuplicateInfo != "" {
+		writeError(w, http.StatusBadRequest, "duplicate entries use Replace or Keep Existing, not Pick Selected")
+		return
+	}
+
+	// The source file must still be where it was queued.
+	if _, statErr := os.Stat(entry.OriginalPath); statErr != nil {
+		newReason := "source file no longer present: " + entry.OriginalPath
+		_ = h.reviewStore.UpdateReviewEntryReason(id, newReason)
+		writeError(w, http.StatusConflict, newReason)
+		return
+	}
+
+	// Start from the filename parse (for season/episode) and overlay the confirmed
+	// metadata from the picked candidate.
+	parsed := intake.ParseFilename(entry.Filename)
+	parsed.Title = req.Candidate.Title
+	if req.Candidate.Year > 0 {
+		parsed.Year = req.Candidate.Year
+	}
+	if req.Candidate.EpisodeTitle != "" {
+		parsed.EpisodeTitle = req.Candidate.EpisodeTitle
+	}
+	if req.Candidate.MediaType != "" {
+		parsed.MediaType = req.Candidate.MediaType
+		parsed.IsTV = req.Candidate.MediaType == "tv"
+	}
+	if req.Candidate.Season > 0 {
+		parsed.Season = req.Candidate.Season
+	}
+	if req.Candidate.Episode > 0 {
+		parsed.Episode = req.Candidate.Episode
+	}
+
+	ext := filepath.Ext(entry.Filename)
+	libraryPath := intake.ResolveLibraryPath(&h.cfg.Intake, &parsed, ext)
+	if libraryPath == "" {
+		newReason := fmt.Sprintf("could not build library path for %q (missing title/season?)", req.Candidate.Title)
+		_ = h.reviewStore.UpdateReviewEntryReason(id, newReason)
+		writeError(w, http.StatusBadRequest, newReason)
+		return
+	}
+
+	// Never auto-overwrite an existing file at the destination (spec: duplicates go
+	// to manual decision, not silent overwrite).
+	if _, statErr := os.Stat(libraryPath); statErr == nil {
+		newReason := "file already exists at library destination: " + libraryPath
+		_ = h.reviewStore.UpdateReviewEntryReason(id, newReason)
+		writeError(w, http.StatusConflict, newReason)
+		return
+	}
+
+	if err := util.SafeMove(entry.OriginalPath, libraryPath); err != nil {
+		newReason := fmt.Sprintf("library move failed: %v", err)
+		logger.Warn("Review resolve: move failed",
+			"entry_id", id, "src", entry.OriginalPath, "dst", libraryPath, "error", err)
+		_ = h.reviewStore.UpdateReviewEntryReason(id, newReason)
+		writeError(w, http.StatusInternalServerError, newReason)
+		return
+	}
+
+	logger.Info("Review resolve: moved to library", "entry_id", id, "dst", libraryPath)
 	if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "resolved"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "resolved", "library_path": libraryPath})
 }
 
-// RetryReviewEntry handles PUT /api/review/{id}/retry
-func (h *Handler) RetryReviewEntry(w http.ResponseWriter, r *http.Request) {
+// DiscardReviewEntry handles PUT /api/review/{id}/discard
+// For duplicate-conflict entries this is the "Keep Existing" action: the incoming
+// file (which lost out to the existing library file) is deleted from disk so it
+// does not linger in the intake/staging directory or reappear on restart.
+func (h *Handler) DiscardReviewEntry(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "entry ID required")
@@ -1062,55 +1177,19 @@ func (h *Handler) RetryReviewEntry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if entry == nil {
-		writeError(w, http.StatusNotFound, "review entry not found")
-		return
-	}
-
-	// Post-encode retry: the entry ID matches a job that has a library destination.
-	// The staged file is already HEVC; skip re-identification and re-encoding and
-	// simply re-attempt the SafeMove from the staged path to the stored library path.
-	if h.queue != nil {
-		if job := h.queue.Get(id); job != nil && job.LibraryPath != "" {
-			if moveErr := util.SafeMove(entry.OriginalPath, job.LibraryPath); moveErr != nil {
-				newReason := fmt.Sprintf("post-encode move failed: %v", moveErr)
-				logger.Warn("Retry: post-encode move failed",
-					"entry_id", id, "src", entry.OriginalPath, "dst", job.LibraryPath, "error", moveErr)
-				if updateErr := h.reviewStore.UpdateReviewEntryReason(id, newReason); updateErr != nil {
-					logger.Warn("Retry: failed to update review entry reason", "entry_id", id, "error", updateErr)
-				}
-				writeError(w, http.StatusInternalServerError, newReason)
-				return
+	if entry != nil && entry.DuplicateInfo != "" {
+		var dupCtx intake.DuplicateContext
+		if err := json.Unmarshal([]byte(entry.DuplicateInfo), &dupCtx); err == nil && dupCtx.Incoming.Path != "" {
+			if err := os.Remove(dupCtx.Incoming.Path); err != nil && !os.IsNotExist(err) {
+				logger.Warn("Review discard: failed to delete incoming duplicate file",
+					"path", dupCtx.Incoming.Path, "error", err)
+			} else {
+				logger.Info("Review discard: deleted incoming file",
+					"path", dupCtx.Incoming.Path, "reason", "duplicate: user selected keep existing")
 			}
-			logger.Info("Retry: post-encode move succeeded", "entry_id", id, "dst", job.LibraryPath)
-			if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]string{"status": "retried"})
-			return
 		}
 	}
 
-	// Default: mark resolved; full pipeline re-run wired in a future phase.
-	if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "retried"})
-}
-
-// DiscardReviewEntry handles PUT /api/review/{id}/discard
-func (h *Handler) DiscardReviewEntry(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "entry ID required")
-		return
-	}
-	if h.reviewStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "review store not configured")
-		return
-	}
 	if err := h.reviewStore.UpdateReviewQueueStatus(id, "discarded"); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1184,8 +1263,11 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		PresetID     string `json:"preset_id"`
-		OriginalPath string `json:"original_path"`
+		PresetID           string `json:"preset_id"`
+		OriginalPath       string `json:"original_path"`
+		EncodeSpeed        string `json:"encode_speed"`
+		EncodeOutputFormat string `json:"encode_output_format"`
+		SmartShrinkQuality string `json:"smartshrink_quality"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1205,6 +1287,20 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate optional custom-encode overrides (Issue #4: re-encode with custom settings).
+	if req.EncodeOutputFormat != "" {
+		switch req.EncodeOutputFormat {
+		case "mkv", "mp4", "preserve":
+		default:
+			writeError(w, http.StatusBadRequest, "encode_output_format must be 'mkv', 'mp4', or 'preserve'")
+			return
+		}
+	}
+	if req.SmartShrinkQuality != "" && !jobs.IsValidSmartShrinkQuality(req.SmartShrinkQuality) {
+		writeError(w, http.StatusBadRequest, "smartshrink_quality must be 'acceptable', 'good', or 'excellent'")
+		return
+	}
+
 	// Mark resolved and enqueue the file.
 	if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -1220,7 +1316,14 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 			logger.Warn("Review resubmit: probe failed", "path", req.OriginalPath, "error", err)
 			return
 		}
-		_, _ = h.queue.AddMultiple(probes, req.PresetID, "")
+		addedJobs, _ := h.queue.AddMultiple(probes, req.PresetID, req.SmartShrinkQuality)
+
+		// Apply per-job custom-encode overrides (Issue #4).
+		if req.EncodeSpeed != "" || req.EncodeOutputFormat != "" {
+			for _, job := range addedJobs {
+				h.queue.SetJobOverrides(job.ID, req.EncodeSpeed, req.EncodeOutputFormat)
+			}
+		}
 	}()
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "resubmitted"})
