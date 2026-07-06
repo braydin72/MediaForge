@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+- Mobile responsiveness gaps below 768px: the Review Queue duplicate-file
+  compare (`.review-dup-compare`) stayed side-by-side and got cramped on
+  phone-width screens; buttons and the review-card checkbox were under the
+  ~44px touch-target guideline. Added a new `@media (max-width: 480px)`
+  block that stacks the duplicate compare into a column and bumps `.btn`
+  min-height to 44px and `.review-card-check` to 20x20px (`.btn-sm` left
+  untouched — those are deliberately compact secondary actions).
+- Files modified: web/templates/index.html
+
 ### Added
 - Logs viewer tab in the web UI (`GET /api/logs?file=current|1|2&lines=N`):
   lets a device on the LAN view the app's rotated log files remotely instead

@@ -59,16 +59,27 @@ user's real browser windows by accident. Same caution applies to
 `mediaforge.exe`: check `netstat -ano | grep :<scratch-port>` before killing,
 since the user may have the real deployed instance running concurrently.
 
-**Still incomplete / next steps for a future session:** the mobile-friendly
-CSS pass (Part 2 of the current plan) has NOT been started yet — only the
-Logs tab (Part 1) is done and ready to commit. Planned scope for Part 2 (see
-`web/templates/index.html`): add a new `@media (max-width: 480px)` block
-after the existing 768px block (~line 2158) to (a) collapse
-`.review-dup-compare`/`.review-dup-side` to a stacked column instead of
-side-by-side, (b) bump `.btn` to `min-height: 44px` and `.review-card-check`
-to 20x20px for touch targets (leave `.btn-sm` alone). Note: `.file-name`
-already has proper ellipsis truncation — that was a false lead from initial
-research, confirmed fixed already, no work needed there.
+Part 2 (mobile CSS pass) is now also done, in a separate commit. Added a new
+`@media (max-width: 480px)` block right after the existing 768px block in
+`web/templates/index.html`: `.review-dup-compare` switches to
+`flex-direction: column` (was a cramped two-column layout on phones),
+`.btn` gets `min-height: 44px`, `.review-card-check` grows to 20x20px
+(`.btn-sm` deliberately left alone — Prev/Next and other compact actions
+rely on the smaller size). Note: `.file-name` already had proper ellipsis
+truncation before this session — that was a false lead from initial
+research, confirmed already-fine by reading the CSS directly, no work
+needed there.
+
+Verified via the same scratch-build + headless-Chrome-over-CDP approach:
+measured `.review-dup-compare` stacking (injected a synthetic instance of
+the markup since no real duplicate entry existed in the scratch environment),
+measured `.btn`/`.review-card-check` computed sizes at 375px (44px / 20x20,
+as intended) vs. 1280px (reverted to original 38px / 15x15, confirming no
+desktop regression), and took a screenshot at 375px to visually confirm the
+header/logo/queue panel render sanely on a phone-width viewport.
+
+**Nothing outstanding from this session** — both parts of the logs+mobile
+plan are implemented, verified, and committed as of this note.
 
 === Prior session: UI polish (logo/font/dropdown width) + per-job CRF override for Compress presets ===
 
