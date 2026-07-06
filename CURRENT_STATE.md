@@ -1,6 +1,76 @@
 CURRENT STATE NOTE
 
-=== Latest session: UI polish (logo/font/dropdown width) + per-job CRF override for Compress presets ===
+=== Latest session: fixed Review Queue resubmit path corruption + added Logs viewer tab; mobile CSS pass in progress ===
+
+User found (real-world, not synthetic): "Re-encode Custom" in the Review
+Queue removed the entry from the queue but never actually enqueued an
+encode. Root cause: `web/templates/index.html`'s Re-encode button embedded
+the file's raw Windows/UNC path directly into an inline `onclick="..."`
+attribute; the browser parses that attribute as a JS string literal, so
+every lone backslash (all but the leading `\\`) was silently dropped as an
+invalid escape sequence — e.g. `\\TOWER\Media\TV Shows\...` became
+`\TOWERMediaTV Shows...`. Fixed by passing the path via a `data-original-path`
+attribute (HTML-escaped via the existing `escReview()` helper) instead of an
+inline JS string. Separately, `ResubmitReviewEntry` in
+`internal/api/handler.go` used to mark the entry `resolved` unconditionally
+before probing the file in a background goroutine — if the probe failed
+(corrupted path, missing file, etc.) the entry just vanished with only a
+server-log warning, violating the "no silent failures" principle in
+MEDIAFORGE_SPEC.md. Now reverts the entry to `pending` with a reason via
+`UpdateReviewEntryReason` when the probe fails, so it stays visible and
+actionable instead of disappearing.
+
+Also added a Logs viewer to the web UI (user asked "I can't see the log from
+a remote device" — logs previously only existed as a local file at
+`%APPDATA%\Mediaforge\logs\mediaforge.log`, unreachable from a phone/other
+LAN device hitting the web UI):
+- New `GET /api/logs?file=current|1|2&lines=N` endpoint
+  (`internal/api/handler.go`, registered in `internal/api/router.go`). Reuses
+  the existing `h.cfgPath` field to derive the log directory the same way
+  `cmd/mediaforge/main.go` does. `lines` clamps 1-1000 (default 200); returns
+  JSON with `lines`, `totalLines`, and an `available` map so the frontend can
+  gray out file-picker options for backups that don't exist yet (fresh
+  installs only have `current`, no `.1`/`.2`).
+- New third top-level nav tab "Logs" (`web/templates/index.html`), alongside
+  the existing Queue/Review tabs — `#logs-view` section with a file picker
+  (current/previous/2-sessions-ago), a line-count selector (50/200/500/1000),
+  and an "Auto-refresh" checkbox (client-side 5s `setInterval` poll — no SSE/
+  live-tail in v1, deliberately: no file-watcher abstraction exists in this
+  codebase and a plain refresh is adequate for a personal LAN tool).
+  `switchView()` was generalized from a two-branch (queue/review) to a
+  three-branch if to support the new tab.
+
+Verified end-to-end against a real running instance (not just unit tests):
+built a scratch `mediaforge.exe`, confirmed via `curl` that `/api/logs`'s
+tail output exactly matches the real file's tail on disk, confirmed
+`file=1`/`file=2` return distinct real content vs. 404 when absent, confirmed
+`lines=5000` doesn't error (clamped), and drove the UI via headless Chrome
+over CDP (Node's built-in `WebSocket`, no extra deps) to confirm the Logs tab
+shows real content, the file picker's disabled state matches `available`,
+switching files changes displayed content, navigating away hides the tab and
+resets auto-refresh, and the auto-refresh timer fires a real second fetch
+after 5s.
+
+Cleanup note for future sessions: when killing a disposable headless Chrome
+test instance, track its specific PID(s) at launch and kill only those (or
+kill by the scratch app's listening port via `netstat -ano`) — a blanket
+`taskkill /F /IM chrome.exe` earlier in this project's history killed the
+user's real browser windows by accident. Same caution applies to
+`mediaforge.exe`: check `netstat -ano | grep :<scratch-port>` before killing,
+since the user may have the real deployed instance running concurrently.
+
+**Still incomplete / next steps for a future session:** the mobile-friendly
+CSS pass (Part 2 of the current plan) has NOT been started yet — only the
+Logs tab (Part 1) is done and ready to commit. Planned scope for Part 2 (see
+`web/templates/index.html`): add a new `@media (max-width: 480px)` block
+after the existing 768px block (~line 2158) to (a) collapse
+`.review-dup-compare`/`.review-dup-side` to a stacked column instead of
+side-by-side, (b) bump `.btn` to `min-height: 44px` and `.review-card-check`
+to 20x20px for touch targets (leave `.btn-sm` alone). Note: `.file-name`
+already has proper ellipsis truncation — that was a false lead from initial
+research, confirmed fixed already, no work needed there.
+
+=== Prior session: UI polish (logo/font/dropdown width) + per-job CRF override for Compress presets ===
 
 UI changes in `web/templates/index.html`:
 - Logo icon already sized to 48x48 (was 32x32) in the working tree at session

@@ -1484,6 +1484,48 @@
             transition: border-color var(--transition-fast);
         }
 
+        .logs-view {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            max-width: 1600px;
+            margin: 0 auto;
+            width: 100%;
+            padding: 24px;
+            gap: 12px;
+            min-height: 0;
+            overflow: hidden;
+            height: 100%;
+        }
+
+        .logs-list {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+            margin: 0;
+            padding: 14px 16px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            font-family: var(--font-mono);
+            font-size: 0.8125rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: var(--text-primary);
+        }
+
+        .logs-view select {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-size: 13px;
+            padding: 6px 10px;
+            cursor: pointer;
+            outline: none;
+        }
+
         /* Review Queue pagination bar (Issue #12) */
         .review-pager {
             display: flex;
@@ -2395,6 +2437,12 @@
                     Review
                     <span class="review-badge" id="review-badge" style="display:none">0</span>
                 </button>
+                <button class="view-tab" data-view="logs" onclick="switchView('logs')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/>
+                    </svg>
+                    Logs
+                </button>
             </nav>
 
             <div class="header-right">
@@ -2654,6 +2702,30 @@
             <span class="review-pager-info" id="review-pager-info">Page 1</span>
             <button class="btn btn-secondary btn-sm" id="review-next" onclick="reviewGoPage(1)">Next</button>
         </div>
+    </div>
+
+    <!-- Logs View -->
+    <div class="logs-view" id="logs-view" style="display:none">
+        <div class="review-bulk-bar">
+            <select id="logs-file-select" onchange="loadLogs()">
+                <option value="current">Current session</option>
+                <option value="1">Previous session</option>
+                <option value="2">2 sessions ago</option>
+            </select>
+            <select id="logs-lines-select" onchange="loadLogs()">
+                <option value="50">Last 50 lines</option>
+                <option value="200" selected>Last 200 lines</option>
+                <option value="500">Last 500 lines</option>
+                <option value="1000">Last 1000 lines</option>
+            </select>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                <input type="checkbox" id="logs-autorefresh" onchange="toggleLogsAutoRefresh(this.checked)">
+                <span>Auto-refresh</span>
+            </label>
+            <div style="flex:1"></div>
+            <button class="btn btn-secondary btn-sm" onclick="loadLogs()">Refresh</button>
+        </div>
+        <pre class="logs-list" id="logs-list"></pre>
     </div>
     </div>
 
@@ -5632,18 +5704,46 @@
         let _reviewPages = 1;
         let _reviewPerPage = 10;
 
+        let _logsAutoTimer = null;
+
         function switchView(view) {
             document.querySelectorAll('.view-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
-            const mainView = document.getElementById('main-view');
-            const reviewView = document.getElementById('review-view');
-            if (view === 'review') {
-                mainView.style.display = 'none';
-                reviewView.style.display = '';
-                loadReviewQueue();
-            } else {
-                mainView.style.display = '';
-                reviewView.style.display = 'none';
+            document.getElementById('main-view').style.display = view === 'queue' ? '' : 'none';
+            document.getElementById('review-view').style.display = view === 'review' ? '' : 'none';
+            document.getElementById('logs-view').style.display = view === 'logs' ? '' : 'none';
+            if (view === 'review') loadReviewQueue();
+            if (view === 'logs') loadLogs();
+            if (view !== 'logs') {
+                clearInterval(_logsAutoTimer);
+                const cb = document.getElementById('logs-autorefresh');
+                if (cb) cb.checked = false;
             }
+        }
+
+        async function loadLogs() {
+            const file = document.getElementById('logs-file-select').value;
+            const lines = document.getElementById('logs-lines-select').value;
+            const pane = document.getElementById('logs-list');
+            try {
+                const res = await fetch(`/api/logs?file=${file}&lines=${lines}`);
+                if (!res.ok) {
+                    pane.textContent = '(log file not available)';
+                    return;
+                }
+                const data = await res.json();
+                pane.textContent = data.lines.join('\n');
+                pane.scrollTop = pane.scrollHeight;
+                const sel = document.getElementById('logs-file-select');
+                sel.querySelector('[value="1"]').disabled = !data.available['1'];
+                sel.querySelector('[value="2"]').disabled = !data.available['2'];
+            } catch (e) {
+                pane.textContent = '(failed to load logs)';
+            }
+        }
+
+        function toggleLogsAutoRefresh(checked) {
+            clearInterval(_logsAutoTimer);
+            if (checked) _logsAutoTimer = setInterval(loadLogs, 5000);
         }
 
         async function loadReviewQueue() {
@@ -5812,7 +5912,7 @@
                     <option value="mp4">MP4</option>
                     <option value="preserve">Preserve</option>
                   </select>
-                  <button class="btn btn-primary btn-sm" onclick="reviewResubmitCustom('${e.id}','${e.original_path.replace(/'/g,'\\x27')}')">Re-encode</button>
+                  <button class="btn btn-primary btn-sm" data-original-path="${escReview(e.original_path)}" onclick="reviewResubmitCustom('${e.id}', this.dataset.originalPath)">Re-encode</button>
                   <button class="btn btn-secondary btn-sm" onclick="reviewToggleCustom('${e.id}')">Cancel</button>
                 </div>` : ''}
                 <div class="review-actions">${actionsHTML}

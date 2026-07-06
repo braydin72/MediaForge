@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Logs viewer tab in the web UI (`GET /api/logs?file=current|1|2&lines=N`):
+  lets a device on the LAN view the app's rotated log files remotely instead
+  of requiring local filesystem access to `%APPDATA%\Mediaforge\logs`. Includes
+  a file picker (current/previous/2-sessions-ago), a line-count selector
+  (50/200/500/1000, tail-based), and an optional 5s auto-refresh.
+- Files modified: internal/api/handler.go, internal/api/router.go,
+  web/templates/index.html
+
+### Fixed
+- Review Queue "Re-encode Custom" silently corrupted Windows/UNC file paths
+  (every backslash except the first was dropped) because the original path
+  was interpolated raw into an inline `onclick="..."` attribute, which the
+  browser then parsed as a JS string literal — lone backslashes were consumed
+  as invalid escape sequences. Fixed by passing the path via a `data-*`
+  attribute instead. Also: a failed resubmit (bad path, missing file) used to
+  mark the entry `resolved` and silently drop it from the queue with no
+  encode ever created; it now reverts the entry to `pending` with an
+  actionable reason instead of disappearing silently.
+- Files modified: internal/api/handler.go, web/templates/index.html
+
+### Added
 - Custom Encode CRF override for Compress presets (compress-hevc/compress-av1):
   a per-job CRF field in both the main file browser UI and the Review Queue's
   "Re-encode Custom" form, sent as `encode_quality_crf` to `/api/jobs` and

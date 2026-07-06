@@ -36,6 +36,9 @@ func registerAPIRoutes(mux *http.ServeMux, h *Handler) {
 	mux.HandleFunc("GET /api/config", h.GetConfig)
 	mux.HandleFunc("PUT /api/config", h.UpdateConfig)
 
+	// Logs
+	mux.HandleFunc("GET /api/logs", h.GetLogs)
+
 	// Misc
 	mux.HandleFunc("GET /api/stats", h.Stats)
 	mux.HandleFunc("POST /api/stats/reset-session", h.ResetSession)

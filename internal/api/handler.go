@@ -171,6 +171,80 @@ func (h *Handler) Presets(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, presets)
 }
 
+// logsDir returns the directory containing the app's rotated log files,
+// derived the same way cmd/mediaforge/main.go derives it for the logger.
+func (h *Handler) logsDir() string {
+	dir := filepath.Dir(h.cfgPath)
+	if dir == "." || h.cfgPath == "" {
+		dir = "config"
+	}
+	return filepath.Join(dir, "logs")
+}
+
+// logFileNames maps the "file" query param to its on-disk log file name.
+var logFileNames = map[string]string{
+	"current": "mediaforge.log",
+	"1":       "mediaforge.1.log",
+	"2":       "mediaforge.2.log",
+}
+
+// GetLogs handles GET /api/logs?file=current|1|2&lines=200
+func (h *Handler) GetLogs(w http.ResponseWriter, r *http.Request) {
+	fileParam := r.URL.Query().Get("file")
+	if fileParam == "" {
+		fileParam = "current"
+	}
+	fileName, ok := logFileNames[fileParam]
+	if !ok {
+		writeError(w, http.StatusBadRequest, "file must be 'current', '1', or '2'")
+		return
+	}
+
+	lines, _ := strconv.Atoi(r.URL.Query().Get("lines"))
+	if lines < 1 || lines > 1000 {
+		lines = 200
+	}
+
+	dir := h.logsDir()
+
+	available := map[string]bool{}
+	for key, name := range logFileNames {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			available[key] = true
+		} else {
+			available[key] = false
+		}
+	}
+
+	if !available[fileParam] {
+		writeError(w, http.StatusNotFound, "log file not found")
+		return
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, fileName))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	allLines := strings.Split(strings.TrimRight(string(content), "\n"), "\n")
+	if len(allLines) == 1 && allLines[0] == "" {
+		allLines = allLines[:0]
+	}
+	total := len(allLines)
+	tail := allLines
+	if total > lines {
+		tail = allLines[total-lines:]
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"file":       fileParam,
+		"lines":      tail,
+		"totalLines": total,
+		"available":  available,
+	})
+}
+
 // Encoders handles GET /api/encoders
 func (h *Handler) Encoders(w http.ResponseWriter, r *http.Request) {
 	encoders := ffmpeg.ListAvailableEncoders()
@@ -1336,7 +1410,15 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		probes, err := h.browser.GetVideoFilesWithProgress(ctx, []string{req.OriginalPath}, nil)
 		if err != nil || len(probes) == 0 {
+			reason := fmt.Sprintf("resubmit failed: could not probe %q", req.OriginalPath)
+			if err != nil {
+				reason = fmt.Sprintf("resubmit failed: %v (%s)", err, req.OriginalPath)
+			}
 			logger.Warn("Review resubmit: probe failed", "path", req.OriginalPath, "error", err)
+			// Don't leave the entry silently resolved with nothing enqueued —
+			// put it back in the queue with a reason the user can act on.
+			_ = h.reviewStore.UpdateReviewEntryReason(id, reason)
+			_ = h.reviewStore.UpdateReviewQueueStatus(id, "pending")
 			return
 		}
 		addedJobs, _ := h.queue.AddMultiple(probes, req.PresetID, req.SmartShrinkQuality)
