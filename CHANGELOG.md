@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Fixed
+- Additional mobile responsiveness fixes below 768px, continuing the prior
+  pass: `.header` now wraps (`flex-wrap`, `row-gap`) instead of clipping when
+  its contents don't fit one row; `.view-nav` moves to its own row
+  (`order: 3`, full width) with horizontal scroll instead of squeezing the
+  tab labels; `.review-bulk-bar` (480px block) now wraps instead of
+  overflowing.
+- Files modified: web/templates/index.html
+
+### Fixed
 - Review Queue resubmit ("Re-encode Custom") silently failed for entries whose
   original path was in the staging/transcode working directory (e.g. jobs that
   failed during SmartShrink encoding), instead of the media library — clicking

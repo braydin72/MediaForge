@@ -1,5 +1,16 @@
 CURRENT STATE NOTE
 
+=== Latest session (cont.): additional mobile CSS fixes below 768px ===
+
+Continuation of the mobile responsiveness pass from the prior commit
+(796057c). web/templates/index.html, inside the existing 768px block: `.header`
+gets `flex-wrap`/`row-gap` so it wraps instead of clipping when contents
+overflow one row; new `.view-nav` rule moves the tab nav to its own full-width
+row (`order: 3`) with `overflow-x: auto` instead of squeezing tab labels.
+Inside the 480px block: `.review-bulk-bar` gets `flex-wrap`. No JS/backend
+changes. Not click-tested in a browser this session (CSS-only, reviewed by
+reading the rules against the existing layout).
+
 === Latest session: fixed Review Queue resubmit silently failing for staging-path entries ===
 
 User reported: an encode-failure Review Queue entry (SmartShrink couldn't hit
