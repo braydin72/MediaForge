@@ -1,6 +1,56 @@
 CURRENT STATE NOTE
 
-=== Latest session: fixed app-reported version not matching git tag ===
+=== Latest session: UI polish (logo/font/dropdown width) + per-job CRF override for Compress presets ===
+
+UI changes in `web/templates/index.html`:
+- Logo icon already sized to 48x48 (was 32x32) in the working tree at session
+  start; left as-is.
+- Added Cinzel (Google Fonts) and wrapped the "MediaForge" header text in a
+  new `.logo-text` span so only the app name uses it — rest of the UI stays
+  on DM Sans.
+- Added `#quality-dropdown .preset-dropdown-trigger { min-width: 160px; }` to
+  shrink the SmartShrink quality dropdown (shared by both smartshrink-hevc
+  and smartshrink-av1) without affecting the main preset dropdown's 230px
+  min-width.
+
+New feature: per-job CRF override for Compress presets (compress-hevc /
+compress-av1) in Custom Encode mode, available in both the main file browser
+UI and the Review Queue's "Re-encode Custom" form. Previously CRF for these
+presets was only settable via the global Settings drawer (quality_hevc /
+quality_av1); this adds a one-off override per job, following the same
+pattern as the existing per-job EncodeSpeed/EncodeOutputFormat overrides.
+
+Backend:
+- `internal/jobs/job.go` — new `Job.OverrideCRF int` field (in-memory only,
+  like OverrideSpeed/OverrideOutputFormat — not persisted to sqlite).
+- `internal/jobs/queue.go` — `SetJobOverrides` signature extended to
+  `(id, speed, outputFormat string, crf int)`.
+- `internal/jobs/worker.go` — after initializing qualityHEVC/qualityAV1 from
+  config, applies `job.OverrideCRF` when set and `!preset.IsSmartShrink`,
+  keyed by `preset.Codec`.
+- `internal/api/handler.go` — new `encode_quality_crf` field on
+  `CreateJobsRequest` (POST /api/jobs) and on the review-resubmit request
+  struct (PUT /api/review/{id}/resubmit). Validated via existing
+  `validateQuality()` (range 16-30 HEVC, 18-35 AV1) and rejected for
+  SmartShrink presets.
+
+Frontend:
+- Main UI: new `#custom-crf-input` number field next to the speed/format
+  selects, shown only in Custom Encode mode when the selected preset is
+  compress-hevc/compress-av1 (`updateCustomCrfVisibility()`, wired into
+  `onPipelineModeChange()` and `selectPreset()`). min/max swap based on
+  preset codec. Sent as `encode_quality_crf` in `startJobs()`.
+- Review Queue: new `#rccrf-{id}` number input in the custom re-encode form,
+  shown only when preset is compress-hevc (`reviewCustomPresetChange`), sent
+  as `encode_quality_crf` in `reviewResubmitCustom()`.
+
+Verified: `go build ./...`, `go vet ./...`, and `go test ./...` all pass.
+Did not launch the app in a browser this session — UI changes are CSS/markup
+only and were reviewed by reading the rendered structure, not click-tested.
+
+Nothing else outstanding from this session.
+
+=== Prior session: fixed app-reported version not matching git tag ===
 
 User reported the running app logged `version=v1.0.0+build.12` despite being
 built from the `v1.1.0` tag. Root cause: `internal/version.Version` was a

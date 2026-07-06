@@ -633,6 +633,16 @@ func (w *Worker) processJob(job *Job) {
 	qualityAV1 := w.cfg.QualityAV1
 	var qualityMod float64
 
+	// Per-job CRF override takes precedence over global config for Compress presets.
+	if job.OverrideCRF > 0 && !preset.IsSmartShrink {
+		switch preset.Codec {
+		case ffmpeg.CodecHEVC:
+			qualityHEVC = job.OverrideCRF
+		case ffmpeg.CodecAV1:
+			qualityAV1 = job.OverrideCRF
+		}
+	}
+
 	// Check if this is a SmartShrink preset
 	if preset.IsSmartShrink {
 		var shouldSkip bool

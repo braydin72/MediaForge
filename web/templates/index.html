@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="icon" type="image/png" href="/favicon.png">
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg-primary: #FAFAFA;
@@ -128,10 +128,14 @@
             letter-spacing: -0.02em;
         }
 
+        .logo-text {
+            font-family: 'Cinzel', serif;
+        }
+
         .logo-icon {
-            width: 32px;
-            height: 32px;
-            border-radius: var(--radius-sm);
+            width: 48px;
+            height: 48px;
+            border-radius: var(--radius-md);
             overflow: hidden;
         }
 
@@ -746,6 +750,10 @@
             cursor: pointer;
             min-width: 230px;
             transition: border-color var(--transition-fast);
+        }
+
+        #quality-dropdown .preset-dropdown-trigger {
+            min-width: 160px;
         }
 
         .preset-dropdown-trigger:hover {
@@ -2315,9 +2323,9 @@
             <div class="header-left">
                 <div class="logo">
                     <div class="logo-icon">
-                        <img src="/logo.png" alt="MediaForge" width="32" height="32">
+                        <img src="/logo.png" alt="MediaForge" width="48" height="48">
                     </div>
-                    MediaForge
+                    <span class="logo-text">MediaForge</span>
                 </div>
                 <div class="stats-bar" id="stats-bar">
                     <div class="stat-item stat-queue-wrapper" id="stat-queue-wrapper">
@@ -2519,6 +2527,7 @@
                             <option value="mp4">MP4</option>
                             <option value="preserve">Preserve</option>
                         </select>
+                        <input type="number" id="custom-crf-input" style="display:none;width:110px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;padding:6px 10px;outline:none;" placeholder="CRF: default" title="CRF override">
                         <button class="btn btn-primary" onclick="startJobs()" id="start-btn" disabled>Start Transcode</button>
                         <span class="selection-count" id="selection-summary"></span>
                         <span class="schedule-status" id="schedule-status"></span>
@@ -3842,10 +3851,29 @@
             // Custom encode speed and format overrides.
             document.getElementById('custom-speed-select').style.display = isCustom ? '' : 'none';
             document.getElementById('custom-format-select').style.display = isCustom ? '' : 'none';
+            updateCustomCrfVisibility();
 
             // Button label reflects actual action.
             document.getElementById('start-btn').textContent =
                 isFullPipeline ? 'Start Pipeline' : 'Start Transcode';
+        }
+
+        // Show/configure the CRF override input for Compress presets in Custom Encode mode.
+        function updateCustomCrfVisibility() {
+            const mode = document.getElementById('pipeline-mode-select').value;
+            const isCustom = mode === 'encode_only_custom';
+            const preset = allPresets.find(p => p.id === selectedPresetId);
+            const isCompress = preset && !preset.is_smart_shrink && selectedPresetId.startsWith('compress-');
+            const crfInput = document.getElementById('custom-crf-input');
+            if (isCustom && isCompress) {
+                const isAV1 = preset.codec === 'av1';
+                crfInput.min = isAV1 ? 18 : 16;
+                crfInput.max = isAV1 ? 35 : 30;
+                crfInput.style.display = '';
+            } else {
+                crfInput.style.display = 'none';
+                crfInput.value = '';
+            }
         }
 
         function updateButtons() {
@@ -3901,8 +3929,12 @@
                 if (pipelineMode === 'encode_only_custom') {
                     const speed = document.getElementById('custom-speed-select').value;
                     const format = document.getElementById('custom-format-select').value;
+                    const crfInput = document.getElementById('custom-crf-input');
                     if (speed) jobBody.encode_speed = speed;
                     if (format) jobBody.encode_output_format = format;
+                    if (crfInput.style.display !== 'none' && crfInput.value) {
+                        jobBody.encode_quality_crf = parseInt(crfInput.value, 10);
+                    }
                 }
                 const resp = await fetch('/api/jobs', {
                     method: 'POST',
@@ -5495,6 +5527,7 @@
 
             qualityDropdown.style.display = isSmartShrink ? 'inline-block' : 'none';
             hint.style.display = isSmartShrink ? 'block' : 'none';
+            updateCustomCrfVisibility();
 
             // Close dropdown
             closePresetDropdown();
@@ -5764,6 +5797,7 @@
                     <option value="good" selected>Good</option>
                     <option value="excellent">Excellent</option>
                   </select>
+                  <input type="number" class="review-search-year" id="rccrf-${e.id}" min="16" max="30" placeholder="CRF: default" title="CRF override">
                   <select class="review-search-type" id="rcspeed-${e.id}" title="Encode speed">
                     <option value="">Speed: default</option>
                     <option value="slowest">Slowest</option>
@@ -5895,6 +5929,8 @@
             const preset = document.getElementById('rcpreset-'+id).value;
             const q = document.getElementById('rcquality-'+id);
             if (q) q.style.display = (preset === 'smartshrink-hevc') ? '' : 'none';
+            const crf = document.getElementById('rccrf-'+id);
+            if (crf) crf.style.display = (preset === 'compress-hevc') ? '' : 'none';
         }
 
         async function reviewResubmitCustom(id, originalPath) {
@@ -5907,6 +5943,10 @@
             };
             if (preset === 'smartshrink-hevc') {
                 body.smartshrink_quality = document.getElementById('rcquality-'+id).value || '';
+            }
+            if (preset === 'compress-hevc') {
+                const crfVal = document.getElementById('rccrf-'+id).value;
+                if (crfVal) body.encode_quality_crf = parseInt(crfVal, 10);
             }
             const res = await fetch(`/api/review/${id}/resubmit`, {
                 method: 'PUT', headers: {'Content-Type':'application/json'},

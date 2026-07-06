@@ -196,6 +196,7 @@ type CreateJobsRequest struct {
 	PipelineMode       string   `json:"pipeline_mode,omitempty"`        // "full_pipeline" | "encode_only" | "encode_only_custom"
 	EncodeSpeed        string   `json:"encode_speed,omitempty"`         // encode_only_custom: override encoder speed preset
 	EncodeOutputFormat string   `json:"encode_output_format,omitempty"` // encode_only_custom: override output container
+	EncodeQualityCRF   int      `json:"encode_quality_crf,omitempty"`   // encode_only_custom: override CRF for Compress presets
 }
 
 // CreateJobs handles POST /api/jobs
@@ -252,6 +253,17 @@ func (h *Handler) CreateJobs(w http.ResponseWriter, r *http.Request) {
 		if smartShrinkQuality != "" && !jobs.IsValidSmartShrinkQuality(smartShrinkQuality) {
 			writeError(w, http.StatusBadRequest, "smartshrink_quality must be 'acceptable', 'good', or 'excellent'")
 			return
+		}
+
+		if req.EncodeQualityCRF != 0 {
+			if preset.IsSmartShrink {
+				writeError(w, http.StatusBadRequest, "encode_quality_crf is not applicable to SmartShrink presets")
+				return
+			}
+			if msg := validateQuality(req.EncodeQualityCRF, string(preset.Codec)); msg != "" {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
 		}
 	}
 
@@ -314,9 +326,9 @@ func (h *Handler) CreateJobs(w http.ResponseWriter, r *http.Request) {
 		addedJobs, _ := h.queue.AddMultiple(probes, req.PresetID, smartShrinkQuality)
 
 		// Apply per-job overrides for encode_only_custom.
-		if req.PipelineMode == "encode_only_custom" && (req.EncodeSpeed != "" || req.EncodeOutputFormat != "") {
+		if req.PipelineMode == "encode_only_custom" && (req.EncodeSpeed != "" || req.EncodeOutputFormat != "" || req.EncodeQualityCRF != 0) {
 			for _, job := range addedJobs {
-				h.queue.SetJobOverrides(job.ID, req.EncodeSpeed, req.EncodeOutputFormat)
+				h.queue.SetJobOverrides(job.ID, req.EncodeSpeed, req.EncodeOutputFormat, req.EncodeQualityCRF)
 			}
 		}
 	}()
@@ -1268,6 +1280,7 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 		EncodeSpeed        string `json:"encode_speed"`
 		EncodeOutputFormat string `json:"encode_output_format"`
 		SmartShrinkQuality string `json:"smartshrink_quality"`
+		EncodeQualityCRF   int    `json:"encode_quality_crf"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1300,6 +1313,16 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "smartshrink_quality must be 'acceptable', 'good', or 'excellent'")
 		return
 	}
+	if req.EncodeQualityCRF != 0 {
+		if preset.IsSmartShrink {
+			writeError(w, http.StatusBadRequest, "encode_quality_crf is not applicable to SmartShrink presets")
+			return
+		}
+		if msg := validateQuality(req.EncodeQualityCRF, string(preset.Codec)); msg != "" {
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+	}
 
 	// Mark resolved and enqueue the file.
 	if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
@@ -1319,9 +1342,9 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 		addedJobs, _ := h.queue.AddMultiple(probes, req.PresetID, req.SmartShrinkQuality)
 
 		// Apply per-job custom-encode overrides (Issue #4).
-		if req.EncodeSpeed != "" || req.EncodeOutputFormat != "" {
+		if req.EncodeSpeed != "" || req.EncodeOutputFormat != "" || req.EncodeQualityCRF != 0 {
 			for _, job := range addedJobs {
-				h.queue.SetJobOverrides(job.ID, req.EncodeSpeed, req.EncodeOutputFormat)
+				h.queue.SetJobOverrides(job.ID, req.EncodeSpeed, req.EncodeOutputFormat, req.EncodeQualityCRF)
 			}
 		}
 	}()

@@ -62,6 +62,7 @@ type Job struct {
 	LibraryPath         string `json:"library_path,omitempty"`          // Post-encode library destination (intake pipeline only)
 	OverrideSpeed       string `json:"override_speed,omitempty"`        // Per-job encoder speed preset (encode_only_custom)
 	OverrideOutputFormat string `json:"override_output_format,omitempty"` // Per-job output container (encode_only_custom)
+	OverrideCRF          int    `json:"override_crf,omitempty"`          // Per-job CRF override for Compress presets (encode_only_custom)
 	CreatedAt          time.Time `json:"created_at"`
 	StartedAt   time.Time `json:"started_at,omitempty"`
 	CompletedAt time.Time `json:"completed_at,omitempty"`

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- Custom Encode CRF override for Compress presets (compress-hevc/compress-av1):
+  a per-job CRF field in both the main file browser UI and the Review Queue's
+  "Re-encode Custom" form, sent as `encode_quality_crf` to `/api/jobs` and
+  `/api/review/{id}/resubmit`. Falls back to the global quality_hevc/quality_av1
+  setting when left blank; validated to the same ranges as the Settings sliders
+  (16-30 HEVC, 18-35 AV1) and rejected for SmartShrink presets.
+- Files modified: internal/jobs/job.go, internal/jobs/queue.go,
+  internal/jobs/worker.go, internal/api/handler.go, web/templates/index.html
+
+### Changed
+- App name in the header now renders in Cinzel; rest of the UI is unchanged
+  (DM Sans). SmartShrink quality dropdown (Acceptable/Good/Excellent) is
+  narrower (160px min-width) to match its shorter option labels.
+- Files modified: web/templates/index.html
+
 ### Fixed
 - App-reported version was hardcoded to `1.0.0` in `internal/version/version.go`
   and never bumped for tagged releases, so a binary built from the `v1.1.0` tag

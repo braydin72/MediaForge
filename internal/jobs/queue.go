@@ -766,8 +766,8 @@ func checkSkipReason(probe *ffmpeg.ProbeResult, meta *ffmpeg.BasePresetMeta, all
 }
 
 // SetJobOverrides stores per-job encoder overrides for encode_only_custom jobs.
-// Only non-empty values are written; existing overrides are preserved for omitted fields.
-func (q *Queue) SetJobOverrides(id, speed, outputFormat string) {
+// Only non-empty/non-zero values are written; existing overrides are preserved for omitted fields.
+func (q *Queue) SetJobOverrides(id, speed, outputFormat string, crf int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if job, ok := q.jobs[id]; ok {
@@ -776,6 +776,9 @@ func (q *Queue) SetJobOverrides(id, speed, outputFormat string) {
 		}
 		if outputFormat != "" {
 			job.OverrideOutputFormat = outputFormat
+		}
+		if crf > 0 {
+			job.OverrideCRF = crf
 		}
 		q.persist(job)
 	}
