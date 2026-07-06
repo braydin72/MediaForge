@@ -50,3 +50,4 @@ tmp/
 ghcr.sh
 HANDOFF.md
 **/plans/
+update-mediaforge.ps1
