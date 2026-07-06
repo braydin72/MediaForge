@@ -1,6 +1,39 @@
 CURRENT STATE NOTE
 
-=== Latest session: fixed Review Queue resubmit path corruption + added Logs viewer tab; mobile CSS pass in progress ===
+=== Latest session: fixed Review Queue resubmit silently failing for staging-path entries ===
+
+User reported: an encode-failure Review Queue entry (SmartShrink couldn't hit
+the VMAF threshold for any CRF, so it was routed to Review Queue) would, on
+clicking "Re-encode Custom", flash back to the queue screen with no encode
+ever starting. Log showed `Review resubmit: probe failed ... error=<nil>` —
+a nil error with zero probes is the tell.
+
+Root cause: `ResubmitReviewEntry` (internal/api/handler.go) probed the file via
+`h.browser.GetVideoFilesWithProgress`, which is scoped to the configured media
+browse root (`internal/browse/browse.go` normalizePath/isUnderRoot) and
+silently drops any path outside that root — returns an empty slice with a nil
+error, no logged reason. For entries that failed during encoding (not intake
+identification), `OriginalPath` is the staging/transcode working path (e.g.
+`D:\MediaForge\Transcode\...`), which normally lives outside the media library
+root, so every resubmit attempt silently probed zero files and the entry got
+reverted to `pending`.
+
+Fix: switched to `h.browser.ProbeFile(ctx, req.OriginalPath)` — a direct
+ffprobe call with no root restriction, same pattern already used by
+`RetryJob` (internal/api/handler.go). Appropriate here because OriginalPath
+comes from a server-stored review entry, not untrusted user browse input, so
+the root-scoping check was never the right tool for this call site.
+
+Files modified: internal/api/handler.go (ResubmitReviewEntry), CHANGELOG.md.
+
+Verified: go build ./..., go vet ./..., go test ./... all pass. NOT yet
+re-verified against a live encode-failure-to-resubmit run (no test file in
+this environment reproduces a full SmartShrink failure end-to-end) — recommend
+the user re-run "Re-encode Custom" on the real failed entry and confirm the
+job actually starts (job_id appears, "Job started" log line) instead of the
+entry reverting to pending again.
+
+=== Prior session: fixed Review Queue resubmit path corruption + added Logs viewer tab; mobile CSS pass in progress ===
 
 User found (real-world, not synthetic): "Re-encode Custom" in the Review
 Queue removed the entry from the queue but never actually enqueued an

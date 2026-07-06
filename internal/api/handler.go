@@ -1408,12 +1408,13 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		probes, err := h.browser.GetVideoFilesWithProgress(ctx, []string{req.OriginalPath}, nil)
-		if err != nil || len(probes) == 0 {
-			reason := fmt.Sprintf("resubmit failed: could not probe %q", req.OriginalPath)
-			if err != nil {
-				reason = fmt.Sprintf("resubmit failed: %v (%s)", err, req.OriginalPath)
-			}
+		// Use ProbeFile (direct ffprobe call), not the media-root-scoped browser:
+		// OriginalPath for encode-failure entries points at the staging/transcode
+		// working directory, which normally sits outside the configured media
+		// browse root and would be silently filtered out by GetVideoFilesWithProgress.
+		probe, err := h.browser.ProbeFile(ctx, req.OriginalPath)
+		if err != nil {
+			reason := fmt.Sprintf("resubmit failed: %v (%s)", err, req.OriginalPath)
 			logger.Warn("Review resubmit: probe failed", "path", req.OriginalPath, "error", err)
 			// Don't leave the entry silently resolved with nothing enqueued —
 			// put it back in the queue with a reason the user can act on.
@@ -1421,7 +1422,7 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 			_ = h.reviewStore.UpdateReviewQueueStatus(id, "pending")
 			return
 		}
-		addedJobs, _ := h.queue.AddMultiple(probes, req.PresetID, req.SmartShrinkQuality)
+		addedJobs, _ := h.queue.AddMultiple([]*ffmpeg.ProbeResult{probe}, req.PresetID, req.SmartShrinkQuality)
 
 		// Apply per-job custom-encode overrides (Issue #4).
 		if req.EncodeSpeed != "" || req.EncodeOutputFormat != "" || req.EncodeQualityCRF != 0 {

@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Fixed
+- Review Queue resubmit ("Re-encode Custom") silently failed for entries whose
+  original path was in the staging/transcode working directory (e.g. jobs that
+  failed during SmartShrink encoding), instead of the media library — clicking
+  resubmit bounced the entry back to `pending` with no encode ever enqueued.
+  Root cause: `ResubmitReviewEntry` probed the file via
+  `browser.GetVideoFilesWithProgress`, which is scoped to the configured media
+  browse root and silently drops any path outside it (returns 0 results, nil
+  error). Fixed by probing via `browser.ProbeFile` (direct ffprobe call, no
+  root restriction) instead, matching the pattern already used by `RetryJob`.
+- Files modified: internal/api/handler.go
+
+### Fixed
 - Mobile responsiveness gaps below 768px: the Review Queue duplicate-file
   compare (`.review-dup-compare`) stayed side-by-side and got cramped on
   phone-width screens; buttons and the review-card checkbox were under the
