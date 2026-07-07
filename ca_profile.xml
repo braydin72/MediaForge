@@ -1,4 +1,5 @@
 <CommunityApplications>
+  <!-- Required profile -->
   <Profile>
     MediaForge is a self-hosted media ingest engine for Unraid. It watches an
     incoming folder, identifies movies and TV episodes via TMDB/TVDB/OMDb,
@@ -8,8 +9,23 @@
     server-compatible naming. Anything that can't be processed automatically
     is routed to a Review Queue with a specific reason instead of failing
     silently. This repository maintains the MediaForge Docker template.
-    Support: https://github.com/braydin72/MediaForge/issues
   </Profile>
+  <!-- Optional icon -->
   <Icon>https://raw.githubusercontent.com/braydin72/MediaForge/main/web/templates/icon.png</Icon>
+  <!-- Optional web page -->
   <WebPage>https://github.com/braydin72/MediaForge</WebPage>
+  <!-- Optional support and donation links -->
+  <!-- <Forum>https://forums.unraid.net/topic/YOUR_SUPPORT_TOPIC</Forum> -->
+  <!-- Optional Discord link -->
+  <!-- <Discord>https://discord.gg/YOUR_INVITE_CODE</Discord> -->
+  <!-- Optional donation link -->
+  <!-- <DonateLink>https://github.com/sponsors/YOUR_GITHUB_USERNAME</DonateLink> -->
+  <!-- Optional donation text -->
+  <!-- <DonateText>Support this project</DonateText> -->
+  <!-- Optional photos -->
+  <!-- <Photo>URL to any photos</Photo> -->
+  <!-- You can add multiple photos by adding multiple <Photo> tags -->
+  <!-- Optional videos -->
+  <!-- <Video>URL to any video.  Youtube URLs are recommended</Video> -->
+  <!-- You can add multiple videos by adding multiple <Video> tags -->
 </CommunityApplications>
