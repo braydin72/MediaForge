@@ -1,5 +1,29 @@
 CURRENT STATE NOTE
 
+=== Latest session: fixed colon-in-title sanitization (":" -> "_") for library naming ===
+
+User reported: shows like "9-1-1: Nashville" were getting library folder/file
+names like "9-1-1_ Nashville" instead of the expected "9-1-1 - Nashville".
+Root cause: internal/intake/naming.go sanitizePathComponent() mapped every
+filesystem-illegal character, including ':', to a bare underscore.
+
+Fix (internal/intake/naming.go): sanitizePathComponent now special-cases the
+colon before the generic illegal-char loop — replaces ": " and ":" with
+" - " (space-dash-space), then still maps the other illegal chars
+(/ \ * ? " < > |) to "_" as before. Also collapses any resulting double
+spaces and trims. Comment explains why colon gets special treatment (title
+subtitle separator, not stray punctuation).
+
+Test (new internal/intake/naming_test.go): TestSanitizePathComponent covers
+colon-with-space, colon-no-space, and all the other illegal characters
+individually; TestApplyNamingTemplateColonInShowTitle exercises the full
+{show} ({year}) template with "9-1-1: Nashville" end-to-end, asserting the
+folder name comes out "9-1-1 - Nashville (2025)".
+
+Verified: go build ./... and go test ./... (full suite) both pass. Not
+tested against a live intake run — this is naming-template logic only, no
+filesystem/network dependency, so unit coverage is adequate.
+
 === Latest session (cont.): additional mobile CSS fixes below 768px ===
 
 Continuation of the mobile responsiveness pass from the prior commit

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+- Colon character in show/movie titles (e.g. `9-1-1: Nashville`) was being
+  replaced with an underscore (`9-1-1_ Nashville`) when building library
+  folder/file paths, instead of the intended space-dash separator. Colons
+  are now replaced with " - " while other filesystem-illegal characters
+  (`/ \ * ? " < >  |`) still map to `_`.
+  - Files modified: internal/intake/naming.go, internal/intake/naming_test.go
+
 ## [1.2.0] - 2026-07-07
 
 ### Added
