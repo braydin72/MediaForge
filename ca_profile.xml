@@ -1,0 +1,15 @@
+<CommunityApplications>
+  <Profile>
+    MediaForge is a self-hosted media ingest engine for Unraid. It watches an
+    incoming folder, identifies movies and TV episodes via TMDB/TVDB/OMDb,
+    verifies matches with an optional LLM, transcodes H.264 to HEVC (or AV1)
+    with hardware acceleration and VMAF-driven quality control, and files
+    finished media into your Plex/Jellyfin/Emby library using
+    server-compatible naming. Anything that can't be processed automatically
+    is routed to a Review Queue with a specific reason instead of failing
+    silently. This repository maintains the MediaForge Docker template.
+    Support: https://github.com/braydin72/MediaForge/issues
+  </Profile>
+  <Icon>https://raw.githubusercontent.com/braydin72/MediaForge/main/web/templates/icon.png</Icon>
+  <WebPage>https://github.com/braydin72/MediaForge</WebPage>
+</CommunityApplications>
