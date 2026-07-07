@@ -1,11 +1,11 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>MediaForge</Name>
-  <Repository>ghcr.io/braydin72/mediaforge:dev</Repository>
+  <Repository>ghcr.io/braydin72/mediaforge:latest</Repository>
   <Registry>https://github.com/braydin72/mediaforge/pkgs/container/mediaforge</Registry>
   <Branch>
     <Tag>dev</Tag>
-    <TagDescription>Latest development release</TagDescription>
+    <TagDescription>Latest development build (unstable, tracks the develop branch)</TagDescription>
   </Branch>
   <Network>bridge</Network>
   <Privileged>false</Privileged>
