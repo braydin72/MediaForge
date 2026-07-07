@@ -1,43 +1,110 @@
-<?xml version="1.0"?>
 <Container version="2">
+
   <Name>MediaForge</Name>
   <Repository>ghcr.io/braydin72/mediaforge:latest</Repository>
   <Registry>https://github.com/braydin72/mediaforge/</Registry>
   <Network>bridge</Network>
+  
   <shell>bash</shell>
   <Privileged>false</Privileged>
+  
+  <!-- Optional but highly recommended: app icon -->
   <Icon>https://raw.githubusercontent.com/braydin72/mediaforge/main/web/templates/logo.png</Icon>
+  
+  <!-- Optional theme-specific icon overrides -->
+  <!-- <Icon-black>https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/YOUR_PLUGIN_REPO/main/icon-black.png</Icon-black> -->
+  <!-- <Icon-white>https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/YOUR_PLUGIN_REPO/main/icon-white.png</Icon-white> -->
+  <!-- <Icon-azure>https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/YOUR_PLUGIN_REPO/main/icon-azure.png</Icon-azure> -->
+  <!-- <Icon-gray>https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/YOUR_PLUGIN_REPO/main/icon-gray.png</Icon-gray> -->
+  
+  <!-- NOTE: The port in the entry ALWAYS refers to the container port, not the host port--> 
   <WebUI>http://[IP]:[PORT:8080]</WebUI>
-  <Overview>MediaForge is a self-hosted media ingest engine — a single application and single Docker container that handles the complete journey of a raw video file from arrival to library-ready:[br]
-[b]Ingest[/b] - watch a folder, detect new files, verify they are fully written[br]
-[b]Identify[/b] - codec detection via ffprobe, metadata lookup via TVDB/TMDB/OMDb, LLM-assisted verification for ambiguous matches[br][b]Transcode[/b] - AVC (H.264) files are queued and encoded to HEVC (H.265) using hardware acceleration (NVIDIA, AMD, Intel, or CPU fallback)[br][b]Organize[/b] - rename and move to library with media-server-compatible folder and file naming[br]
-[br][br]MediaForge is not a media server. It is designed to feed Plex, Jellyfin, Emby, or any other media server that watches a library folder.[br][br][b]GPU Setup (Recommended):[/b][br]Without GPU passthrough, MediaForge falls back to slower CPU encoding.[br][br][b]Intel/AMD:[/b] Add --device=/dev/dri to Extra Parameters.[br][br][b]NVIDIA:[/b] Install the Nvidia-Driver plugin (reboot after) and add --runtime=nvidia to Extra Parameters.</Overview>  
+  
+  <!-- Plain text description -->
+   <Overview>MediaForge is a self-hosted media ingest engine — a single application and single Docker container that handles the complete journey of a raw video file from arrival to library-ready:[br][b]Ingest[/b] - watch a folder, detect new files, verify they are fully written[br][b]Identify[/b] - codec detection via ffprobe, metadata lookup via TVDB/TMDB/OMDb, LLM-assisted verification for ambiguous matches[br][b]Transcode[/b] - AVC (H.264) files are queued and encoded to HEVC (H.265) using hardware acceleration (NVIDIA, AMD, Intel, or CPU fallback)[br][b]Organize[/b] - rename and move to library with media-server-compatible folder and file naming[br][br][br]MediaForge is not a media server. It is designed to feed Plex, Jellyfin, Emby, or any other media server that watches a library folder.[br][br][b]GPU Setup (Recommended):[/b][br]Without GPU passthrough, MediaForge falls back to slower CPU encoding.[br][br][b]Intel/AMD:[/b] Add --device=/dev/dri to Extra Parameters.[br][br][b]NVIDIA:[/b] Install the Nvidia-Driver plugin (reboot after) and add --runtime=nvidia to Extra Parameters.</Overview>  
+
+  <!-- NOTE: Either Support or Project is REQUIRED -->
+  <!-- Support forum -->
   <Support>https://github.com/braydin72/mediaforge/issues</Support>
+
+  <!-- Project Page -->
   <Project>https://github.com/braydin72/mediaforge</Project>
+
+  <!-- Raw URL to this exact template file -->
   <TemplateURL>https://raw.githubusercontent.com/braydin72/MediaForge/main/templates/mediaforge.xml</TemplateURL>
-  <ReadMe>https://github.com/braydin72/mediaforge#readme</ReadMe>  
-  <Category>MediaApp:Video</Category>
-  <ExtraSearchTerms>transcode ffmpeg compression video hevc av1 encode ingest organize mediaforge shrink shrinkray</ExtraSearchTerms>
-  <Requires>For hardware acceleration, GPU passthrough is required. See Overview for setup instructions.</Requires>
-  <Changes>v1.2.0 — see CHANGELOG.md on GitHub for full release notes.</Changes>
-  <Date>2026-07-07</Date>
-  <Beta>false</Beta>
-  <License>MIT</License>
+
+  <!-- ReadMe first file -->
+  <ReadMe>https://github.com/braydin72/mediaforge#readme</ReadMe>
+
+    <!-- Optional Discord community URL -->
+  <!-- <Discord>https://discord.gg/YOUR_DISCORD_INVITE_CODE</Discord> -->
+
+  <!-- Optional Reddit community URL -->
+  <!-- <Reddit>https://www.reddit.com/r/YOUR_REDDIT_COMMUNITY</Reddit> -->
+
+  <!-- Optional Facebook community URL -->
+  <!-- <Facebook>https://www.facebook.com/YOUR_FACEBOOK_PAGE</Facebook> -->
 
   
-  <!-- Ports -->
-  <Config Name="WebUI Port" Target="8080" Default="8080" Mode="tcp" Type="Port" Description="Web interface port" Display="always" Required="true"/>
+  
+  <!-- Valid category entries can be generated from the Application Categorizer plugin available in Apps -->
+  <Category>MediaApp:Video</Category>
 
-  <!-- Volumes -->
+  <!-- Optional extra app search terms -->
+  <ExtraSearchTerms>transcode ffmpeg compression video hevc av1 encode ingest organize mediaforge shrink shrinkray</ExtraSearchTerms>
+
+  <!-- Optional system requirement text -->
+  <Requires>For hardware acceleration, GPU passthrough is required. See Overview for setup instructions.</Requires>
+
+  <!-- Optional change log text -->
+  <Changes>v1.2.0 — see CHANGELOG.md on GitHub for full release notes.</Changes>
+  
+  <!-- Optional date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS) -->
+  <Date>2026-07-07</Date>
+  
+  <!-- Optional: set to true if this is a beta container -->
+  <!-- <Beta>true</Beta> -->
+  
+  <!-- Minimum and maximum Unraid version.-->
+  <MinVer>6.1</MinVer>
+  <MaxVer>7.3</MaxVer>
+  
+  <!-- Optionally set this if this container is deprecated for all OS versions -->
+  <!-- <Deprecated>true</Deprecated> -->
+  
+  <!-- Optional: deprecate starting with a specific OS version -->
+  <!-- <DeprecatedMaxVer>7.2</DeprecatedMaxVer> -->
+
+  <!-- License of the container-->
+  <License>MIT</License>
+
+  <!-- Screenshots -->
+  <!-- You can add multiple screenshots by adding multiple <Screenshot> tags -->
+  <!-- <Screenshot>https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/YOUR_PLUGIN_REPO/main/screenshot.png</Screenshot> -->
+  
+  <!-- Video. YouTube URLs are highly recommended -->
+  <!-- You can add multiple videos by adding multiple <Video> tags -->
+  <!-- <Video>https://www.youtube.com/watch?v=YOUR_YOUTUBE_VIDEO_ID</Video> -->
+
+  <!-- Optional release branch selectors -->
+  <!--
+  <DefaultTagDescription>Stable releases</DefaultTagDescription>
+  <Branch>
+    <Tag>main</Tag>
+    <TagDescription>Latest commits from main branch</TagDescription>
+  </Branch>
+  -->
+
+  <!-- v2 templates should define ports/paths/variables with Config entries -->
+  <Config Name="WebUI Port" Target="8080" Default="8080" Mode="tcp" Type="Port" Description="Web interface port" Display="always" Required="true"/>
   <Config Name="Config" Target="/config" Default="/mnt/user/appdata/mediaforge" Mode="rw" Type="Path" Description="Configuration and database directory" Display="always" Required="true"/>
   <Config Name="Incoming" Target="/incoming" Default="/mnt/user/incoming" Mode="rw" Type="Path" Description="Watch folder — drop new media files here for processing" Display="always" Required="true"/>
   <Config Name="Staging" Target="/staging" Default="/mnt/cache/staging" Mode="rw" Type="Path" Description="Fast storage for AVC files awaiting encode and transcode working directory. SSD or cache pool strongly recommended." Display="always" Required="true"/>
   <Config Name="Movies Library" Target="/media/Movies" Default="/mnt/user/media/Movies" Mode="rw" Type="Path" Description="Movie library output folder. Can be a locally mounted network share." Display="always" Required="true"/>
   <Config Name="TV Library" Target="/media/TV Shows" Default="/mnt/user/media/TV Shows" Mode="rw" Type="Path" Description="TV show library output folder. Can be a locally mounted network share." Display="always" Required="true"/>
-
-  <!-- Environment Variables -->
   <Config Name="PUID" Target="PUID" Default="99" Type="Variable" Description="User ID for file permissions" Display="advanced" Required="false"/>
   <Config Name="PGID" Target="PGID" Default="100" Type="Variable" Description="Group ID for file permissions. For GPU encoding, set this to the group that owns /dev/dri/renderD128 on your host." Display="advanced" Required="false"/>
   <Config Name="NVIDIA_VISIBLE_DEVICES" Target="NVIDIA_VISIBLE_DEVICES" Default="all" Type="Variable" Description="Exposes NVIDIA GPUs to the container. Default 'all' works for single-GPU systems. For multi-GPU, set to a specific GPU UUID from the Nvidia-Driver plugin page." Display="advanced" Required="false"/>
   <Config Name="NVIDIA_DRIVER_CAPABILITIES" Target="NVIDIA_DRIVER_CAPABILITIES" Default="all" Type="Variable" Description="NVIDIA driver features exposed to the container." Display="always-hide" Required="false"/>
+  
 </Container>
