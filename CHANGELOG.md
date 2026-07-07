@@ -7,14 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-### Fixed
-- Additional mobile responsiveness fixes below 768px, continuing the prior
-  pass: `.header` now wraps (`flex-wrap`, `row-gap`) instead of clipping when
-  its contents don't fit one row; `.view-nav` moves to its own row
-  (`order: 3`, full width) with horizontal scroll instead of squeezing the
-  tab labels; `.review-bulk-bar` (480px block) now wraps instead of
-  overflowing.
-- Files modified: web/templates/index.html
+## [1.2.0] - 2026-07-07
+
+### Added
+- Logs viewer tab in the web UI (`GET /api/logs?file=current|1|2&lines=N`):
+  lets a device on the LAN view the app's rotated log files remotely instead
+  of requiring local filesystem access to `%APPDATA%\Mediaforge\logs`. Includes
+  a file picker (current/previous/2-sessions-ago), a line-count selector
+  (50/200/500/1000, tail-based), and an optional 5s auto-refresh.
+  - Files modified: internal/api/handler.go, internal/api/router.go,
+    web/templates/index.html
+- Custom Encode CRF override for Compress presets (compress-hevc/compress-av1):
+  a per-job CRF field in both the main file browser UI and the Review Queue's
+  "Re-encode Custom" form, sent as `encode_quality_crf` to `/api/jobs` and
+  `/api/review/{id}/resubmit`. Falls back to the global quality_hevc/quality_av1
+  setting when left blank; validated to the same ranges as the Settings sliders
+  (16-30 HEVC, 18-35 AV1) and rejected for SmartShrink presets.
+  - Files modified: internal/jobs/job.go, internal/jobs/queue.go,
+    internal/jobs/worker.go, internal/api/handler.go, web/templates/index.html
+
+### Changed
+- App name in the header now renders in Cinzel; rest of the UI is unchanged
+  (DM Sans). SmartShrink quality dropdown (Acceptable/Good/Excellent) is
+  narrower (160px min-width) to match its shorter option labels.
+  - Files modified: web/templates/index.html
 
 ### Fixed
 - Review Queue resubmit ("Re-encode Custom") silently failed for entries whose
@@ -26,9 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   browse root and silently drops any path outside it (returns 0 results, nil
   error). Fixed by probing via `browser.ProbeFile` (direct ffprobe call, no
   root restriction) instead, matching the pattern already used by `RetryJob`.
-- Files modified: internal/api/handler.go
-
-### Fixed
+  - Files modified: internal/api/handler.go
+- Additional mobile responsiveness fixes below 768px, continuing the prior
+  pass: `.header` now wraps (`flex-wrap`, `row-gap`) instead of clipping when
+  its contents don't fit one row; `.view-nav` moves to its own row
+  (`order: 3`, full width) with horizontal scroll instead of squeezing the
+  tab labels; `.review-bulk-bar` (480px block) now wraps instead of
+  overflowing.
+  - Files modified: web/templates/index.html
 - Mobile responsiveness gaps below 768px: the Review Queue duplicate-file
   compare (`.review-dup-compare`) stayed side-by-side and got cramped on
   phone-width screens; buttons and the review-card checkbox were under the
@@ -36,18 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   block that stacks the duplicate compare into a column and bumps `.btn`
   min-height to 44px and `.review-card-check` to 20x20px (`.btn-sm` left
   untouched — those are deliberately compact secondary actions).
-- Files modified: web/templates/index.html
-
-### Added
-- Logs viewer tab in the web UI (`GET /api/logs?file=current|1|2&lines=N`):
-  lets a device on the LAN view the app's rotated log files remotely instead
-  of requiring local filesystem access to `%APPDATA%\Mediaforge\logs`. Includes
-  a file picker (current/previous/2-sessions-ago), a line-count selector
-  (50/200/500/1000, tail-based), and an optional 5s auto-refresh.
-- Files modified: internal/api/handler.go, internal/api/router.go,
-  web/templates/index.html
-
-### Fixed
+  - Files modified: web/templates/index.html
 - Review Queue "Re-encode Custom" silently corrupted Windows/UNC file paths
   (every backslash except the first was dropped) because the original path
   was interpolated raw into an inline `onclick="..."` attribute, which the
@@ -57,25 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mark the entry `resolved` and silently drop it from the queue with no
   encode ever created; it now reverts the entry to `pending` with an
   actionable reason instead of disappearing silently.
-- Files modified: internal/api/handler.go, web/templates/index.html
-
-### Added
-- Custom Encode CRF override for Compress presets (compress-hevc/compress-av1):
-  a per-job CRF field in both the main file browser UI and the Review Queue's
-  "Re-encode Custom" form, sent as `encode_quality_crf` to `/api/jobs` and
-  `/api/review/{id}/resubmit`. Falls back to the global quality_hevc/quality_av1
-  setting when left blank; validated to the same ranges as the Settings sliders
-  (16-30 HEVC, 18-35 AV1) and rejected for SmartShrink presets.
-- Files modified: internal/jobs/job.go, internal/jobs/queue.go,
-  internal/jobs/worker.go, internal/api/handler.go, web/templates/index.html
-
-### Changed
-- App name in the header now renders in Cinzel; rest of the UI is unchanged
-  (DM Sans). SmartShrink quality dropdown (Acceptable/Good/Excellent) is
-  narrower (160px min-width) to match its shorter option labels.
-- Files modified: web/templates/index.html
-
-### Fixed
+  - Files modified: internal/api/handler.go, web/templates/index.html
 - App-reported version was hardcoded to `1.0.0` in `internal/version/version.go`
   and never bumped for tagged releases, so a binary built from the `v1.1.0` tag
   still logged `version=v1.0.0+build.N`. `Version` is now injected via
@@ -84,8 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Dockerfile`, new `APP_VERSION` build-arg), and local builds
   (`build.ps1`, via `git describe --tags`). The hardcoded constant remains
   only as a fallback for non-tagged/dev builds.
-- Files modified: internal/version/version.go, build.ps1, Dockerfile,
-  .github/workflows/release.yml
+  - Files modified: internal/version/version.go, build.ps1, Dockerfile,
+    .github/workflows/release.yml
 
 ## V1.1.0
 
@@ -340,7 +332,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker support with multi-stage build
 - GitHub Actions CI/CD pipeline
 
-[Unreleased]: https://github.com/braydin72/MediaForge/compare/v1.0.0...develop
+[Unreleased]: https://github.com/braydin72/MediaForge/compare/v1.2.0...develop
+[1.2.0]: https://github.com/braydin72/MediaForge/compare/v1.1.0...v1.2.0
 [1.0.0]: https://github.com/braydin72/MediaForge/releases/tag/v1.0.0
 
 
