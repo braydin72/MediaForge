@@ -11,6 +11,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/braydin72/mediaforge/issues</Support>
   <Project>https://github.com/braydin72/mediaforge</Project>
+  <TemplateURL>https://raw.githubusercontent.com/braydin72/MediaForge/main/templates/mediaforge.xml</TemplateURL>
   <Overview>MediaForge is a self-hosted media ingest engine — a single application and single Docker container that handles the complete journey of a raw video file from arrival to library-ready:[br]
 [b]Ingest[/b] - watch a folder, detect new files, verify they are fully written[br]
 [b]Identify[/b] - codec detection via ffprobe, metadata lookup via TVDB/TMDB/OMDb, LLM-assisted verification for ambiguous matches[br][b]Transcode[/b] - AVC (H.264) files are queued and encoded to HEVC (H.265) using hardware acceleration (NVIDIA, AMD, Intel, or CPU fallback)[br][b]Organize[/b] - rename and move to library with media-server-compatible folder and file naming[br]
@@ -21,6 +22,9 @@
   <ExtraSearchTerms>transcode ffmpeg compression video hevc av1 encode ingest organize mediaforge shrink shrinkray</ExtraSearchTerms>
   <Requires>For hardware acceleration, GPU passthrough is required. See Overview for setup instructions.</Requires>
   <ReadMe>https://github.com/braydin72/mediaforge#readme</ReadMe>
+  <License>MIT</License>
+  <Date>2026-07-07</Date>
+  <Changes>v1.2.0 — see CHANGELOG.md on GitHub for full release notes.</Changes>
   <Beta>false</Beta>
 
   <!-- Ports -->
