@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-07-08
+
+### Fixed
+- Review Queue duplicate-conflict entries lost metadata corrections found
+  during intake (e.g. TVDB season/episode reconciliation, title/year
+  correction) — the stored `ReviewEntry.Filename` was always the raw,
+  uncorrected source basename, even when `resolveAndGate` had already
+  identified the correct metadata before the duplicate check ran. Since
+  `ResolveReviewEntry`/`ResubmitReviewEntry` re-derive metadata by
+  re-parsing `entry.Filename`, a later "Re-encode Custom" or manual
+  resolve would reproduce the original wrong title/year/season/episode.
+  Fix: `sendToReviewQueue`/`sendDuplicateToReviewQueue`
+  (`internal/intake/watcher.go`) now accept a `correctedFilename` built
+  from the already-identified metadata (`buildCorrectedFilename`,
+  `internal/intake/naming.go`) once `resolveAndGate` succeeds, so the
+  stored filename carries the correction. The post-encode duplicate path
+  (`internal/jobs/worker.go` `processJob`) now derives the review-entry
+  filename from `job.LibraryPath` (already metadata-corrected) instead of
+  `filepath.Base(finalPath)` (the raw transcoded file's name, unchanged by
+  encoding). No new staging folder or physical file move — the file stays
+  at its existing location; only the filename string used for
+  identification/re-parsing changed.
+  - Files modified: internal/intake/watcher.go, internal/intake/naming.go,
+    internal/intake/watcher_test.go, internal/jobs/worker.go
+- Two remaining gaps in the fix above, found from a real run (Revolution
+  S02E12: first landed as "Revolution (2013) - S02E12 -.mp4" — wrong year,
+  missing episode title):
+  1. `internal/jobs/worker.go` SmartShrink "no viable encode" → Review Queue
+     path (~line 926) was a call site the first fix missed — still used
+     `filepath.Base(job.InputPath)` (raw, uncorrected name) instead of
+     `job.LibraryPath` (already metadata-corrected during intake). This is
+     why the wrong year (2013 instead of TVDB's 2012) survived into the
+     Review Queue entry.
+  2. `internal/api/handler.go` `ResubmitReviewEntry` (and defensively
+     `ResolveReviewEntry`) called `intake.ParseFilename(entry.Filename)`,
+     which only ever populates `ParsedEpisodeTitle` (the raw text parsed
+     from the filename) — never `EpisodeTitle`, the field naming templates
+     actually read. Every "Re-encode Custom" resubmit for a TV show was
+     silently dropping the episode title from the rebuilt library path,
+     independent of whether the entry's filename was corrected. Both
+     handlers now fall back to `ParsedEpisodeTitle` when `EpisodeTitle` is
+     empty.
+  - Files modified: internal/jobs/worker.go, internal/api/handler.go
+
 ## [1.2.1] - 2026-07-08
 
 ### Fixed

@@ -1196,6 +1196,11 @@ func (h *Handler) ResolveReviewEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Candidate.EpisodeTitle != "" {
 		parsed.EpisodeTitle = req.Candidate.EpisodeTitle
+	} else if parsed.EpisodeTitle == "" {
+		// Fall back to the title parsed out of the filename text itself when the
+		// picked candidate didn't supply one (ParseFilename only ever populates
+		// ParsedEpisodeTitle, not the EpisodeTitle field naming templates read).
+		parsed.EpisodeTitle = parsed.ParsedEpisodeTitle
 	}
 	if req.Candidate.MediaType != "" {
 		parsed.MediaType = req.Candidate.MediaType
@@ -1449,6 +1454,13 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 		// (same approach as ResolveReviewEntry) and set it on the new job(s) so
 		// the worker's post-encode move step actually fires on completion.
 		parsed := intake.ParseFilename(entry.Filename)
+		// ParseFilename only ever populates ParsedEpisodeTitle (the raw title parsed
+		// out of the filename text) — naming templates read the separate EpisodeTitle
+		// field (confirmed metadata), which ParseFilename never sets. Without this,
+		// every TV resubmit silently drops the episode title from the rebuilt path.
+		if parsed.EpisodeTitle == "" {
+			parsed.EpisodeTitle = parsed.ParsedEpisodeTitle
+		}
 		cfgFmt := h.cfg.OutputFormat
 		if req.EncodeOutputFormat != "" {
 			cfgFmt = req.EncodeOutputFormat

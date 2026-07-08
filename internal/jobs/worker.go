@@ -923,7 +923,14 @@ func (w *Worker) processJob(job *Job) {
 					float64(result.OutputSize)/float64(inputSize)*100)
 				logger.Warn("SmartShrink: no viable encode", "job_id", job.ID)
 				_ = w.queue.FailJob(job.ID, reason)
-				w.queue.SendToReviewQueue(job.ID, job.InputPath, filepath.Base(job.InputPath), reason, "")
+				// job.LibraryPath, when set, already carries the metadata-corrected name
+				// (resolved during intake before this job was enqueued); job.InputPath's
+				// basename is still the raw, possibly-uncorrected source name.
+				correctedName := filepath.Base(job.InputPath)
+				if job.LibraryPath != "" {
+					correctedName = filepath.Base(job.LibraryPath)
+				}
+				w.queue.SendToReviewQueue(job.ID, job.InputPath, correctedName, reason, "")
 				return
 			}
 		}
@@ -962,14 +969,19 @@ func (w *Worker) processJob(job *Job) {
 				"job_id", job.ID, "dst", job.LibraryPath)
 			dupInfoJSON := buildPostEncodeDuplicateJSON(jobCtx, w.prober, finalPath, job.LibraryPath)
 			_ = w.queue.FailJob(job.ID, reason)
-			w.queue.SendDuplicateToReviewQueue(job.ID, finalPath, filepath.Base(finalPath), reason, "", dupInfoJSON)
+			// job.LibraryPath already carries the metadata-corrected name (set from
+			// resolved title/year/season/episode during intake); filepath.Base(finalPath)
+			// would still be the raw, possibly-uncorrected source name since transcoding
+			// doesn't rename. Use the corrected name so a later "Re-encode Custom" re-parses
+			// the correction instead of losing it.
+			w.queue.SendDuplicateToReviewQueue(job.ID, finalPath, filepath.Base(job.LibraryPath), reason, "", dupInfoJSON)
 			return
 		}
 		if moveErr := util.SafeMove(finalPath, job.LibraryPath); moveErr != nil {
 			reason := fmt.Sprintf("post-encode move failed: %v", moveErr)
 			logger.Error("Post-encode library move failed", "job_id", job.ID, "src", finalPath, "dst", job.LibraryPath, "error", moveErr)
 			_ = w.queue.FailJob(job.ID, reason)
-			w.queue.SendToReviewQueue(job.ID, finalPath, filepath.Base(finalPath), reason, "")
+			w.queue.SendToReviewQueue(job.ID, finalPath, filepath.Base(job.LibraryPath), reason, "")
 			return
 		}
 		logger.Info("Post-encode library move complete", "job_id", job.ID, "dst", job.LibraryPath)

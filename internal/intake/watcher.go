@@ -234,7 +234,7 @@ func (w *Watcher) runPipeline(ctx context.Context, path string) {
 	if err != nil {
 		reason := fmt.Sprintf("codec detection failed: %s", err.Error())
 		logger.Warn("Intake: ffprobe error", "file", filename, "error", err)
-		w.sendToReviewQueue(path, reason, nil)
+		w.sendToReviewQueue(path, reason, nil, "")
 		return
 	}
 
@@ -259,7 +259,7 @@ func (w *Watcher) runPipeline(ctx context.Context, path string) {
 			reason = fmt.Sprintf("unrecognized codec: %s", probe.VideoCodec)
 		}
 		logger.Warn("Intake: unrecognized codec, queuing for review", "file", filename, "codec", probe.VideoCodec)
-		w.sendToReviewQueue(path, reason, probe)
+		w.sendToReviewQueue(path, reason, probe, "")
 	}
 }
 
@@ -275,7 +275,7 @@ func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpe
 	}
 
 	if w.cfg.StagingFolder == "" {
-		w.sendToReviewQueue(path, "staging folder not configured", probe)
+		w.sendToReviewQueue(path, "staging folder not configured", probe, "")
 		return
 	}
 
@@ -293,11 +293,24 @@ func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpe
 			"episode_title", result.EpisodeTitle, "confidence", result.Confidence)
 	}
 
+	// Resolve output extension: "preserve" inherits the source container; otherwise
+	// use the configured format. ffmpeg.ResolveOutputFormat handles "preserve" by
+	// inspecting the input file extension, matching what the worker does at encode time.
+	outFmt := ffmpeg.ResolveOutputFormat(filename, w.OutputFormat)
+	if outFmt == "" {
+		outFmt = "mkv"
+	}
+	// Corrected filename (metadata-identified title/year/season/episode), used for any
+	// Review Queue entry created below so ResolveReviewEntry/ResubmitReviewEntry re-parse
+	// the correction instead of the raw source name. Falls back to the raw name when
+	// buildCorrectedFilename can't resolve one (e.g. not enough metadata).
+	correctedName := buildCorrectedFilename(&w.cfg, &parsed, "."+outFmt)
+
 	stagingPath := filepath.Join(w.cfg.StagingFolder, filename)
 	if err := util.SafeMove(path, stagingPath); err != nil {
 		reason := fmt.Sprintf("staging move failed: %v", err)
 		logger.Warn("Intake: failed to move AVC file to staging", "file", filename, "error", err)
-		w.sendToReviewQueue(path, reason, probe)
+		w.sendToReviewQueue(path, reason, probe, correctedName)
 		return
 	}
 
@@ -314,17 +327,10 @@ func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpe
 	if err != nil {
 		reason := fmt.Sprintf("failed to queue encode job: %v", err)
 		logger.Warn("Intake: failed to enqueue AVC file", "file", filename, "error", err)
-		w.sendToReviewQueue(stagingPath, reason, probe)
+		w.sendToReviewQueue(stagingPath, reason, probe, correctedName)
 		return
 	}
 
-	// Resolve output extension: "preserve" inherits the source container; otherwise
-	// use the configured format. ffmpeg.ResolveOutputFormat handles "preserve" by
-	// inspecting the input file extension, matching what the worker does at encode time.
-	outFmt := ffmpeg.ResolveOutputFormat(filename, w.OutputFormat)
-	if outFmt == "" {
-		outFmt = "mkv"
-	}
 	libraryPath := resolveLibraryPath(&w.cfg, &parsed, "."+outFmt)
 	if libraryPath != "" {
 		w.EncodeQueue.SetLibraryPath(job.ID, libraryPath)
@@ -376,14 +382,14 @@ func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *Parse
 	if err != nil {
 		reason := "no metadata match found: " + err.Error()
 		logger.Warn("Intake: metadata lookup failed", "file", filename, "error", err)
-		w.sendToReviewQueue(path, reason, probe)
+		w.sendToReviewQueue(path, reason, probe, "")
 		return nil, false
 	}
 
 	if result.Confidence < reviewThreshold {
 		reason := fmt.Sprintf("low confidence match (%.0f%%) for %q", result.Confidence*100, result.Title)
 		logger.Warn("Intake: confidence below review threshold", "file", filename, "confidence", result.Confidence)
-		w.sendToReviewQueue(path, reason, probe)
+		w.sendToReviewQueue(path, reason, probe, "")
 		return nil, false
 	}
 
@@ -391,25 +397,25 @@ func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *Parse
 		// Confidence is between review_threshold and confidence_threshold — try LLM.
 		if w.LLMClient == nil {
 			reason := fmt.Sprintf("confidence %.0f%% requires LLM verification — LLM not configured", result.Confidence*100)
-			w.sendToReviewQueue(path, reason, probe)
+			w.sendToReviewQueue(path, reason, probe, "")
 			return nil, false
 		}
 		llmResult, llmErr := w.LLMClient.Verify(ctx, parsed, []*LookupResult{result})
 		if llmErr != nil {
 			reason := fmt.Sprintf("LLM verification failed: %v", llmErr)
 			logger.Warn("Intake: LLM verification error", "file", filename, "error", llmErr)
-			w.sendToReviewQueue(path, reason, probe)
+			w.sendToReviewQueue(path, reason, probe, "")
 			return nil, false
 		}
 		if llmResult.Disabled {
 			reason := fmt.Sprintf("confidence %.0f%% requires LLM verification — LLM not configured", result.Confidence*100)
-			w.sendToReviewQueue(path, reason, probe)
+			w.sendToReviewQueue(path, reason, probe, "")
 			return nil, false
 		}
 		if llmResult.CandidateID == "none" || llmResult.Confidence < reviewThreshold {
 			reason := fmt.Sprintf("LLM verification rejected match: %s", llmResult.Reasoning)
 			logger.Warn("Intake: LLM rejected match", "file", filename)
-			w.sendToReviewQueue(path, reason, probe)
+			w.sendToReviewQueue(path, reason, probe, "")
 			return nil, false
 		}
 		result.Confidence = llmResult.Confidence
@@ -440,11 +446,15 @@ func (w *Watcher) moveHEVCToLibrary(ctx context.Context, path string, probe *ffm
 	}
 
 	ext := filepath.Ext(filename)
+	// Corrected filename (metadata-identified title/year/season/episode), used for any
+	// Review Queue entry created below so ResolveReviewEntry/ResubmitReviewEntry re-parse
+	// the correction instead of the raw source name.
+	correctedName := buildCorrectedFilename(&w.cfg, &parsed, ext)
 	libraryPath := resolveLibraryPath(&w.cfg, &parsed, ext)
 	if libraryPath == "" {
 		reason := "could not resolve library destination path from metadata"
 		logger.Warn("Intake: HEVC library path resolution failed", "file", filename)
-		w.sendToReviewQueue(path, reason, probe)
+		w.sendToReviewQueue(path, reason, probe, correctedName)
 		return
 	}
 
@@ -453,7 +463,7 @@ func (w *Watcher) moveHEVCToLibrary(ctx context.Context, path string, probe *ffm
 	if dupRes.decision == dupSendReview {
 		logger.Warn("Intake: HEVC duplicate at destination, queuing for review",
 			"file", filename, "destination", libraryPath)
-		w.sendDuplicateToReviewQueue(path, dupRes.reason, probe, dupRes.ctx)
+		w.sendDuplicateToReviewQueue(path, dupRes.reason, probe, dupRes.ctx, correctedName)
 		return
 	}
 
@@ -461,7 +471,7 @@ func (w *Watcher) moveHEVCToLibrary(ctx context.Context, path string, probe *ffm
 	if err := util.SafeMove(path, libraryPath); err != nil {
 		reason := fmt.Sprintf("library move failed: %v", err)
 		logger.Warn("Intake: HEVC move error", "file", filename, "error", err)
-		w.sendToReviewQueue(path, reason, probe)
+		w.sendToReviewQueue(path, reason, probe, correctedName)
 		return
 	}
 	logger.Info("Intake: HEVC successfully moved to library", "file", filename, "destination", libraryPath)
@@ -524,8 +534,13 @@ func (w *Watcher) waitForStability(ctx context.Context, path string) error {
 }
 
 // sendToReviewQueue persists a Review Queue entry for the given file.
-// probe may be nil if ffprobe itself failed.
-func (w *Watcher) sendToReviewQueue(path, reason string, probe *ffmpeg.ProbeResult) {
+// probe may be nil if ffprobe itself failed. correctedFilename, when non-empty,
+// overrides the stored Filename with metadata-corrected naming-template output
+// (e.g. from resolveAndGate) instead of the raw source basename — this is what
+// ResolveReviewEntry/ResubmitReviewEntry later re-parse via ParseFilename, so a
+// caller that already identified corrected title/year/season/episode metadata
+// before routing to review must pass it here or that correction is lost.
+func (w *Watcher) sendToReviewQueue(path, reason string, probe *ffmpeg.ProbeResult, correctedFilename string) {
 	var ffprobeJSON string
 	if probe != nil {
 		if b, err := json.Marshal(probe); err == nil {
@@ -533,10 +548,15 @@ func (w *Watcher) sendToReviewQueue(path, reason string, probe *ffmpeg.ProbeResu
 		}
 	}
 
+	filename := correctedFilename
+	if filename == "" {
+		filename = filepath.Base(path)
+	}
+
 	entry := store.ReviewEntry{
 		ID:           uuid.New().String(),
 		OriginalPath: path,
-		Filename:     filepath.Base(path),
+		Filename:     filename,
 		Reason:       reason,
 		FFProbeInfo:  ffprobeJSON,
 		Status:       "pending",
@@ -555,8 +575,8 @@ func (w *Watcher) sendToReviewQueue(path, reason string, probe *ffmpeg.ProbeResu
 
 // sendDuplicateToReviewQueue is like sendToReviewQueue but also persists a
 // DuplicateContext so the UI can show incoming/existing file details and offer
-// Replace or Keep Existing actions.
-func (w *Watcher) sendDuplicateToReviewQueue(path, reason string, probe *ffmpeg.ProbeResult, dupCtx *DuplicateContext) {
+// Replace or Keep Existing actions. See sendToReviewQueue for correctedFilename.
+func (w *Watcher) sendDuplicateToReviewQueue(path, reason string, probe *ffmpeg.ProbeResult, dupCtx *DuplicateContext, correctedFilename string) {
 	var ffprobeJSON string
 	if probe != nil {
 		if b, err := json.Marshal(probe); err == nil {
@@ -564,10 +584,15 @@ func (w *Watcher) sendDuplicateToReviewQueue(path, reason string, probe *ffmpeg.
 		}
 	}
 
+	filename := correctedFilename
+	if filename == "" {
+		filename = filepath.Base(path)
+	}
+
 	entry := store.ReviewEntry{
 		ID:            uuid.New().String(),
 		OriginalPath:  path,
-		Filename:      filepath.Base(path),
+		Filename:      filename,
 		Reason:        reason,
 		FFProbeInfo:   ffprobeJSON,
 		DuplicateInfo: marshalDuplicateContext(dupCtx),

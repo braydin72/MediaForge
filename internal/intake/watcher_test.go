@@ -1,14 +1,18 @@
 package intake
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/braydin72/mediaforge/internal/config"
+	"github.com/braydin72/mediaforge/internal/ffmpeg"
 	"github.com/braydin72/mediaforge/internal/store"
 )
 
@@ -274,4 +278,113 @@ func TestWatcherMissingFolder(t *testing.T) {
 
 	// Should not panic.
 	w.Start(ctx)
+}
+
+// TestMoveHEVCToLibrary_DuplicateReviewEntryUsesCorrectedFilename reproduces the
+// real-world bug: TVDB corrects a season/episode numbering offset (filename says
+// S48E30 "I Have Killed For You", TVDB's real episode is S49E30 "Her Last Call"),
+// but the destination already has a file, so the corrected file is routed to the
+// Review Queue instead of moved. Before the fix, sendDuplicateToReviewQueue stored
+// the raw, uncorrected source filename — so a later "Re-encode Custom" / resolve,
+// which re-parses ReviewEntry.Filename via ParseFilename, would reproduce the wrong
+// season/episode. The stored Filename must reflect the correction.
+func TestMoveHEVCToLibrary_DuplicateReviewEntryUsesCorrectedFilename(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.NewSQLiteStore(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer st.Close()
+
+	searchBody := map[string]interface{}{
+		"data": []map[string]interface{}{
+			{"tvdb_id": "72289", "name": "20/20", "year": "1978", "network": "ABC"},
+		},
+	}
+	tvdb := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
+		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, searchBody) },
+		"/v4/series": func(r *http.Request) *http.Response {
+			if strings.Contains(r.URL.Path, "/page/") {
+				return jsonResp(http.StatusOK, map[string]interface{}{
+					"data":  map[string]interface{}{"episodes": []map[string]interface{}{}},
+					"links": map[string]interface{}{"next": ""},
+				})
+			}
+			switch r.URL.Query().Get("season") {
+			case "48":
+				return jsonResp(http.StatusOK, map[string]interface{}{
+					"data": map[string]interface{}{
+						"episodes": []map[string]interface{}{
+							{"id": 1, "name": "I Have Killed For You", "aired": "2025-06-06", "seasonNumber": 48, "number": 30},
+						},
+					},
+				})
+			case "49":
+				return jsonResp(http.StatusOK, map[string]interface{}{
+					"data": map[string]interface{}{
+						"episodes": []map[string]interface{}{
+							{"id": 2, "name": "Her Last Call", "aired": "2023-03-10", "seasonNumber": 49, "number": 30},
+						},
+					},
+				})
+			default:
+				return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(bytes.NewReader(nil)), Header: make(http.Header)}
+			}
+		},
+	}))
+
+	cfg := config.IntakeConfig{}
+	cfg.Library.TVShows = filepath.Join(dir, "TV Shows")
+
+	w := NewWatcher(&cfg, "ffprobe", st)
+	w.Orchestrator = &Orchestrator{TVDB: tvdb}
+
+	// Pre-create the corrected destination file so checkDuplicate routes to review
+	// instead of moving.
+	destDir := filepath.Join(cfg.Library.TVShows, "20_20 (1978)", "Season 49")
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	destFile := filepath.Join(destDir, "20_20 - S49E30 - Her Last Call.mkv")
+	if err := os.WriteFile(destFile, []byte("existing"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	incomingPath := filepath.Join(dir, "20_20 (1978) - S48E30 - Her Last Call.mkv")
+	probe := &ffmpeg.ProbeResult{VideoCodec: "hevc"}
+
+	w.moveHEVCToLibrary(context.Background(), incomingPath, probe)
+
+	entries, err := st.GetReviewQueue()
+	if err != nil {
+		t.Fatalf("GetReviewQueue: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 review queue entry, got %d", len(entries))
+	}
+
+	e := entries[0]
+	if strings.Contains(e.Filename, "S48E30") {
+		t.Errorf("Filename = %q, still contains uncorrected S48E30", e.Filename)
+	}
+	if !strings.Contains(e.Filename, "S49E30") {
+		t.Errorf("Filename = %q, want it to contain corrected S49E30", e.Filename)
+	}
+	if strings.Contains(e.Filename, "I Have Killed For You") {
+		t.Errorf("Filename = %q, still contains uncorrected episode title", e.Filename)
+	}
+	if !strings.Contains(e.Filename, "Her Last Call") {
+		t.Errorf("Filename = %q, want it to contain corrected episode title", e.Filename)
+	}
+	if e.DuplicateInfo == "" {
+		t.Error("expected DuplicateInfo to be set for a duplicate-conflict entry")
+	}
+
+	// Reproduce what ResolveReviewEntry/ResubmitReviewEntry do with the stored
+	// Filename to prove the round-trip yields the corrected season/episode.
+	reparsed := ParseFilename(e.Filename)
+	if reparsed.Season != 49 || reparsed.Episode != 30 {
+		t.Errorf("re-parsed season/episode: want S49E30, got S%02dE%02d", reparsed.Season, reparsed.Episode)
+	}
 }

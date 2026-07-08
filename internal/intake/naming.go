@@ -50,6 +50,34 @@ func resolveLibraryPath(cfg *config.IntakeConfig, parsed *ParsedFilename, ext st
 	}
 }
 
+// buildCorrectedFilename renders just the file-name component (no folder path)
+// that resolveLibraryPath would use, given corrected metadata in parsed. Used to
+// rename a Review Queue entry's stored Filename after a successful metadata
+// lookup so ParseFilename re-parses the correction instead of the raw source
+// name. Returns "" under the same conditions resolveLibraryPath would.
+func buildCorrectedFilename(cfg *config.IntakeConfig, parsed *ParsedFilename, ext string) string {
+	if parsed.Title == "" {
+		return ""
+	}
+	switch parsed.MediaType {
+	case "tv":
+		if parsed.Season == 0 {
+			return ""
+		}
+		fileTmpl := cfg.Naming.EpisodeFile
+		if fileTmpl == "" {
+			fileTmpl = "{show} - S{season:02d}E{episode:02d} - {episode_title}"
+		}
+		return applyNamingTemplate(fileTmpl, parsed) + ext
+	default: // "movie"
+		fileTmpl := cfg.Naming.MovieFile
+		if fileTmpl == "" {
+			fileTmpl = "{title} ({year})"
+		}
+		return applyNamingTemplate(fileTmpl, parsed) + ext
+	}
+}
+
 // ResolveLibraryPath is an exported wrapper around resolveLibraryPath for callers
 // outside the package (e.g. the API resolving a manually-picked match to a
 // destination path). Returns "" when there is not enough metadata to build a path.

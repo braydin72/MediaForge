@@ -1,6 +1,139 @@
 CURRENT STATE NOTE
 
-=== Latest session: fixed Review Queue custom re-encode never moving file to library ===
+=== Latest session (cont.): two more real-log-confirmed gaps in the metadata-correction fix ===
+
+User re-deployed the fix below via update-mediaforge.ps1, then hit the exact
+same symptom on a real run and reported it back with a real log excerpt.
+Traced the log precisely (file: "Revolution (2013) - S02E12 - Captain
+Trips.mp4"):
+- Job `-1` (original SmartShrink attempt, VMAF threshold=94) correctly
+  resolved the library path to "Revolution (2012) - S02E12 - Captain
+  Trips.mp4" (TVDB correction worked, confidence=1.0), but failed the
+  quality bar ("no viable encode found") and went to Review Queue.
+- User did "Re-encode Custom" with a lower quality tier (job `-2`,
+  threshold=85). This job's post-encode move landed at "Revolution (2013)
+  - S02E12 -.mp4" — wrong year, no episode title.
+
+Two distinct root causes, neither fixed by the earlier session's change:
+1. `internal/jobs/worker.go` line ~926, the SmartShrink "no viable encode"
+   → Review Queue call site, was missed by the earlier fix — still used
+   `filepath.Base(job.InputPath)` (raw staging filename, still says 2013)
+   instead of `job.LibraryPath` (already correctly resolved to 2012 during
+   intake, before this SmartShrink retry loop runs). Fixed: now uses
+   `filepath.Base(job.LibraryPath)` when LibraryPath is set, matching the
+   pattern used at the two call sites fixed in the prior session.
+2. `internal/api/handler.go` `ResubmitReviewEntry`: `intake.ParseFilename
+   (entry.Filename)` only ever populates `ParsedEpisodeTitle` (raw text
+   parsed from the filename) — never `EpisodeTitle`, which is the field
+   `ResolveLibraryPath`/`applyNamingTemplate` actually reads for the
+   `{episode_title}` naming-template token. This meant EVERY "Re-encode
+   Custom" resubmit for a TV show silently dropped the episode title,
+   independent of bug 1 above and independent of whether entry.Filename
+   itself was ever corrected. `ResolveReviewEntry` ("Pick Selected") mostly
+   avoided this because it explicitly overlays `req.Candidate.EpisodeTitle`
+   when the picked candidate supplies one — but had no fallback if it
+   didn't. Fixed: both handlers now do
+   `if parsed.EpisodeTitle == "" { parsed.EpisodeTitle =
+   parsed.ParsedEpisodeTitle }` (ResolveReviewEntry's fallback only applies
+   when the candidate also didn't supply one).
+
+User explicitly asked to fix these directly rather than switch to the
+originally-proposed physical-staging-folder design — confirmed via
+investigation that a staging folder would not have prevented either bug
+(bug 1 is a missed call site, bug 2 is a field-mapping gap in a handler),
+so the existing filename-carries-metadata architecture was kept and these
+two gaps closed instead.
+
+Verified: go build ./..., go vet ./..., go test ./... all pass (full
+suite, including the intake test added in the prior session). Did NOT add
+a new automated test for either fix — `ResubmitReviewEntry` only exercises
+the fixed code inside a goroutine gated on a real `ProbeFile` (ffprobe)
+call, matching the same "not worth the flakiness" reasoning from an
+earlier session's CURRENT_STATE.md entry for the same handler; the
+`ParsedEpisodeTitle` extraction itself is already covered by existing
+`internal/intake/parse_test.go` cases. NOT yet redeployed/re-verified
+against a live run — recommend rebuilding via update-mediaforge.ps1 and
+re-running a TV file through the exact failure path (SmartShrink fails
+quality bar → Review Queue → "Re-encode Custom" with a different quality
+tier) to confirm the final library path now has both the corrected year
+and the episode title.
+
+=== Prior session: fixed Review Queue duplicate entries losing metadata corrections ===
+
+User reported (via a task prompt describing symptoms, not a live repro): a
+file with a wrong year/season/episode in its filename gets corrected by
+intake's metadata lookup, then gets flagged as a duplicate at the library
+destination and routed to Review Queue — but the correction is lost, so a
+later "Re-encode Custom" reproduces the original wrong metadata in the
+output filename/path.
+
+Root cause, confirmed by reading the code (not a guess): ReviewEntry has no
+dedicated metadata fields — `ResolveReviewEntry`/`ResubmitReviewEntry`
+(internal/api/handler.go) already re-derive title/year/season/episode by
+calling `intake.ParseFilename(entry.Filename)`, i.e. the stored Filename
+string IS the metadata source of truth for resubmit/resolve (this was
+already the existing design, not something added this session). The bug:
+`entry.Filename` was always set via `filepath.Base(path)` — the raw,
+uncorrected source/output basename — even in the two places where
+corrected metadata was already known before routing to review:
+1. `internal/intake/watcher.go` `moveHEVCToLibrary`: `resolveAndGate`
+   merges corrected title/year/season/episode into `parsed`, but if a
+   duplicate is then found at the destination, `sendDuplicateToReviewQueue`
+   was called with the raw basename, discarding `parsed`.
+2. `internal/jobs/worker.go` `processJob` post-encode duplicate check
+   (~line 965): `job.LibraryPath` already has the corrected name baked in
+   (set during intake's `stageAndEnqueue`), but the review entry's filename
+   was built from `filepath.Base(finalPath)` — the transcoded file's name,
+   unchanged by encoding, so still the original uncorrected name.
+
+Fix — no new staging folder, no physical file move, no DB schema change
+(the initial task prompt proposed a `D:\MediaForge\ReviewQueue\` staging
+folder with files physically moved there; investigation showed the
+filename-as-metadata-carrier pattern already exists and just needed to
+actually carry the correction):
+- `internal/intake/watcher.go`: `sendToReviewQueue`/
+  `sendDuplicateToReviewQueue` gained a `correctedFilename string` param
+  (falls back to `filepath.Base(path)` when empty). `moveHEVCToLibrary` and
+  `stageAndEnqueue` now build one via the new `buildCorrectedFilename`
+  helper once `resolveAndGate` has succeeded, and pass it through at every
+  review-queue call site in those two functions. Call sites still inside
+  `resolveAndGate` itself pass `""` (no correction exists yet at that
+  point — that's the expected review case).
+- `internal/intake/naming.go`: new `buildCorrectedFilename(cfg, parsed,
+  ext)` — renders just the filename component (no folder) using the same
+  naming-template logic `resolveLibraryPath` already uses, so the result
+  round-trips cleanly through `ParseFilename`.
+- `internal/jobs/worker.go`: the two post-encode `SendDuplicateToReviewQueue`/
+  `SendToReviewQueue` calls now use `filepath.Base(job.LibraryPath)`
+  instead of `filepath.Base(finalPath)`.
+- New test: `internal/intake/watcher_test.go`
+  `TestMoveHEVCToLibrary_DuplicateReviewEntryUsesCorrectedFilename` —
+  reproduces the exact real-world case from an earlier session's TVDB
+  adjacent-season-offset bug (filename S48E30 "I Have Killed For You" →
+  corrected S49E30 "Her Last Call") with a pre-existing file at the
+  corrected destination, and asserts the resulting ReviewEntry.Filename
+  carries the correction and re-parses correctly via ParseFilename.
+
+Did NOT add a worker.go-level test for the post-encode duplicate branch —
+consistent with an earlier session's decision (see below), that code path
+only completes via a real ffmpeg transcode through the worker pool, so a
+meaningful test would need a real encode-to-completion run; the fix there
+is a one-line field swap (`finalPath` → `job.LibraryPath`) verified by
+reading the code, not by a new automated test.
+
+Verified: go build ./..., go vet ./..., go test ./... (full suite,
+including the new test) all pass. gofmt -l flags these files, but that is
+a pre-existing repo-wide CRLF-line-ending artifact (confirmed by running
+gofmt -l against untouched files too, e.g. internal/intake/parse.go) — not
+something introduced by or relevant to this change. NOT verified against a
+live intake run with a real duplicate file — recommend re-running the
+original 20/20-style scenario (or any file that hits a duplicate at the
+destination after a metadata correction) and confirming the Review Queue
+entry's displayed filename shows the corrected title/year/season/episode,
+then confirming "Re-encode Custom" from that entry lands at the corrected
+path.
+
+=== Prior session: fixed Review Queue custom re-encode never moving file to library ===
 
 User reported: TV shows re-encoded from the Review Queue via "Re-encode
 Custom" completed successfully (log showed "Job started"/"Job complete" with
