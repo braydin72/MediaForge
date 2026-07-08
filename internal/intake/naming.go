@@ -82,15 +82,25 @@ func applyNamingTemplate(tmpl string, parsed *ParsedFilename) string {
 }
 
 // sanitizePathComponent removes characters that are invalid in directory or file names.
+// Colons are replaced with " - " (matching common media-server naming conventions,
+// e.g. "9-1-1: Nashville" -> "9-1-1 - Nashville") rather than an underscore, since
+// a colon in a title is almost always a subtitle separator, not stray punctuation.
 func sanitizePathComponent(s string) string {
+	s = strings.ReplaceAll(s, ": ", " - ")
+	s = strings.ReplaceAll(s, ":", " - ")
+
 	var b strings.Builder
 	for _, r := range s {
 		switch r {
-		case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
+		case '/', '\\', '*', '?', '"', '<', '>', '|':
 			b.WriteRune('_')
 		default:
 			b.WriteRune(r)
 		}
 	}
-	return b.String()
+	result := b.String()
+	for strings.Contains(result, "  ") {
+		result = strings.ReplaceAll(result, "  ", " ")
+	}
+	return strings.TrimSpace(result)
 }
