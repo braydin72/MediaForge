@@ -1398,6 +1398,20 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fetch the entry so we can rebuild its intended library destination below —
+	// AddMultiple never sets Job.LibraryPath itself, so without this the worker's
+	// post-encode move step (worker.go processJob, gated on job.LibraryPath != "")
+	// silently never fires and the file is left in the staging/transcode folder.
+	entry, err := h.reviewStore.GetReviewEntry(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if entry == nil {
+		writeError(w, http.StatusNotFound, "review entry not found")
+		return
+	}
+
 	// Mark resolved and enqueue the file.
 	if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -1429,6 +1443,25 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 			for _, job := range addedJobs {
 				h.queue.SetJobOverrides(job.ID, req.EncodeSpeed, req.EncodeOutputFormat, req.EncodeQualityCRF)
 			}
+		}
+
+		// Rebuild the intended library destination from the entry's filename
+		// (same approach as ResolveReviewEntry) and set it on the new job(s) so
+		// the worker's post-encode move step actually fires on completion.
+		parsed := intake.ParseFilename(entry.Filename)
+		cfgFmt := h.cfg.OutputFormat
+		if req.EncodeOutputFormat != "" {
+			cfgFmt = req.EncodeOutputFormat
+		}
+		ext := ffmpeg.ResolveOutputFormat(req.OriginalPath, cfgFmt)
+		libraryPath := intake.ResolveLibraryPath(&h.cfg.Intake, &parsed, "."+ext)
+		if libraryPath == "" {
+			logger.Warn("Review resubmit: could not rebuild library path, file will not auto-move on completion",
+				"entry_id", id, "filename", entry.Filename)
+			return
+		}
+		for _, job := range addedJobs {
+			h.queue.SetLibraryPath(job.ID, libraryPath)
 		}
 	}()
 

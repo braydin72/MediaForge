@@ -1,6 +1,46 @@
 CURRENT STATE NOTE
 
-=== Latest session: fixed colon-in-title sanitization (":" -> "_") for library naming ===
+=== Latest session: fixed Review Queue custom re-encode never moving file to library ===
+
+User reported: TV shows re-encoded from the Review Queue via "Re-encode
+Custom" completed successfully (log showed "Job started"/"Job complete" with
+normal duration/saved-bytes) but the file was left in the staging folder
+(D:\MediaForge\Transcode\) instead of landing in the library.
+
+Root cause: the worker's post-encode library-move step
+(internal/jobs/worker.go processJob, ~line 957) is gated on `job.LibraryPath
+!= ""`. That field is set in exactly one place in the codebase —
+internal/intake/watcher.go, during the normal file-watcher intake flow.
+ResubmitReviewEntry (internal/api/handler.go, the only handler behind Review
+Queue re-encodes since RetryReviewEntry/"Re-add" were removed in an earlier
+session) re-enqueues the job via queue.AddMultiple but never calls
+queue.SetLibraryPath — so every Review Queue resubmit (not just ones using
+custom CRF/speed/format overrides) skipped the library move silently. The
+"Job complete" log line fires unconditionally regardless of whether the move
+happened, which is why this looked like success in the logs.
+
+Fix (internal/api/handler.go ResubmitReviewEntry): now fetches the
+ReviewEntry up front (previously only req.OriginalPath/PresetID were used),
+and after AddMultiple, rebuilds the intended library path the same way
+ResolveReviewEntry already does — intake.ParseFilename(entry.Filename) +
+intake.ResolveLibraryPath(&h.cfg.Intake, &parsed, ext) — with the output
+extension resolved via ffmpeg.ResolveOutputFormat using the same
+config-then-override precedence the worker uses for OutputFormat. Calls
+queue.SetLibraryPath(job.ID, libraryPath) on each resubmitted job. If the
+library path can't be rebuilt (e.g. unparseable filename), logs a warning
+and leaves the job to complete without an auto-move rather than failing the
+resubmit outright.
+
+Verified: go build ./..., go vet ./..., go test ./... (full suite) all pass.
+Did NOT add a new automated test — ResubmitReviewEntry probes the file via a
+real ffprobe call and the job only completes via a real ffmpeg transcode
+through the worker pool, so a meaningful test would require a real
+encode-to-completion run rather than a mock; considered not worth the
+flakiness for this fix. Recommend the user re-run "Re-encode Custom" on a
+real Review Queue TV show entry and confirm the file actually lands in the
+configured TV library path (not just that the job logs "Job complete").
+
+=== Prior session: fixed colon-in-title sanitization (":" -> "_") for library naming ===
 
 User reported: shows like "9-1-1: Nashville" were getting library folder/file
 names like "9-1-1_ Nashville" instead of the expected "9-1-1 - Nashville".

@@ -5,9 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [1.2.1] - 2026-07-08
 
 ### Fixed
+- Review Queue "Re-encode Custom" (`ResubmitReviewEntry`) completed encodes
+  successfully but never moved the output into the library — the file was
+  left behind in the staging/transcode folder. Root cause: the worker's
+  post-encode library-move step (`internal/jobs/worker.go`) is gated on
+  `Job.LibraryPath`, which is only ever set by the file-watcher intake path
+  (`internal/intake/watcher.go`); the Review Queue resubmit path re-enqueued
+  jobs via `AddMultiple` but never set `LibraryPath` on them. Fix rebuilds
+  the intended library path from the review entry's filename (same approach
+  as `ResolveReviewEntry`) and calls `queue.SetLibraryPath` on the resubmitted
+  job(s).
+  - Files modified: internal/api/handler.go (ResubmitReviewEntry)
 - Colon character in show/movie titles (e.g. `9-1-1: Nashville`) was being
   replaced with an underscore (`9-1-1_ Nashville`) when building library
   folder/file paths, instead of the intended space-dash separator. Colons
