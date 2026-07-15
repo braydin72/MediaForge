@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-07-15
+
+### Fixed
+- Review Queue manual search treated queries containing a season/episode
+  pattern (e.g. "MST3K - S04E23 - Bride of the Monster") as a movie lookup,
+  because `reviewDoSearch()` (`web/templates/index.html`) never extracted
+  season/episode from the query string, even though the backend's
+  `SearchReviewEntry` handler (`internal/api/handler.go`) already supports
+  `season`/`episode` query params and sets `IsTV = true` when they're
+  present. Fix: `reviewDoSearch()` now matches the query against
+  `[Ss](\d{1,2})[Ee](\d{1,2})`; on a match it appends `season`/`episode`
+  params and forces `type=tv` (overriding the user-selected type dropdown).
+  Files modified: `web/templates/index.html`.
+- Second, deeper bug in the same feature (found via real log after the fix
+  above): even with `season`/`episode`/`type=tv` correctly sent,
+  `SearchReviewEntry` (`internal/api/handler.go`) used the raw `q` string
+  verbatim as the TMDB/TVDB search title — e.g. it searched TMDB/TVDB for
+  the literal string "Mystery Science Theater 3000 - S04E23 - Bride of the
+  Monster" instead of just "Mystery Science Theater 3000", so no candidates
+  were ever found. The normal intake pipeline avoids this because it always
+  calls `intake.ParseFilename()` first to split title from season/episode;
+  the manual-search handler never did. Fix: `SearchReviewEntry` now runs
+  `q` through `intake.ParseFilename()` and uses its extracted `Title` (and
+  `Year`/`Season`/`Episode`/`IsTV` as fallbacks when the corresponding query
+  param wasn't supplied) instead of `q` itself. Files modified:
+  `internal/api/handler.go`.
+- Third bug in the same feature: after the fixes above, manual search found
+  the correct TV episode candidate, but clicking "Pick Selected" failed with
+  "could not build library path ... (missing title/season?)". Root cause:
+  the candidate JSON built in `SearchReviewEntry` never included the
+  resolved `season`/`episode` (even though `intake.LookupResult` already
+  carries them), so `ResolveReviewEntry`'s overlay had nothing to use except
+  whatever `intake.ParseFilename(entry.Filename)` could extract from the
+  Review Queue entry's *original* stored filename — which is frequently
+  unparseable (that's often why the entry needed manual search in the first
+  place), yielding `Season == 0` and tripping `resolveLibraryPath`'s TV
+  guard. Fix: `SearchReviewEntry`'s candidate JSON now includes `season` and
+  `episode` from the lookup result, so the picked candidate itself supplies
+  them regardless of the original filename. Files modified:
+  `internal/api/handler.go`.
+
 ## [1.2.2] - 2026-07-08
 
 ### Fixed

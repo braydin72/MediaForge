@@ -1,6 +1,88 @@
 CURRENT STATE NOTE
 
-=== Latest session (cont.): two more real-log-confirmed gaps in the metadata-correction fix ===
+=== Latest session: manual search in Review Queue didn't extract season/episode for TV queries ===
+
+Symptom: searching "MST3K - S04E23 - Bride of the Monster" in a Review Queue
+entry's manual search dialog returned a movie-search error ("no TMDB movie
+found for..."). Root cause: `reviewDoSearch()` (web/templates/index.html)
+sent the raw query string as `q` plus `year`/`type` but never parsed out a
+season/episode pattern, so the backend's `SearchReviewEntry`
+(internal/api/handler.go) defaulted to a movie lookup — that handler already
+supports `season`/`episode` params and sets `IsTV = true` when present, this
+was purely a frontend gap.
+
+Fix (web/templates/index.html, reviewDoSearch() only): matches the query
+against `/[Ss](\d{1,2})[Ee](\d{1,2})/`; on match appends `season`/`episode`
+params (parsed as ints) and forces `type = 'tv'`, overriding whatever the
+type dropdown had selected. Full query string is left intact — backend
+handles it as before.
+
+Files modified: web/templates/index.html, CHANGELOG.md.
+
+User re-tested against a live deployed instance and reported it still
+failed, with a real debug log: `TMDB: TV search query="Mystery Science
+Theater 3000 - S04E23 - Bride of the Monster"` /
+`TMDB: no TV candidates returned` — same full string. Traced the second,
+deeper bug: `SearchReviewEntry` (internal/api/handler.go) used the raw `q`
+query param VERBATIM as `parsed.Title` for the TMDB/TVDB search — it never
+parsed the query at all, so `season`/`episode`/`type=tv` being sent
+correctly (part 1's fix) didn't matter; the search title itself still
+contained the whole "Title - SxxExx - Episode Title" string, which no
+TMDB/TVDB search matches. The user separately confirmed TVDB lookup itself
+works correctly for this exact show/episode — renaming the file and letting
+it re-enter the normal intake pipeline correctly identified and moved it
+via TVDB (S04E23 "Bride of the Monster", confidence=0.90) — because that
+path calls `intake.ParseFilename()` on the filename first, which correctly
+splits "Mystery Science Theater 3000" (title) from "S04E23" and "Bride of
+the Monster" (episode title). `SearchReviewEntry` never did this.
+
+Fix (internal/api/handler.go, SearchReviewEntry): now runs `q` through
+`intake.ParseFilename(q)` and uses the resulting `Title` as the search
+title (falling back to raw `q` only if parsing yields an empty title).
+`Year`/`Season`/`Episode`/`IsTV` from the parse are used as fallbacks only
+when the corresponding query param wasn't already supplied by the frontend
+(explicit params from the form still win). No frontend change needed for
+this part — `reviewDoSearch()` already sends the full query as `q`, per the
+original task's explicit instruction to keep the query string intact and
+let the backend handle it; that assumption just wasn't true until this fix.
+
+Files modified: internal/api/handler.go, CHANGELOG.md.
+
+User rebuilt/redeployed and confirmed this part worked — search now returns
+a real candidate. But clicking "Pick Selected" then failed: "Resolve
+failed: could not build library path for "Mystery Science Theater 3000"
+(missing title/season?)". Third bug in this same feature, found by tracing
+ResolveReviewEntry (internal/api/handler.go): it seeds `parsed` from
+`intake.ParseFilename(entry.Filename)` (the Review Queue entry's ORIGINAL
+stored filename, not the search query), then overlays only the fields the
+picked candidate JSON supplies. `SearchReviewEntry`'s candidate JSON never
+included `season`/`episode` (checked: `intake.LookupResult` already carries
+both, populated by TVDB/TMDB — the JSON builder in SearchReviewEntry just
+never surfaced them). So the candidate overlay had nothing to give
+`parsed.Season`, leaving whatever `ParseFilename(entry.Filename)` produced
+from the entry's original filename — which, for entries that needed manual
+search in the first place, is often exactly the case where the original
+filename ISN'T cleanly parseable, so Season came out 0.
+`resolveLibraryPath` (internal/intake/naming.go) refuses to build a TV path
+when `parsed.Season == 0`, which is the exact error string the user saw.
+
+Fix (internal/api/handler.go, SearchReviewEntry): candidate JSON now
+includes `"season": result.Season, "episode": result.Episode`. No other
+handler needed changes — `ResolveReviewEntry`'s existing overlay logic
+already does `if req.Candidate.Season > 0 { parsed.Season = ... }` /
+same for Episode; it just never received nonzero values to overlay before
+this fix.
+
+Files modified: internal/api/handler.go, CHANGELOG.md.
+
+Verified: go build ./..., go vet ./..., go test ./... all pass (full
+suite). NOT re-verified against a live instance this round — recommend the
+user rebuild/redeploy once more, redo the same manual search, click "Pick
+Selected", and confirm the file actually moves to the library this time
+(check for a destination path in the response/log, not just the absence of
+an error).
+
+=== Prior session (cont.): two more real-log-confirmed gaps in the metadata-correction fix ===
 
 User re-deployed the fix below via update-mediaforge.ps1, then hit the exact
 same symptom on a real run and reported it back with a real log excerpt.

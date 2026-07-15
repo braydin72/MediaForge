@@ -1494,13 +1494,32 @@ func (h *Handler) SearchReviewEntry(w http.ResponseWriter, r *http.Request) {
 	episode, _ := strconv.Atoi(r.URL.Query().Get("episode"))
 	mediaType := r.URL.Query().Get("type")
 
+	// q may be a raw filename-style query (e.g. "Mystery Science Theater 3000 -
+	// S04E23 - Bride of the Monster") rather than a bare title — reuse the same
+	// filename parser the intake pipeline uses so the search title actually
+	// matches the show/movie name instead of the whole query string.
+	fromQ := intake.ParseFilename(q)
+	title := fromQ.Title
+	if title == "" {
+		title = q
+	}
+	if year == 0 {
+		year = fromQ.Year
+	}
+	if season == 0 {
+		season = fromQ.Season
+	}
+	if episode == 0 {
+		episode = fromQ.Episode
+	}
+
 	parsed := &intake.ParsedFilename{
-		Title:   q,
+		Title:   title,
 		Year:    year,
 		Season:  season,
 		Episode: episode,
 	}
-	if mediaType == "tv" || (mediaType == "" && (season > 0 || episode > 0)) {
+	if mediaType == "tv" || (mediaType == "" && (season > 0 || episode > 0 || fromQ.IsTV)) {
 		parsed.IsTV = true
 		parsed.MediaType = "tv"
 	} else {
@@ -1532,6 +1551,8 @@ func (h *Handler) SearchReviewEntry(w http.ResponseWriter, r *http.Request) {
 			"title":            result.Title,
 			"year":             result.Year,
 			"runtime_minutes":  result.RuntimeMinutes,
+			"season":           result.Season,
+			"episode":          result.Episode,
 			"episode_title":    result.EpisodeTitle,
 			"episode_air_date": result.EpisodeAirDate,
 			"poster_path":      result.PosterPath,
