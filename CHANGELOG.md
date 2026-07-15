@@ -8,6 +8,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Encode-complete/failed Pushover and email notifications were sent once per
+  connected SSE client (browser tab), not once per event — `JobStream`
+  (`internal/api/sse.go`) runs its handler loop once per connection to
+  `/api/jobs/stream`, and `dispatchEncodeEvent` was called directly inside
+  that per-connection loop with no dedup, so a user with e.g. 3 open browser
+  tabs got 3 identical notifications per encode-complete/failed event. Fix:
+  `jobs.Queue` gained an `OnTerminalEvent` callback invoked exactly once per
+  `broadcast()` call, regardless of subscriber count; `dispatchEncodeEvent`
+  is now wired there (in `NewHandler`) instead of inside the per-connection
+  SSE loop. Files modified: `internal/jobs/queue.go`,
+  `internal/api/handler.go`, `internal/api/sse.go`,
+  `internal/jobs/queue_test.go` (new regression test with 3 simulated
+  subscribers asserting exactly 1 dispatch).
+
+### Changed
+- SmartShrink previously routed any file whose content never cleared the
+  configured VMAF tier threshold (a hard quality ceiling, e.g. from film
+  grain/video noise) straight to Review Queue via "no viable encode found",
+  with no size information — even when a smaller file existed that cost no
+  additional measurable quality. Root cause: `interpolatedSearchCRF`'s
+  failure handling only ever narrows toward `qRange.Min` (larger files) once
+  it decides quality is insufficient, so the best-effort CRF it lands on is
+  biased toward near-lossless regardless of whether a higher CRF would have
+  scored almost identically; the size-retry loop then compared every step
+  against the absolute tier threshold, which content already known to be
+  below that threshold can never pass. Now: when analysis returns a
+  best-effort result (`AnalysisResult.BestEffort`), a new plateau-fallback
+  probes a few CRF steps upward and accepts any step within 2.0 VMAF points
+  of the original best-effort ceiling (`bestEffortFallbackTolerance` in
+  `internal/ffmpeg/vmaf/search.go`), and the worker's size-retry loop
+  (`internal/jobs/worker.go`) steps using that same tolerance instead of the
+  absolute threshold. The job completes automatically with the
+  closest-achievable-quality, smallest-available file instead of failing to
+  Review Queue — this is a deliberate, explicit exception to the "every
+  failure routes to Review Queue" rule for this one case, confirmed with the
+  user, since a content quality ceiling isn't something a human decision can
+  fix. Clearly logged as a fallback (`ceiling_vmaf`, `tier_threshold`, chosen
+  CRF) so it's distinguishable from a normal threshold-met accept. The
+  existing "still not smaller than source" safety net is unchanged and still
+  routes to Review Queue. Files modified: `internal/ffmpeg/vmaf/search.go`,
+  `internal/ffmpeg/vmaf/vmaf.go`, `internal/ffmpeg/vmaf/analyze.go`,
+  `internal/jobs/worker.go`, `internal/ffmpeg/vmaf/search_test.go`.
+
+### Fixed
+- SmartShrink VMAF sampling used fixed positions (25%/50%/75% of duration)
+  for every file. Real production logs showed the 50% sample scoring 15-30
+  VMAF points above the other two on nearly every episode of the same show
+  (e.g. `[75.8, 96.3, 74.9]`) — a recurring low-motion structural element
+  (recap card/bumper, common in syndicated TV) at a consistent relative
+  timestamp inflated the averaged score, which is very likely why the
+  interpolated CRF search bottomed out near CRF 16 (near-lossless, huge
+  first-try output) instead of a size-friendlier CRF that still meets the
+  quality floor on the actual content. `SamplePositions` (`internal/ffmpeg/vmaf/sample.go`)
+  now jitters each of the 3 sample positions within ±8% of its anchor,
+  seeded deterministically per input file path (`fnv` hash + `math/rand`),
+  so re-analyzing the same file is reproducible but different episodes of a
+  series no longer all land on the same relative timestamp. Files modified:
+  `internal/ffmpeg/vmaf/sample.go`, `internal/ffmpeg/vmaf/analyze.go`,
+  `internal/jobs/worker.go`, `internal/ffmpeg/vmaf/sample_test.go`.
+
 - LLM verification pass (triggered when TVDB/TMDB confidence lands between
   `review_threshold` and `confidence_threshold`) was silent in the logs on
   success — `LLMClient.Verify()` never logged, so there was no way to tell

@@ -30,11 +30,12 @@ type QualityRange struct {
 
 // SearchResult holds the result of the search
 type SearchResult struct {
-	Quality    int     // CRF/CQ/QP value
-	Modifier   float64 // Bitrate modifier (for VideoToolbox)
-	VMafScore  float64 // Achieved VMAF score
-	Iterations int     // Number of quality levels tested (each test encodes all samples)
-	BestEffort bool    // True if no CRF met the threshold; Quality/VMafScore reflect best found
+	Quality        int     // CRF/CQ/QP value
+	Modifier       float64 // Bitrate modifier (for VideoToolbox)
+	VMafScore      float64 // Achieved VMAF score
+	Iterations     int     // Number of quality levels tested (each test encodes all samples)
+	BestEffort     bool    // True if no CRF met the threshold; Quality/VMafScore reflect best found
+	BestEffortBase int     // Original best-effort CRF before plateau fallback climbed higher (0 if unchanged/not applicable)
 }
 
 // EncodeSampleFunc is a function that encodes a sample at the given quality
@@ -182,6 +183,57 @@ type crfAttempt struct {
 	score float64
 }
 
+// bestEffortFallbackTolerance is how far (in VMAF points) a higher CRF may
+// score below a best-effort ceiling and still be treated as "no real quality
+// cost" — used to claim free size savings when content has a hard VMAF
+// ceiling below the tier's threshold (see applyBestEffortFallback).
+const bestEffortFallbackTolerance = 2.0
+
+// bestEffortFallbackMaxProbes caps how many extra CRF steps are probed
+// looking for plateau-edge size savings beyond a best-effort result.
+const bestEffortFallbackMaxProbes = 3
+
+// bestEffortFallbackStep is the CRF increment used for each plateau probe.
+const bestEffortFallbackStep = 2
+
+// applyBestEffortFallback walks CRF upward (more compression, smaller file)
+// from a best-effort attempt that never cleared the VMAF threshold, looking
+// for free size reduction. Content with a hard VMAF ceiling (e.g. film
+// grain/video noise no CRF can fully preserve) often scores nearly the same
+// across a range of CRFs, but interpolatedSearchCRF's failure handling only
+// ever narrows toward minCRF (larger files) once it decides quality is
+// insufficient — it never tests whether a smaller file would cost anything.
+// This fills that gap: returns the highest CRF within
+// bestEffortFallbackTolerance VMAF points of the original best-effort score,
+// or the original attempt unchanged if even the first probe step drops
+// quality meaningfully.
+func applyBestEffortFallback(s *sampleScorer, best crfAttempt, maxCRF int) crfAttempt {
+	current := best
+	for i := 0; i < bestEffortFallbackMaxProbes; i++ {
+		candidateCRF := current.crf + bestEffortFallbackStep
+		if candidateCRF > maxCRF {
+			break
+		}
+		score, err := s.scoreCRF(candidateCRF)
+		if err != nil {
+			break
+		}
+		if bestEffortFallbackAccepts(best.score, score) {
+			current = crfAttempt{crf: candidateCRF, score: score}
+		} else {
+			break
+		}
+	}
+	return current
+}
+
+// bestEffortFallbackAccepts reports whether a candidate CRF's score is close
+// enough to the original best-effort score to count as "no real quality
+// cost" — i.e. within bestEffortFallbackTolerance VMAF points.
+func bestEffortFallbackAccepts(bestScore, candidateScore float64) bool {
+	return bestScore-candidateScore <= bestEffortFallbackTolerance
+}
+
 // interpolatedSearchCRF finds optimal CRF using ab-av1 style interpolated search.
 // Algorithm: Start with midpoint, track all attempts, use interpolation to converge.
 // For CRF: lower value = better quality, higher value = more compression.
@@ -249,7 +301,8 @@ func interpolatedSearchCRF(s *sampleScorer, qRange QualityRange, threshold float
 			if crf == minCRF {
 				// Even best quality fails — use best-effort result
 				if best := findAbsoluteBestCRFAttempt(attempts); best != nil {
-					return &SearchResult{Quality: best.crf, VMafScore: best.score, Iterations: s.testCount, BestEffort: true}, nil
+					fallback := applyBestEffortFallback(s, *best, maxCRF)
+					return &SearchResult{Quality: fallback.crf, VMafScore: fallback.score, Iterations: s.testCount, BestEffort: true, BestEffortBase: best.crf}, nil
 				}
 				return nil, nil
 			}
@@ -268,7 +321,8 @@ func interpolatedSearchCRF(s *sampleScorer, qRange QualityRange, threshold float
 				}
 				// Both adjacent points fail — use best-effort result
 				if best := findAbsoluteBestCRFAttempt(attempts); best != nil {
-					return &SearchResult{Quality: best.crf, VMafScore: best.score, Iterations: s.testCount, BestEffort: true}, nil
+					fallback := applyBestEffortFallback(s, *best, maxCRF)
+					return &SearchResult{Quality: fallback.crf, VMafScore: fallback.score, Iterations: s.testCount, BestEffort: true, BestEffortBase: best.crf}, nil
 				}
 				return nil, nil
 			}
@@ -306,7 +360,8 @@ func interpolatedSearchCRF(s *sampleScorer, qRange QualityRange, threshold float
 			}
 			// No threshold-meeting result — use best-effort
 			if absBest := findAbsoluteBestCRFAttempt(attempts); absBest != nil {
-				return &SearchResult{Quality: absBest.crf, VMafScore: absBest.score, Iterations: s.testCount, BestEffort: true}, nil
+				fallback := applyBestEffortFallback(s, *absBest, maxCRF)
+				return &SearchResult{Quality: fallback.crf, VMafScore: fallback.score, Iterations: s.testCount, BestEffort: true, BestEffortBase: absBest.crf}, nil
 			}
 			return nil, nil
 		}
@@ -323,7 +378,8 @@ func interpolatedSearchCRF(s *sampleScorer, qRange QualityRange, threshold float
 	}
 	// No threshold-meeting result — use best-effort
 	if absBest := findAbsoluteBestCRFAttempt(attempts); absBest != nil {
-		return &SearchResult{Quality: absBest.crf, VMafScore: absBest.score, Iterations: s.testCount, BestEffort: true}, nil
+		fallback := applyBestEffortFallback(s, *absBest, maxCRF)
+		return &SearchResult{Quality: fallback.crf, VMafScore: fallback.score, Iterations: s.testCount, BestEffort: true, BestEffortBase: absBest.crf}, nil
 	}
 	return nil, nil
 }

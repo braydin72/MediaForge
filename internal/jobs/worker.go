@@ -77,6 +77,13 @@ const (
 	vmafExcellent  = 94.0
 )
 
+// smartShrinkFallbackTolerance is how far (in VMAF points) a size-retry step
+// may score below the best-effort ceiling and still be accepted, when the
+// content never clears the tier's threshold at any CRF (see
+// runSmartShrinkAnalysis's bestEffort return value). Mirrors
+// vmaf.bestEffortFallbackTolerance's rationale.
+const smartShrinkFallbackTolerance = 2.0
+
 // runningJob tracks a job being processed by a worker.
 // Used by Resize and Pause to collect and manage running jobs.
 type runningJob struct {
@@ -632,6 +639,12 @@ func (w *Worker) processJob(job *Job) {
 	qualityHEVC := w.cfg.QualityHEVC
 	qualityAV1 := w.cfg.QualityAV1
 	var qualityMod float64
+	// Set by SmartShrink analysis; consumed by the size-retry loop below to
+	// apply tolerance-based stepping (relative to this ceiling) instead of
+	// the tier's absolute threshold when the content has a hard VMAF ceiling
+	// it can never clear regardless of CRF.
+	var smartShrinkBestEffort bool
+	var smartShrinkVMafCeiling float64
 
 	// Per-job CRF override takes precedence over global config for Compress presets.
 	if job.OverrideCRF > 0 && !preset.IsSmartShrink {
@@ -650,7 +663,8 @@ func (w *Worker) processJob(job *Job) {
 		var selectedCRF int
 		var vmafScore float64
 		var err error
-		shouldSkip, skipReason, selectedCRF, qualityMod, vmafScore, err = w.pool.runSmartShrinkAnalysis(jobCtx, job, preset)
+		shouldSkip, skipReason, selectedCRF, qualityMod, vmafScore, smartShrinkBestEffort, err = w.pool.runSmartShrinkAnalysis(jobCtx, job, preset)
+		smartShrinkVMafCeiling = vmafScore
 		if err != nil {
 			// Check if context was cancelled (user cancel or shutdown)
 			if jobCtx.Err() != nil {
@@ -872,9 +886,22 @@ func (w *Worker) processJob(job *Job) {
 			qRange := ffmpeg.GetQualityRange(preset.Encoder, preset.Codec)
 			threshold := getSmartShrinkThreshold(job.SmartShrinkQuality)
 			bestResult := result
+			bestCRF := qualityHEVC
 			currentCRF := qualityHEVC
 			if qualityAV1 > 0 && currentCRF == 0 {
 				currentCRF = qualityAV1
+				bestCRF = currentCRF
+			}
+
+			if smartShrinkBestEffort {
+				// Phase-1 analysis never found a CRF clearing the tier's VMAF
+				// threshold for this content (a hard quality ceiling, e.g. from
+				// film grain/video noise) — comparing further steps against that
+				// absolute threshold would reject everything. Fall back to
+				// tolerance-based stepping relative to the ceiling already found,
+				// to claim any size savings that don't cost additional quality.
+				logger.Info("SmartShrink: quality tier unreachable for this content, falling back to closest-achievable-quality size optimization",
+					"job_id", job.ID, "ceiling_vmaf", smartShrinkVMafCeiling, "tier_threshold", threshold)
 			}
 
 			for jobCtx.Err() == nil {
@@ -889,7 +916,14 @@ func (w *Worker) processJob(job *Job) {
 					logger.Warn("SmartShrink retry VMAF check failed", "job_id", job.ID, "error", checkErr)
 					break
 				}
-				if sampleScore < threshold {
+
+				if smartShrinkBestEffort {
+					if smartShrinkVMafCeiling-sampleScore > smartShrinkFallbackTolerance {
+						logger.Info("SmartShrink fallback: additional compression would exceed quality tolerance",
+							"job_id", job.ID, "crf", currentCRF, "vmaf", sampleScore, "ceiling", smartShrinkVMafCeiling)
+						break
+					}
+				} else if sampleScore < threshold {
 					logger.Info("SmartShrink retry: VMAF would fall below threshold",
 						"job_id", job.ID, "crf", currentCRF, "vmaf", sampleScore, "threshold", threshold)
 					break
@@ -908,12 +942,20 @@ func (w *Worker) processJob(job *Job) {
 
 				if retryResult.OutputSize < bestResult.OutputSize {
 					bestResult = retryResult
+					bestCRF = currentCRF
 				}
 				if float64(retryResult.OutputSize) <= float64(inputSize)*sizeTarget {
 					break // achieved 40% reduction target
 				}
 			}
 			result = bestResult
+
+			if smartShrinkBestEffort && float64(result.OutputSize) < float64(inputSize) {
+				logger.Info("SmartShrink: accepted best-achievable-quality fallback",
+					"job_id", job.ID, "crf", bestCRF, "vmaf_ceiling", smartShrinkVMafCeiling,
+					"tier_threshold", threshold, "output_size", util.FormatBytes(result.OutputSize),
+					"input_size", util.FormatBytes(inputSize))
+			}
 
 			// If best result is still >= source: no viable encode, route to Review Queue
 			if float64(result.OutputSize) >= float64(inputSize) {
@@ -1050,12 +1092,14 @@ func shouldRetryWithSoftwareDecode(encoder ffmpeg.HWAccel) bool {
 }
 
 // runSmartShrinkAnalysis performs VMAF analysis and returns the optimal quality settings.
-// Returns (shouldSkip, skipReason, selectedCRF, qualityMod, vmafScore, error)
-func (wp *WorkerPool) runSmartShrinkAnalysis(ctx context.Context, job *Job, preset *ffmpeg.Preset) (bool, string, int, float64, float64, error) {
+// Returns (shouldSkip, skipReason, selectedCRF, qualityMod, vmafScore, bestEffort, error).
+// bestEffort is true when no CRF cleared the tier's VMAF threshold — vmafScore is then
+// the best achievable ceiling, not a threshold-clearing score.
+func (wp *WorkerPool) runSmartShrinkAnalysis(ctx context.Context, job *Job, preset *ffmpeg.Preset) (bool, string, int, float64, float64, bool, error) {
 	// SmartShrink does not support HDR content — VMAF is validated for SDR only.
 	// Check before acquiring analysis slot so HDR jobs don't block SDR analyses.
 	if job.IsHDR {
-		return true, "SmartShrink does not support HDR content. Use a Compress preset or tonemap to SDR first", 0, 0, 0, nil
+		return true, "SmartShrink does not support HDR content. Use a Compress preset or tonemap to SDR first", 0, 0, 0, false, nil
 	}
 
 	// Update phase immediately so UI shows "Analyzing" while waiting for slot
@@ -1074,7 +1118,7 @@ func (wp *WorkerPool) runSmartShrinkAnalysis(ctx context.Context, job *Job, pres
 		// At limit, wait with context check
 		select {
 		case <-ctx.Done():
-			return false, "", 0, 0, 0, ctx.Err()
+			return false, "", 0, 0, 0, false, ctx.Err()
 		case <-time.After(100 * time.Millisecond):
 			// Retry
 		}
@@ -1089,7 +1133,7 @@ func (wp *WorkerPool) runSmartShrinkAnalysis(ctx context.Context, job *Job, pres
 	// Check video duration
 	duration := time.Duration(job.Duration) * time.Millisecond
 	if duration < 5*time.Second {
-		return true, "Video too short for analysis", 0, 0, 0, nil
+		return true, "Video too short for analysis", 0, 0, 0, false, nil
 	}
 
 	// Get quality range for this encoder
@@ -1134,21 +1178,21 @@ func (wp *WorkerPool) runSmartShrinkAnalysis(ctx context.Context, job *Job, pres
 	// Run analysis with threshold
 	result, err := analyzer.Analyze(ctx, job.InputPath, duration, job.Height, qRange, threshold, encodeSample)
 	if err != nil {
-		return false, "", 0, 0, 0, fmt.Errorf("VMAF analysis failed: %w", err)
+		return false, "", 0, 0, 0, false, fmt.Errorf("VMAF analysis failed: %w", err)
 	}
 
 	if result.ShouldSkip {
-		return true, result.SkipReason, 0, 0, 0, nil
+		return true, result.SkipReason, 0, 0, 0, false, nil
 	}
 
-	return false, "", result.OptimalCRF, result.QualityMod, result.VMafScore, nil
+	return false, "", result.OptimalCRF, result.QualityMod, result.VMafScore, result.BestEffort, nil
 }
 
 // quickSampleVMAF encodes one video sample at the given CRF and returns its VMAF score.
 // Used by the SmartShrink retry loop to verify quality before committing to a full re-encode.
 func (w *Worker) quickSampleVMAF(ctx context.Context, job *Job, preset *ffmpeg.Preset, crf int) (float64, error) {
 	duration := time.Duration(job.Duration) * time.Millisecond
-	positions := vmaf.SamplePositions(duration)
+	positions := vmaf.SamplePositions(duration, job.InputPath)
 	if len(positions) == 0 {
 		return 0, fmt.Errorf("no sample positions available")
 	}
@@ -1210,7 +1254,7 @@ func (wp *WorkerPool) runFixedReductionAnalysis(ctx context.Context, job *Job, p
 	}
 	defer os.RemoveAll(analysisDir)
 
-	positions := vmaf.SamplePositions(duration)
+	positions := vmaf.SamplePositions(duration, job.InputPath)
 	refSamples, err := vmaf.ExtractSamples(ctx, wp.cfg.FFmpegPath, job.InputPath, analysisDir, duration, positions)
 	if err != nil {
 		return false, "", 0, fmt.Errorf("extract samples: %w", err)

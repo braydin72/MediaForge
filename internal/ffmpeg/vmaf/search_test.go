@@ -305,6 +305,36 @@ func TestVmafLerpCRFMidpointFallback(t *testing.T) {
 	}
 }
 
+// TestBestEffortFallbackAccepts covers the tolerance comparison used by
+// applyBestEffortFallback to decide whether stepping to a higher (smaller
+// file) CRF costs any real quality relative to the original best-effort
+// ceiling.
+func TestBestEffortFallbackAccepts(t *testing.T) {
+	tests := []struct {
+		name           string
+		bestScore      float64
+		candidateScore float64
+		want           bool
+	}{
+		{"identical score", 78.7, 78.7, true},
+		{"candidate slightly higher", 78.7, 80.9, true},
+		{"within tolerance", 78.7, 76.8, true},           // 1.9 pt drop, tolerance 2.0
+		{"exactly at tolerance", 80.0, 78.0, true},        // 2.0 pt drop
+		{"just over tolerance", 80.0, 77.9, false},        // 2.1 pt drop
+		{"large drop rejected", 90.0, 70.0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := bestEffortFallbackAccepts(tt.bestScore, tt.candidateScore)
+			if got != tt.want {
+				t.Errorf("bestEffortFallbackAccepts(%v, %v) = %v, want %v",
+					tt.bestScore, tt.candidateScore, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestVmafLerpModMidpointFallback specifically tests the zero/negative score diff fallback
 func TestVmafLerpModMidpointFallback(t *testing.T) {
 	// When scores are equal, should return midpoint
