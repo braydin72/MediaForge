@@ -1,6 +1,47 @@
 CURRENT STATE NOTE
 
-=== Latest session: manual search in Review Queue didn't extract season/episode for TV queries ===
+=== Latest session: LLM verification pass had no logging ===
+
+User was debugging why a low-confidence TVDB match (e.g. "MST3K (1989) -
+S13E12 - The Bubble.mp4", confidence=0.60) moved straight to the library
+instead of Review Queue, and initially misread this as the LLM-verification
+gate (review_threshold..confidence_threshold gray zone, defaults 0.60/0.85)
+being skipped. Root cause: it wasn't skipped — `LLMClient.Verify()`
+(internal/intake/llm.go) never logged anything on success, and the
+`llmResult.Disabled` branch in `resolveAndGate()` (internal/intake/watcher.go)
+also logged nothing, so there was no way to tell from the log file whether
+the LLM was queried, or what it returned, when a low-confidence match got
+silently accepted (LLM confidence overwrites the deterministic score at
+`result.Confidence = llmResult.Confidence`).
+
+Fix (internal/intake/watcher.go, resolveAndGate only): added
+`logger.Info("Intake: querying LLM for verification", ...)` immediately
+before the `Verify()` call, `logger.Info("Intake: LLM verification result",
+...)` (candidate_id, confidence, reasoning) immediately after a successful
+call, and a `logger.Warn` for the previously-silent `llmResult.Disabled`
+(LLM not configured) case. No behavior change — logging only.
+
+Files modified: internal/intake/watcher.go, CHANGELOG.md.
+
+Verified: go build ./... and go test ./internal/intake/... pass. User
+re-tested against a live instance by renaming a file into the gray zone
+(confidence 0.60) and confirmed the new log lines appear correctly:
+"Intake: querying LLM for verification" followed by "Intake: LLM
+verification result" with candidate_id/confidence/reasoning, then the file
+moved to the library as expected.
+
+Separately identified but NOT fixed this session: `computeTVDBConfidence`
+(internal/intake/tvdb.go) scores show-name match as 0 for acronym filenames
+like "MST3K" against the full TVDB series name "Mystery Science Theater
+3000" — neither the Levenshtein-similarity fuzzy check nor the substring
+-containment fallback recognize the acronym as equivalent, costing 40% of
+the confidence score on every MST3K file regardless of episode-title/year
+match. This is why MST3K episodes repeatedly land in the LLM gray zone or
+Review Queue rather than the 0.90+ exact-name-match shortcut. User has not
+yet asked for this to be fixed — flagged for a future session if they want
+an alias/acronym table added to the name-matching logic.
+
+=== Prior session: manual search in Review Queue didn't extract season/episode for TV queries ===
 
 Symptom: searching "MST3K - S04E23 - Bride of the Monster" in a Review Queue
 entry's manual search dialog returned a movie-search error ("no TMDB movie

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- LLM verification pass (triggered when TVDB/TMDB confidence lands between
+  `review_threshold` and `confidence_threshold`) was silent in the logs on
+  success — `LLMClient.Verify()` never logged, so there was no way to tell
+  from the log file whether the LLM was queried at all, or what it returned,
+  when a low-confidence match was accepted into the library anyway (its
+  confidence silently overwrote the deterministic score). Fix: `watcher.go`'s
+  `resolveAndGate()` now logs `Intake: querying LLM for verification` before
+  the call and `Intake: LLM verification result` (candidate_id, confidence,
+  reasoning) after it, plus a log line for the previously-silent
+  `llmResult.Disabled` (LLM not configured) branch. Files modified:
+  `internal/intake/watcher.go`.
+
 ## [1.2.3] - 2026-07-15
 
 ### Fixed
