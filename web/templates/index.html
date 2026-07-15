@@ -6002,9 +6002,15 @@
             const q = (document.getElementById('rsq-'+id).value||'').trim();
             if (!q) return;
             const year = document.getElementById('rsyear-'+id).value||'';
-            const type = document.getElementById('rstype-'+id).value||'';
+            let type = document.getElementById('rstype-'+id).value||'';
             const params = new URLSearchParams({q});
             if (year) params.append('year', year);
+            const seMatch = q.match(/[Ss](\d{1,2})[Ee](\d{1,2})/);
+            if (seMatch) {
+                params.append('season', String(parseInt(seMatch[1], 10)));
+                params.append('episode', String(parseInt(seMatch[2], 10)));
+                type = 'tv';
+            }
             if (type) params.append('type', type);
             const box = document.getElementById('rcands-'+id);
             box.innerHTML = '<div style="font-size:0.8125rem;color:var(--text-tertiary)">Searching...</div>';
