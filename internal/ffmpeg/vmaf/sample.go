@@ -63,7 +63,7 @@ func SamplePositions(videoDuration time.Duration, seedKey string) []float64 {
 
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(seedKey))
-	rng := rand.New(rand.NewSource(int64(h.Sum64())))
+	rng := rand.New(rand.NewSource(int64(h.Sum64()))) //nolint:gosec // deterministic sample-position jitter, not security
 
 	positions := make([]float64, len(anchors))
 	for i, anchor := range anchors {
