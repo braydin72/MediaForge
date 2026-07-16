@@ -21,6 +21,10 @@ dist/
 release/
 bin/
 
+# release/ above is a build-artifact ignore; don't let it swallow the
+# .claude/skills/release/ project skill.
+!.claude/skills/release/
+
 # Runtime
 queue.json
 config/mediaforge.yaml
