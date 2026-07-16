@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-07-16
+
 ### Fixed
 - Review Queue "Re-encode Custom" resubmits that target a file already sitting
   in the library (e.g. re-encoding an existing AVC library file to HEVC) were
@@ -96,6 +98,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reasoning) after it, plus a log line for the previously-silent
   `llmResult.Disabled` (LLM not configured) branch. Files modified:
   `internal/intake/watcher.go`.
+
+- CI lint failure (`gosec G404`) on the new VMAF sample-jitter code: `math/rand`
+  is used to deterministically jitter sample positions per input file path,
+  which gosec flags as a weak RNG even though this isn't a security-sensitive
+  use — same pattern already suppressed in `internal/ffmpeg/transcode.go` for
+  temp filename generation. Fix: `//nolint:gosec` on the `rand.New` call.
+  Files modified: `internal/ffmpeg/vmaf/sample.go`.
 
 ## [1.2.3] - 2026-07-15
 
