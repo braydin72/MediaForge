@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -1004,8 +1006,24 @@ func (w *Worker) processJob(job *Job) {
 	// Post-encode library move for intake pipeline jobs.
 	// SafeMove uses a temp-name strategy so media servers never see a partial file.
 	if job.LibraryPath != "" {
-		// Check for a pre-existing file at the destination before moving.
-		if _, statErr := os.Stat(job.LibraryPath); statErr == nil {
+		// FinalizeTranscode writes the encoded output next to job.InputPath. When
+		// InputPath is already the library file itself (e.g. a Review Queue
+		// "Re-encode Custom" resubmit whose OriginalPath is the in-library file
+		// being replaced) and OriginalHandling=="replace", finalPath and
+		// job.LibraryPath resolve to the identical path — the replace already
+		// happened in-place inside FinalizeTranscode. Treating that as a
+		// pre-existing "duplicate" at this point would be comparing the freshly
+		// written file to itself, so skip the duplicate check and the move.
+		if samePath(finalPath, job.LibraryPath) {
+			logger.Info("Post-encode library move complete (in-place replace)", "job_id", job.ID, "dst", job.LibraryPath)
+			if w.pool.OnLibraryMoveComplete != nil {
+				completedJob := job.Copy()
+				completedJob.OutputPath = finalPath
+				completedJob.OutputSize = result.OutputSize
+				w.pool.OnLibraryMoveComplete(completedJob)
+			}
+		} else if _, statErr := os.Stat(job.LibraryPath); statErr == nil {
+			// Check for a pre-existing file at the destination before moving.
 			reason := fmt.Sprintf("duplicate: file already exists at destination %s", job.LibraryPath)
 			logger.Warn("Post-encode library move: duplicate at destination, queuing for review",
 				"job_id", job.ID, "dst", job.LibraryPath)
@@ -1018,21 +1036,21 @@ func (w *Worker) processJob(job *Job) {
 			// the correction instead of losing it.
 			w.queue.SendDuplicateToReviewQueue(job.ID, finalPath, filepath.Base(job.LibraryPath), reason, "", dupInfoJSON)
 			return
-		}
-		if moveErr := util.SafeMove(finalPath, job.LibraryPath); moveErr != nil {
+		} else if moveErr := util.SafeMove(finalPath, job.LibraryPath); moveErr != nil {
 			reason := fmt.Sprintf("post-encode move failed: %v", moveErr)
 			logger.Error("Post-encode library move failed", "job_id", job.ID, "src", finalPath, "dst", job.LibraryPath, "error", moveErr)
 			_ = w.queue.FailJob(job.ID, reason)
 			w.queue.SendToReviewQueue(job.ID, finalPath, filepath.Base(job.LibraryPath), reason, "")
 			return
-		}
-		logger.Info("Post-encode library move complete", "job_id", job.ID, "dst", job.LibraryPath)
-		finalPath = job.LibraryPath
-		if w.pool.OnLibraryMoveComplete != nil {
-			completedJob := job.Copy()
-			completedJob.OutputPath = finalPath
-			completedJob.OutputSize = result.OutputSize
-			w.pool.OnLibraryMoveComplete(completedJob)
+		} else {
+			logger.Info("Post-encode library move complete", "job_id", job.ID, "dst", job.LibraryPath)
+			finalPath = job.LibraryPath
+			if w.pool.OnLibraryMoveComplete != nil {
+				completedJob := job.Copy()
+				completedJob.OutputPath = finalPath
+				completedJob.OutputSize = result.OutputSize
+				w.pool.OnLibraryMoveComplete(completedJob)
+			}
 		}
 	}
 
@@ -1326,6 +1344,17 @@ func (wp *WorkerPool) runFixedReductionAnalysis(ctx context.Context, job *Job, p
 
 	logger.Info("Fixed reduction analysis complete", "job_id", job.ID, "crf", bestCRF, "target_pct", targetReductionPct)
 	return false, "", bestCRF, nil
+}
+
+// samePath reports whether two paths refer to the same file location after
+// cleaning, case-insensitively on Windows (where paths are case-insensitive
+// and this app primarily runs).
+func samePath(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 // buildPostEncodeDuplicateJSON builds a DuplicateContext JSON string for a post-encode

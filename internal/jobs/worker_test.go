@@ -4,12 +4,39 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/braydin72/mediaforge/internal/config"
 	"github.com/braydin72/mediaforge/internal/ffmpeg"
 )
+
+func TestSamePath(t *testing.T) {
+	cases := []struct {
+		name        string
+		a           string
+		b           string
+		want        bool
+		windowsOnly bool // true if want only holds on case-insensitive (Windows) filesystems
+	}{
+		{"identical", `\\TOWER\Media\TV Shows\ER (1994)\Season 05\ep.mp4`, `\\TOWER\Media\TV Shows\ER (1994)\Season 05\ep.mp4`, true, false},
+		{"different case", `\\TOWER\Media\TV Shows\ER (1994)\Season 05\ep.mp4`, `\\TOWER\media\tv shows\ER (1994)\Season 05\EP.mp4`, true, true},
+		{"different file", `\\TOWER\Media\TV Shows\ER (1994)\Season 05\ep1.mp4`, `\\TOWER\Media\TV Shows\ER (1994)\Season 05\ep2.mp4`, false, false},
+		{"unclean but same", filepath.Join("TV Shows", "ER (1994)", "Season 05", ".", "ep.mp4"), filepath.Join("TV Shows", "ER (1994)", "Season 05", "ep.mp4"), true, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			want := c.want
+			if c.windowsOnly && runtime.GOOS != "windows" {
+				want = false
+			}
+			if got := samePath(c.a, c.b); got != want {
+				t.Errorf("samePath(%q, %q) = %v, want %v", c.a, c.b, got, want)
+			}
+		})
+	}
+}
 
 func TestWorkerPoolIntegration(t *testing.T) {
 	if testing.Short() {

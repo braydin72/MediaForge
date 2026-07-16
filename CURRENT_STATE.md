@@ -1,6 +1,54 @@
 CURRENT STATE NOTE
 
-=== Latest session (cont. once more): fixed triplicate Pushover/email notifications ===
+=== Latest session: fixed false "duplicate" on Review Queue re-encode that replaces a library file in place ===
+
+User reported: re-encoding an existing library file (AVC "ER (1994) - S05E07
+- Hazed and Confused.mp4" -> HEVC) via Review Queue "Re-encode Custom"
+produced a bogus "duplicate: file already exists at destination" Review
+Queue entry, showing Incoming and Existing as byte-for-byte identical
+(same codec/resolution/bitrate/size) — which shouldn't happen since the
+whole point of that resubmit was to replace the file at that exact path.
+
+Root cause, confirmed by reading the code (not a guess): `ResubmitReviewEntry`
+(internal/api/handler.go) sets `job.InputPath` = `entry.OriginalPath`, which
+for this workflow IS the in-library file being replaced. `processJob`
+(internal/jobs/worker.go) then calls `ffmpeg.FinalizeTranscode(job.InputPath,
+...)` with `replace: true` (OriginalHandling == "replace") — which deletes
+`inputPath` and writes the new encode to `filepath.Dir(inputPath) +
+name+outExt`, i.e. the SAME path, since the input was already the
+correctly-named library file. So `finalPath` and the freshly recomputed
+`job.LibraryPath` (via ResolveLibraryPath) resolved to the identical path —
+the "replace" had already happened in-place inside FinalizeTranscode before
+the post-encode duplicate check even ran. That check (`os.Stat(job.LibraryPath)`)
+then found the file that was JUST written and misreported it as a
+pre-existing collision with something else, and `buildPostEncodeDuplicateJSON`
+probed the same path for both "incoming" and "existing", hence identical
+details in the UI.
+
+Fix (internal/jobs/worker.go, processJob only): new `samePath(a, b string)
+bool` helper (filepath.Clean + case-insensitive compare on Windows, exact on
+other platforms). Before the duplicate-exists check, if `samePath(finalPath,
+job.LibraryPath)`, skip both the duplicate check and the `SafeMove` — the
+file is already correctly in place — and go straight to the
+`OnLibraryMoveComplete` callback/logging. The existing duplicate-detection
+behavior for genuinely distinct incoming vs. existing files (the normal
+intake-pipeline collision case) is unchanged; only the identical-path case is
+newly short-circuited.
+
+Test: new `TestSamePath` (internal/jobs/worker_test.go) — table test covering
+identical paths, same path differing only in case (Windows-only expectation),
+genuinely different files, and an uncleaned-but-equivalent path (`.` segment).
+
+Verified: go build ./..., go vet ./..., go test ./... all pass (full suite,
+including the new test). NOT yet verified against a live resubmit of the
+real ER S05E07 file — recommend re-running the same "Re-encode Custom"
+AVC->HEVC resubmit on that file and confirming in the log: "Post-encode
+library move complete (in-place replace)" appears instead of "duplicate at
+destination, queuing for review", the job shows as completed (not sent to
+Review Queue), and the file at the destination is now genuinely HEVC
+(confirm via mediainfo/ffprobe, not just the app's own report).
+
+=== Prior session (cont. once more): fixed triplicate Pushover/email notifications ===
 
 User reported (separate, non-performance annoyance, same live-testing
 session): identical "encode failed" / "added to Review Queue" notifications

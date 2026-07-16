@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Review Queue "Re-encode Custom" resubmits that target a file already sitting
+  in the library (e.g. re-encoding an existing AVC library file to HEVC) were
+  incorrectly flagged as a duplicate at the destination, even though the
+  encode was intentionally replacing that exact file. Root cause:
+  `ffmpeg.FinalizeTranscode`, with `OriginalHandling: "replace"`, deletes the
+  input file and writes the new encode to the same path when the input is
+  already at its final library location — so `finalPath` and
+  `job.LibraryPath` (`internal/jobs/worker.go` `processJob`) resolved to the
+  identical file, and the post-encode "does the destination already exist"
+  check was comparing the just-written file to itself, always finding a
+  "duplicate" (and showing identical Incoming/Existing details in the Review
+  Queue UI, since both probes hit the same path). Fix: new `samePath` helper
+  in `internal/jobs/worker.go` (case-insensitive on Windows) short-circuits
+  the duplicate check and move step when `finalPath` already equals
+  `job.LibraryPath`, since the replace has already completed in place. Files
+  modified: `internal/jobs/worker.go`, `internal/jobs/worker_test.go`.
+
 - Encode-complete/failed Pushover and email notifications were sent once per
   connected SSE client (browser tab), not once per event — `JobStream`
   (`internal/api/sse.go`) runs its handler loop once per connection to
