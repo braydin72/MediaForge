@@ -5,6 +5,98 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Review Queue "Re-encode Custom" resubmits that target a file already sitting
+  in the library (e.g. re-encoding an existing AVC library file to HEVC) were
+  incorrectly flagged as a duplicate at the destination, even though the
+  encode was intentionally replacing that exact file. Root cause:
+  `ffmpeg.FinalizeTranscode`, with `OriginalHandling: "replace"`, deletes the
+  input file and writes the new encode to the same path when the input is
+  already at its final library location — so `finalPath` and
+  `job.LibraryPath` (`internal/jobs/worker.go` `processJob`) resolved to the
+  identical file, and the post-encode "does the destination already exist"
+  check was comparing the just-written file to itself, always finding a
+  "duplicate" (and showing identical Incoming/Existing details in the Review
+  Queue UI, since both probes hit the same path). Fix: new `samePath` helper
+  in `internal/jobs/worker.go` (case-insensitive on Windows) short-circuits
+  the duplicate check and move step when `finalPath` already equals
+  `job.LibraryPath`, since the replace has already completed in place. Files
+  modified: `internal/jobs/worker.go`, `internal/jobs/worker_test.go`.
+
+- Encode-complete/failed Pushover and email notifications were sent once per
+  connected SSE client (browser tab), not once per event — `JobStream`
+  (`internal/api/sse.go`) runs its handler loop once per connection to
+  `/api/jobs/stream`, and `dispatchEncodeEvent` was called directly inside
+  that per-connection loop with no dedup, so a user with e.g. 3 open browser
+  tabs got 3 identical notifications per encode-complete/failed event. Fix:
+  `jobs.Queue` gained an `OnTerminalEvent` callback invoked exactly once per
+  `broadcast()` call, regardless of subscriber count; `dispatchEncodeEvent`
+  is now wired there (in `NewHandler`) instead of inside the per-connection
+  SSE loop. Files modified: `internal/jobs/queue.go`,
+  `internal/api/handler.go`, `internal/api/sse.go`,
+  `internal/jobs/queue_test.go` (new regression test with 3 simulated
+  subscribers asserting exactly 1 dispatch).
+
+### Changed
+- SmartShrink previously routed any file whose content never cleared the
+  configured VMAF tier threshold (a hard quality ceiling, e.g. from film
+  grain/video noise) straight to Review Queue via "no viable encode found",
+  with no size information — even when a smaller file existed that cost no
+  additional measurable quality. Root cause: `interpolatedSearchCRF`'s
+  failure handling only ever narrows toward `qRange.Min` (larger files) once
+  it decides quality is insufficient, so the best-effort CRF it lands on is
+  biased toward near-lossless regardless of whether a higher CRF would have
+  scored almost identically; the size-retry loop then compared every step
+  against the absolute tier threshold, which content already known to be
+  below that threshold can never pass. Now: when analysis returns a
+  best-effort result (`AnalysisResult.BestEffort`), a new plateau-fallback
+  probes a few CRF steps upward and accepts any step within 2.0 VMAF points
+  of the original best-effort ceiling (`bestEffortFallbackTolerance` in
+  `internal/ffmpeg/vmaf/search.go`), and the worker's size-retry loop
+  (`internal/jobs/worker.go`) steps using that same tolerance instead of the
+  absolute threshold. The job completes automatically with the
+  closest-achievable-quality, smallest-available file instead of failing to
+  Review Queue — this is a deliberate, explicit exception to the "every
+  failure routes to Review Queue" rule for this one case, confirmed with the
+  user, since a content quality ceiling isn't something a human decision can
+  fix. Clearly logged as a fallback (`ceiling_vmaf`, `tier_threshold`, chosen
+  CRF) so it's distinguishable from a normal threshold-met accept. The
+  existing "still not smaller than source" safety net is unchanged and still
+  routes to Review Queue. Files modified: `internal/ffmpeg/vmaf/search.go`,
+  `internal/ffmpeg/vmaf/vmaf.go`, `internal/ffmpeg/vmaf/analyze.go`,
+  `internal/jobs/worker.go`, `internal/ffmpeg/vmaf/search_test.go`.
+
+### Fixed
+- SmartShrink VMAF sampling used fixed positions (25%/50%/75% of duration)
+  for every file. Real production logs showed the 50% sample scoring 15-30
+  VMAF points above the other two on nearly every episode of the same show
+  (e.g. `[75.8, 96.3, 74.9]`) — a recurring low-motion structural element
+  (recap card/bumper, common in syndicated TV) at a consistent relative
+  timestamp inflated the averaged score, which is very likely why the
+  interpolated CRF search bottomed out near CRF 16 (near-lossless, huge
+  first-try output) instead of a size-friendlier CRF that still meets the
+  quality floor on the actual content. `SamplePositions` (`internal/ffmpeg/vmaf/sample.go`)
+  now jitters each of the 3 sample positions within ±8% of its anchor,
+  seeded deterministically per input file path (`fnv` hash + `math/rand`),
+  so re-analyzing the same file is reproducible but different episodes of a
+  series no longer all land on the same relative timestamp. Files modified:
+  `internal/ffmpeg/vmaf/sample.go`, `internal/ffmpeg/vmaf/analyze.go`,
+  `internal/jobs/worker.go`, `internal/ffmpeg/vmaf/sample_test.go`.
+
+- LLM verification pass (triggered when TVDB/TMDB confidence lands between
+  `review_threshold` and `confidence_threshold`) was silent in the logs on
+  success — `LLMClient.Verify()` never logged, so there was no way to tell
+  from the log file whether the LLM was queried at all, or what it returned,
+  when a low-confidence match was accepted into the library anyway (its
+  confidence silently overwrote the deterministic score). Fix: `watcher.go`'s
+  `resolveAndGate()` now logs `Intake: querying LLM for verification` before
+  the call and `Intake: LLM verification result` (candidate_id, confidence,
+  reasoning) after it, plus a log line for the previously-silent
+  `llmResult.Disabled` (LLM not configured) branch. Files modified:
+  `internal/intake/watcher.go`.
+
 ## [1.2.3] - 2026-07-15
 
 ### Fixed

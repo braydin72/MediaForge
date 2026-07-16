@@ -8,4 +8,5 @@ type AnalysisResult struct {
 	ShouldSkip  bool    // True if file should be skipped
 	SkipReason  string  // Reason for skip
 	SamplesUsed int     // Number of samples analyzed
+	BestEffort  bool    // True if no CRF cleared the threshold; VMafScore is the best achievable ceiling
 }

@@ -2,6 +2,7 @@ package jobs_test
 
 import (
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -552,6 +553,49 @@ func TestQueueSubscription(t *testing.T) {
 	queue.Unsubscribe(ch)
 
 	t.Log("Subscription working correctly")
+}
+
+// TestQueueOnTerminalEventFiresOnce verifies OnTerminalEvent is invoked
+// exactly once per broadcast event regardless of how many subscribers
+// (e.g. SSE clients/browser tabs) are subscribed — regression test for a bug
+// where notification dispatch previously ran once per connected SSE client,
+// producing duplicate Pushover/email notifications per open browser tab.
+func TestQueueOnTerminalEventFiresOnce(t *testing.T) {
+	queue := jobs.NewQueue()
+
+	// Simulate multiple connected SSE clients (browser tabs).
+	ch1 := queue.Subscribe()
+	ch2 := queue.Subscribe()
+	ch3 := queue.Subscribe()
+	defer queue.Unsubscribe(ch1)
+	defer queue.Unsubscribe(ch2)
+	defer queue.Unsubscribe(ch3)
+
+	var callCount int32
+	queue.OnTerminalEvent = func(event jobs.JobEvent) {
+		atomic.AddInt32(&callCount, 1)
+	}
+
+	probe := &ffmpeg.ProbeResult{
+		Path:     "/media/video.mkv",
+		Size:     1000000,
+		Duration: 10 * time.Second,
+	}
+	queue.Add(probe.Path, "compress-hevc", probe, "")
+
+	// Drain all three subscriber channels to confirm each still receives
+	// the event (fan-out to subscribers is unaffected by this change).
+	for i, ch := range []chan jobs.JobEvent{ch1, ch2, ch3} {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Errorf("subscriber %d: timeout waiting for event", i)
+		}
+	}
+
+	if got := atomic.LoadInt32(&callCount); got != 1 {
+		t.Errorf("OnTerminalEvent called %d times, want exactly 1 (regardless of 3 subscribers)", got)
+	}
 }
 
 func TestQueueSkipJob(t *testing.T) {

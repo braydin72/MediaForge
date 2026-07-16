@@ -57,6 +57,14 @@ type Queue struct {
 	subsMu      sync.RWMutex
 	subscribers map[chan JobEvent]struct{}
 
+	// OnTerminalEvent, if set, is called exactly once per broadcast event —
+	// regardless of how many SSE clients are subscribed. Used to dispatch
+	// external notifications (Pushover/email) without duplicating per
+	// connected browser tab/client (each of which gets its own subscriber
+	// channel via Subscribe). The callback is responsible for filtering to
+	// the event types it cares about.
+	OnTerminalEvent func(JobEvent)
+
 	// Config options
 	allowSameCodec bool // Allow transcoding files already in target codec
 }
@@ -647,8 +655,13 @@ func (q *Queue) Unsubscribe(ch chan JobEvent) {
 	close(ch)
 }
 
-// broadcast sends an event to all subscribers
+// broadcast sends an event to all subscribers and, exactly once regardless
+// of subscriber count, invokes OnTerminalEvent if set.
 func (q *Queue) broadcast(event JobEvent) {
+	if q.OnTerminalEvent != nil {
+		q.OnTerminalEvent(event)
+	}
+
 	q.subsMu.RLock()
 	defer q.subsMu.RUnlock()
 

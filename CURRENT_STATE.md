@@ -1,6 +1,307 @@
 CURRENT STATE NOTE
 
-=== Latest session: manual search in Review Queue didn't extract season/episode for TV queries ===
+=== Latest session: fixed false "duplicate" on Review Queue re-encode that replaces a library file in place ===
+
+User reported: re-encoding an existing library file (AVC "ER (1994) - S05E07
+- Hazed and Confused.mp4" -> HEVC) via Review Queue "Re-encode Custom"
+produced a bogus "duplicate: file already exists at destination" Review
+Queue entry, showing Incoming and Existing as byte-for-byte identical
+(same codec/resolution/bitrate/size) — which shouldn't happen since the
+whole point of that resubmit was to replace the file at that exact path.
+
+Root cause, confirmed by reading the code (not a guess): `ResubmitReviewEntry`
+(internal/api/handler.go) sets `job.InputPath` = `entry.OriginalPath`, which
+for this workflow IS the in-library file being replaced. `processJob`
+(internal/jobs/worker.go) then calls `ffmpeg.FinalizeTranscode(job.InputPath,
+...)` with `replace: true` (OriginalHandling == "replace") — which deletes
+`inputPath` and writes the new encode to `filepath.Dir(inputPath) +
+name+outExt`, i.e. the SAME path, since the input was already the
+correctly-named library file. So `finalPath` and the freshly recomputed
+`job.LibraryPath` (via ResolveLibraryPath) resolved to the identical path —
+the "replace" had already happened in-place inside FinalizeTranscode before
+the post-encode duplicate check even ran. That check (`os.Stat(job.LibraryPath)`)
+then found the file that was JUST written and misreported it as a
+pre-existing collision with something else, and `buildPostEncodeDuplicateJSON`
+probed the same path for both "incoming" and "existing", hence identical
+details in the UI.
+
+Fix (internal/jobs/worker.go, processJob only): new `samePath(a, b string)
+bool` helper (filepath.Clean + case-insensitive compare on Windows, exact on
+other platforms). Before the duplicate-exists check, if `samePath(finalPath,
+job.LibraryPath)`, skip both the duplicate check and the `SafeMove` — the
+file is already correctly in place — and go straight to the
+`OnLibraryMoveComplete` callback/logging. The existing duplicate-detection
+behavior for genuinely distinct incoming vs. existing files (the normal
+intake-pipeline collision case) is unchanged; only the identical-path case is
+newly short-circuited.
+
+Test: new `TestSamePath` (internal/jobs/worker_test.go) — table test covering
+identical paths, same path differing only in case (Windows-only expectation),
+genuinely different files, and an uncleaned-but-equivalent path (`.` segment).
+
+Verified: go build ./..., go vet ./..., go test ./... all pass (full suite,
+including the new test). NOT yet verified against a live resubmit of the
+real ER S05E07 file — recommend re-running the same "Re-encode Custom"
+AVC->HEVC resubmit on that file and confirming in the log: "Post-encode
+library move complete (in-place replace)" appears instead of "duplicate at
+destination, queuing for review", the job shows as completed (not sent to
+Review Queue), and the file at the destination is now genuinely HEVC
+(confirm via mediainfo/ffprobe, not just the app's own report).
+
+=== Prior session (cont. once more): fixed triplicate Pushover/email notifications ===
+
+User reported (separate, non-performance annoyance, same live-testing
+session): identical "encode failed" / "added to Review Queue" notifications
+arriving 3x per event. Asked a clarifying question first (AskUserQuestion) —
+confirmed it's real Pushover/email notifications tripling, and the count
+matched the number of open browser tabs to the web UI.
+
+Root cause found by reading internal/api/sse.go: JobStream (the SSE handler
+for GET /api/jobs/stream) runs once PER CONNECTED CLIENT — each open browser
+tab gets its own subscriber channel via queue.Subscribe(). The per-connection
+read loop called dispatchEncodeEvent(ctx, event) directly for every
+complete/failed job event with no dedup guard, so N open tabs => N identical
+real notification sends for the same event. (Separately confirmed
+checkAndSendNotification, the OTHER notification path in the same loop — the
+"queue empty, N complete/M failed" Pushover summary — already has a correct
+dedup guard via h.notifyMu + flipping cfg.NotifyOnComplete off after firing,
+so it was NOT part of this bug; only dispatchEncodeEvent was unguarded.)
+Also confirmed the "added to Review Queue" notification path
+(watcher.go OnReviewQueueAdd -> handler.DispatchNotification) is dispatched
+once, centrally, from the intake watcher — NOT per-SSE-connection — so it
+was not expected to triple the same way; not independently re-verified live
+this session.
+
+Fix:
+- internal/jobs/queue.go: Queue gained an exported OnTerminalEvent
+  func(JobEvent) field, invoked exactly once inside broadcast() regardless
+  of how many subscriber channels exist (called before the subscriber
+  fan-out loop, not gated by subsMu).
+- internal/api/handler.go NewHandler: wires queue.OnTerminalEvent =
+  h.dispatchEncodeEvent once, at handler construction time.
+- internal/api/sse.go: removed the per-connection
+  h.dispatchEncodeEvent(r.Context(), event) call from JobStream's loop
+  (checkAndSendNotification call is UNCHANGED, still there, since it already
+  had its own correct dedup). dispatchEncodeEvent's signature simplified to
+  no longer take a ctx param (it's no longer tied to any single HTTP
+  request's lifetime, since it now fires from queue.broadcast() which can be
+  called from arbitrary worker goroutines) — uses context.Background()
+  internally instead, matching the existing pattern in
+  handler.DispatchNotification.
+- internal/jobs/queue_test.go: new TestQueueOnTerminalEventFiresOnce —
+  subscribes 3 channels (simulating 3 open browser tabs), adds a job, and
+  asserts OnTerminalEvent fires exactly once while confirming all 3
+  subscriber channels still independently receive the event (fan-out to the
+  UI itself is unaffected, only the external-notification dispatch was
+  de-duplicated).
+
+Verified: go build ./... and go test ./... (full suite, including the new
+test) all pass.
+
+NOT yet verified against a live run with multiple real browser tabs open —
+recommend opening 2-3 tabs to the web UI, triggering an encode-failed or
+Review Queue event, and confirming exactly 1 Pushover/email notification
+arrives instead of one per open tab.
+
+=== Prior session (cont.): best-achievable-quality fallback for content below the VMAF tier floor ===
+
+Direct continuation of the jitter fix below, same live-testing session. User
+re-ran the ER (1994) S01 batch after the jitter fix (confirmed working: jobs
+8-11 converged in a single pass, zero retries, balanced per-sample scores).
+Job -12 (S01E12) correctly went to Review Queue with real per-sample scores
+[69.7, 80.6, 84.9] — genuinely below the tier's threshold (85, "acceptable"
+tier) at every CRF tested, not a sampling artifact. User asked why the tool
+couldn't just accept the smaller file at CRF 18 (score 80.9, essentially
+identical to CRF 16's 80.895) instead of failing outright, since quality
+wasn't actually dropping between those two CRFs.
+
+Traced the real root cause (deeper than "no viable encode"):
+interpolatedSearchCRF (internal/ffmpeg/vmaf/search.go)'s failure-handling
+branch only ever narrows toward qRange.Min (larger files) once it decides a
+score is below threshold — it never explores upward (smaller files) to check
+whether a higher CRF would score nearly the same. So the best-effort CRF the
+search lands on is structurally biased toward near-lossless/big files even
+when a much smaller file would cost nothing. Then the worker's size-retry
+loop (internal/jobs/worker.go ~866-937) compared every retry step against
+the ABSOLUTE tier threshold, which best-effort content (by definition
+already below that threshold) can never pass — so it always failed
+immediately on the first check.
+
+User explicitly chose (via AskUserQuestion, confirmed): auto-complete the
+job with the best-achievable-quality fallback rather than route to Review
+Queue — an explicit, confirmed exception to CLAUDE.md's "every failure path
+routes to Review Queue" rule, scoped specifically to this one case (content
+has a hard, unfixable quality ceiling — no human decision changes that).
+
+Implemented:
+- internal/ffmpeg/vmaf/vmaf.go: AnalysisResult gained BestEffort bool.
+- internal/ffmpeg/vmaf/analyze.go: sets AnalysisResult.BestEffort from the
+  search result.
+- internal/ffmpeg/vmaf/search.go: new applyBestEffortFallback(s, best,
+  maxCRF) — probes up to 3 CRF steps (+2 each, bestEffortFallbackMaxProbes/
+  bestEffortFallbackStep) above a best-effort result, accepting each step
+  via the new pure helper bestEffortFallbackAccepts(bestScore,
+  candidateScore) (accepts if the drop is <= bestEffortFallbackTolerance =
+  2.0 VMAF points). All 4 of interpolatedSearchCRF's existing BestEffort:
+  true return sites now route through this before returning. SearchResult
+  gained BestEffortBase int (the original best-effort CRF, for logging).
+- internal/jobs/worker.go: runSmartShrinkAnalysis's return signature gained
+  a bestEffort bool (6th return value, before error) — one call site
+  updated (processJob). New hoisted vars smartShrinkBestEffort/
+  smartShrinkVMafCeiling (declared before the `if preset.IsSmartShrink`
+  block so they survive to the later retry-loop block, which is a separate
+  scope). The size-retry loop (~873-950) now branches: when
+  smartShrinkBestEffort, steps are accepted via
+  smartShrinkVMafCeiling-sampleScore > smartShrinkFallbackTolerance (new
+  const, 2.0, mirrors the vmaf package one — duplicated intentionally since
+  it's unexported in vmaf and this is a small, clearly-commented constant,
+  not worth exporting cross-package plumbing for) instead of the absolute
+  threshold comparison used for normal (non-best-effort) jobs. Added
+  bestCRF tracking alongside bestResult for accurate fallback-acceptance
+  logging. Two new INFO logs: one when entering fallback mode (ceiling_vmaf,
+  tier_threshold), one when a fallback result is accepted (crf,
+  vmaf_ceiling, output_size vs input_size) — distinguishable from normal
+  "SmartShrink retry"/success logging. The existing "still >= source size"
+  safety-net check (routes to Review Queue) is UNCHANGED and applies
+  regardless of bestEffort — a fallback result must still be smaller than
+  the source or it still fails to Review Queue same as before.
+- internal/ffmpeg/vmaf/search_test.go: new TestBestEffortFallbackAccepts
+  table test covering the tolerance boundary (exactly at 2.0pt drop accepts,
+  2.1pt rejects, etc.) — this is the only new automated coverage; the
+  probe-loop itself (applyBestEffortFallback) isn't unit tested since it
+  calls sampleScorer.scoreCRF which shells out to real ffmpeg, consistent
+  with this file's existing pattern of only testing pure helper logic and
+  deferring encode-dependent paths to real/Docker integration tests.
+
+Verified: go build ./... and go test ./... (full suite) both pass.
+
+NOT yet verified against a live run — recommend re-running S01E12 (or any
+file that previously hit "no viable encode") and confirming in the log:
+(1) "SmartShrink: quality tier unreachable for this content, falling back to
+closest-achievable-quality size optimization" appears instead of going
+straight to the old absolute-threshold retry failure, (2) "SmartShrink:
+accepted best-achievable-quality fallback" appears with a smaller
+output_size than the original best-effort CRF's full-file size, (3) the job
+completes normally (Job complete log line, file lands in library) instead of
+creating a Review Queue entry, and (4) a genuinely non-shrinkable file (if
+one exists) still correctly fails to Review Queue via the unchanged
+"still >= source size" safety net.
+
+=== Prior session (cont.): SmartShrink VMAF sample positions jittered to break fixed-timestamp bias ===
+
+User reported SmartShrink jobs (real prod logs, ER (1994) S01 batch,
+mediaforge.log 2026-07-15) producing huge oversized first-try outputs,
+requiring 6-8 full-file re-encodes to converge (CRF climbing 16→18→20→...→28
+in +2 steps, ~3-4 min per full-file retry). Investigated in stages:
+
+1. Confirmed via real logs that phase-1 VMAF search (interpolatedSearchCRF,
+   internal/ffmpeg/vmaf/search.go) was landing on best-effort CRF 16
+   (near-lossless) because no CRF cleared the VMAF 85 threshold — this then
+   fed the size-retry loop (internal/jobs/worker.go ~866-915) a starting
+   point far below what the size target needed, forcing many +2 full-file
+   re-encode steps.
+2. Discussed (but did NOT implement) two alternative fixes: (a) preset-tier
+   fixed starting CRF (18/24/30) — user correctly identified this fails for
+   the Excellent tier since near-lossless CRF on already-compressed AVC
+   source almost always oversizes regardless of tier; (b) a sample-driven
+   combined VMAF+size search reusing existing sample infrastructure instead
+   of full-file retries — still a reasonable follow-up but not implemented
+   this session, deferred pending re-measurement after item 3 below.
+3. User asked specifically whether the sampler was hitting intro/credits.
+   Checked internal/ffmpeg/vmaf/score.go:187, which already logs per-sample
+   scores (`msg="VMAF score" scores=[...]`) separately from the averaged
+   line — pulled the real per-sample breakdown from the log and found the
+   MIDDLE sample (50% position, not the ends) scoring 15-30 VMAF points
+   above the other two on nearly every episode of the same show (e.g.
+   [75.8, 96.3, 74.9], [68.3, 97.2, 96.2]). This is consistent with a
+   recurring low-motion structural element (recap/bumper/act-break card,
+   common in syndicated 90s TV) landing at a fixed relative timestamp every
+   episode, inflating the averaged score and damping the search's
+   sensitivity to the CRF actually needed for the real content — the likely
+   root cause of the CRF-16 best-effort landing in the first place.
+
+Fix implemented (internal/ffmpeg/vmaf/sample.go): SamplePositions now takes
+a seedKey string param (the input file path) and jitters each of the 3
+anchor positions (0.25/0.50/0.75) by up to ±8% (new sampleJitterRange
+const), seeded deterministically via fnv.New64a hash of seedKey feeding
+math/rand.NewSource — same file always gets the same positions (debuggable/
+reproducible), but different files/episodes no longer systematically hit
+the same relative timestamp. Anchor spacing (0.25 apart) keeps ±8% windows
+from overlapping.
+
+Call sites updated to pass a seed key: internal/ffmpeg/vmaf/analyze.go
+(inputPath), internal/jobs/worker.go quickSampleVMAF and
+runFixedReductionAnalysis (both job.InputPath).
+
+Tests (internal/ffmpeg/vmaf/sample_test.go): existing TestSamplePositions/
+TestSamplePositionsEdgeCases updated to check length/bounds instead of
+exact 0.25/0.50/0.75 equality (no longer holds with jitter). Added
+TestSamplePositionsJitterBounds (positions stay within ±sampleJitterRange
+of their anchor across multiple seed keys) and
+TestSamplePositionsDeterministic (same seedKey → same positions; different
+seedKey → different positions).
+
+Verified: go build ./... and go test ./... (full suite) both pass.
+
+NOT yet verified against a live SmartShrink run — recommend re-running the
+same ER (1994) S01 batch (or similar) and checking two things in the log:
+(1) per-sample VMAF scores (`msg="VMAF score" scores=[...]`) no longer show
+one consistent outlier-high index across episodes, and (2) phase-1's
+selected_crf lands meaningfully above 16 on the first pass, reducing or
+eliminating the size-retry loop's iteration count. If the retry loop still
+fires often after this fix, the sample-driven combined VMAF+size search
+discussed in item 2(b) above is the next thing to implement — re-measure
+before deciding whether it's still needed at the scope discussed.
+
+The VMAF-85-threshold-may-be-uncalibrated-for-this-content-class question
+(raised during the same discussion — phase-1 topped out around VMAF 82-83
+even at CRF 16 for some episodes, suggesting a natural ceiling for older/
+SD-sourced content) and the vmaf_sample_count config change (3→5,
+configurable) were both explicitly deferred as separate follow-up items,
+not addressed this session.
+
+=== Prior session: LLM verification pass had no logging ===
+
+User was debugging why a low-confidence TVDB match (e.g. "MST3K (1989) -
+S13E12 - The Bubble.mp4", confidence=0.60) moved straight to the library
+instead of Review Queue, and initially misread this as the LLM-verification
+gate (review_threshold..confidence_threshold gray zone, defaults 0.60/0.85)
+being skipped. Root cause: it wasn't skipped — `LLMClient.Verify()`
+(internal/intake/llm.go) never logged anything on success, and the
+`llmResult.Disabled` branch in `resolveAndGate()` (internal/intake/watcher.go)
+also logged nothing, so there was no way to tell from the log file whether
+the LLM was queried, or what it returned, when a low-confidence match got
+silently accepted (LLM confidence overwrites the deterministic score at
+`result.Confidence = llmResult.Confidence`).
+
+Fix (internal/intake/watcher.go, resolveAndGate only): added
+`logger.Info("Intake: querying LLM for verification", ...)` immediately
+before the `Verify()` call, `logger.Info("Intake: LLM verification result",
+...)` (candidate_id, confidence, reasoning) immediately after a successful
+call, and a `logger.Warn` for the previously-silent `llmResult.Disabled`
+(LLM not configured) case. No behavior change — logging only.
+
+Files modified: internal/intake/watcher.go, CHANGELOG.md.
+
+Verified: go build ./... and go test ./internal/intake/... pass. User
+re-tested against a live instance by renaming a file into the gray zone
+(confidence 0.60) and confirmed the new log lines appear correctly:
+"Intake: querying LLM for verification" followed by "Intake: LLM
+verification result" with candidate_id/confidence/reasoning, then the file
+moved to the library as expected.
+
+Separately identified but NOT fixed this session: `computeTVDBConfidence`
+(internal/intake/tvdb.go) scores show-name match as 0 for acronym filenames
+like "MST3K" against the full TVDB series name "Mystery Science Theater
+3000" — neither the Levenshtein-similarity fuzzy check nor the substring
+-containment fallback recognize the acronym as equivalent, costing 40% of
+the confidence score on every MST3K file regardless of episode-title/year
+match. This is why MST3K episodes repeatedly land in the LLM gray zone or
+Review Queue rather than the 0.90+ exact-name-match shortcut. User has not
+yet asked for this to be fixed — flagged for a future session if they want
+an alias/acronym table added to the name-matching logic.
+
+=== Prior session: manual search in Review Queue didn't extract season/episode for TV queries ===
 
 Symptom: searching "MST3K - S04E23 - Bride of the Monster" in a Review Queue
 entry's manual search dialog returned a movie-search error ("no TMDB movie

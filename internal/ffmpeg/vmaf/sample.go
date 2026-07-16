@@ -3,6 +3,8 @@ package vmaf
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,11 +30,23 @@ type Sample struct {
 	Duration time.Duration // Sample duration
 }
 
-// SamplePositions returns the 3 fixed positions to sample.
-// Positions: 25%, 50%, 75% of video duration.
-// Using 3 longer samples (20s each) provides better representation than 5 short ones,
-// matching the approach used by ab-av1.
-func SamplePositions(videoDuration time.Duration) []float64 {
+// sampleJitterRange is the maximum fraction of total duration each sample
+// position may shift from its anchor (0.25/0.50/0.75). Anchors are spaced
+// 0.25 apart, so a range of 0.08 keeps windows well clear of overlapping.
+const sampleJitterRange = 0.08
+
+// SamplePositions returns the positions to sample, anchored at 25%/50%/75%
+// of video duration but jittered within sampleJitterRange of each anchor.
+// The jitter is seeded deterministically from seedKey (typically the input
+// file path), so re-analyzing the same file yields the same positions, but
+// different files don't all land on the exact same relative timestamp.
+//
+// Fixed anchors previously let a recurring low-motion structural element at
+// a consistent relative position (e.g. a mid-episode recap card or bumper,
+// common in syndicated TV) score near-perfect VMAF regardless of CRF on
+// every episode of a series, skewing the averaged score high and masking
+// the real quality/CRF tradeoff of the actual content.
+func SamplePositions(videoDuration time.Duration, seedKey string) []float64 {
 	seconds := videoDuration.Seconds()
 
 	// Handle zero/negative duration
@@ -45,8 +59,18 @@ func SamplePositions(videoDuration time.Duration) []float64 {
 		return []float64{0.5}
 	}
 
-	// All other videos: 3 samples at fixed positions
-	return []float64{0.25, 0.50, 0.75}
+	anchors := []float64{0.25, 0.50, 0.75}
+
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(seedKey))
+	rng := rand.New(rand.NewSource(int64(h.Sum64())))
+
+	positions := make([]float64, len(anchors))
+	for i, anchor := range anchors {
+		jitter := (rng.Float64()*2 - 1) * sampleJitterRange
+		positions[i] = anchor + jitter
+	}
+	return positions
 }
 
 // SampleDuration is the fixed duration for each sample (20 seconds).

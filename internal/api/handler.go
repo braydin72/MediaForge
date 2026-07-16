@@ -62,7 +62,7 @@ func NewHandler(browser *browse.Browser, queue *jobs.Queue, workerPool *jobs.Wor
 	smtpClient := notify.NewSMTPClient(&cfg.Notifications.Email)
 	d.AddChannel(smtpClient, cfg.Notifications.Email.IntervalMinutes)
 
-	return &Handler{
+	h := &Handler{
 		browser:    browser,
 		queue:      queue,
 		workerPool: workerPool,
@@ -71,6 +71,14 @@ func NewHandler(browser *browse.Browser, queue *jobs.Queue, workerPool *jobs.Wor
 		pushover:   pushover.NewClient(cfg.PushoverUserKey, cfg.PushoverAppToken),
 		dispatcher: d,
 	}
+
+	// Wired once here so encode-complete/failed notifications fire exactly
+	// once per event regardless of how many SSE clients (browser tabs) are
+	// connected to /api/jobs/stream — previously each connected client
+	// independently dispatched the same notification (see sse.go history).
+	queue.OnTerminalEvent = h.dispatchEncodeEvent
+
+	return h
 }
 
 // Dispatcher returns the notification dispatcher so callers (e.g. main.go) can

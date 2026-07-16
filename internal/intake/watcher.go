@@ -400,6 +400,8 @@ func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *Parse
 			w.sendToReviewQueue(path, reason, probe, "")
 			return nil, false
 		}
+		logger.Info("Intake: querying LLM for verification",
+			"file", filename, "candidate", result.Title, "confidence", result.Confidence)
 		llmResult, llmErr := w.LLMClient.Verify(ctx, parsed, []*LookupResult{result})
 		if llmErr != nil {
 			reason := fmt.Sprintf("LLM verification failed: %v", llmErr)
@@ -409,9 +411,13 @@ func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *Parse
 		}
 		if llmResult.Disabled {
 			reason := fmt.Sprintf("confidence %.0f%% requires LLM verification — LLM not configured", result.Confidence*100)
+			logger.Warn("Intake: LLM not configured, cannot verify", "file", filename)
 			w.sendToReviewQueue(path, reason, probe, "")
 			return nil, false
 		}
+		logger.Info("Intake: LLM verification result",
+			"file", filename, "candidate_id", llmResult.CandidateID,
+			"confidence", llmResult.Confidence, "reasoning", llmResult.Reasoning)
 		if llmResult.CandidateID == "none" || llmResult.Confidence < reviewThreshold {
 			reason := fmt.Sprintf("LLM verification rejected match: %s", llmResult.Reasoning)
 			logger.Warn("Intake: LLM rejected match", "file", filename)

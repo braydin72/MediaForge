@@ -42,8 +42,8 @@ func (a *Analyzer) Analyze(ctx context.Context, inputPath string, videoDuration 
 	}
 	defer os.RemoveAll(analysisDir)
 
-	// Get sample positions (3 positions at 25%, 50%, 75%)
-	positions := SamplePositions(videoDuration)
+	// Get sample positions (3 positions jittered around 25%, 50%, 75%)
+	positions := SamplePositions(videoDuration, inputPath)
 
 	logger.Info("Starting VMAF analysis",
 		"input", inputPath,
@@ -93,5 +93,6 @@ func (a *Analyzer) Analyze(ctx context.Context, inputPath string, videoDuration 
 		QualityMod:  result.Modifier,
 		VMafScore:   result.VMafScore,
 		SamplesUsed: len(positions),
+		BestEffort:  result.BestEffort,
 	}, nil
 }

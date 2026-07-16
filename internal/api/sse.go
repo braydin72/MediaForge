@@ -60,18 +60,24 @@ func (h *Handler) JobStream(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
 
-			// Check if we should send a Pushover notification
-			// This happens when a job completes/fails/skips/cancels and the queue is empty
+			// Check if we should send a Pushover "queue empty" summary notification.
+			// This happens when a job completes/fails/skips/cancels and the queue is empty.
+			// Per-event encode-complete/failed notifications are dispatched once,
+			// centrally, via queue.OnTerminalEvent (see NewHandler) — not here,
+			// since this loop runs once per connected SSE client and would
+			// otherwise send a duplicate notification per open browser tab.
 			if event.Type == "complete" || event.Type == "failed" || event.Type == "cancelled" || event.Type == "skipped" {
 				h.checkAndSendNotification(w, flusher)
-				h.dispatchEncodeEvent(r.Context(), event)
 			}
 		}
 	}
 }
 
-// dispatchEncodeEvent routes a completed/failed job event to the notification dispatcher.
-func (h *Handler) dispatchEncodeEvent(ctx context.Context, event jobs.JobEvent) {
+// dispatchEncodeEvent routes a completed/failed job event to the notification
+// dispatcher. Wired as queue.OnTerminalEvent (see NewHandler) so it fires
+// exactly once per event regardless of how many SSE clients are connected —
+// not tied to any single HTTP request's context, hence context.Background().
+func (h *Handler) dispatchEncodeEvent(event jobs.JobEvent) {
 	if h.dispatcher == nil || event.Job == nil {
 		return
 	}
@@ -80,12 +86,12 @@ func (h *Handler) dispatchEncodeEvent(ctx context.Context, event jobs.JobEvent) 
 
 	switch event.Type {
 	case "complete":
-		h.dispatcher.Dispatch(ctx, &notify.Event{
+		h.dispatcher.Dispatch(context.Background(), &notify.Event{
 			Type:     notify.EventEncodeComplete,
 			Filename: filename,
 		})
 	case "failed":
-		h.dispatcher.Dispatch(ctx, &notify.Event{
+		h.dispatcher.Dispatch(context.Background(), &notify.Event{
 			Type:     notify.EventEncodeFailed,
 			Filename: filename,
 			Reason:   event.Job.Error,
