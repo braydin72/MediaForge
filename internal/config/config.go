@@ -199,6 +199,16 @@ type Config struct {
 	// DefaultQuality is the SmartShrink quality tier for intake-queued AVC files.
 	// Options: "excellent", "good", "acceptable"
 	DefaultQuality string `yaml:"default_quality"`
+
+	// SkipSmartShrinkForAV1 sends AV1-sourced files straight to the Review Queue
+	// instead of running SmartShrink analysis/encode on them. AV1 already
+	// compresses better than HEVC/AVC at comparable quality, so a SmartShrink
+	// re-encode of an AV1 source usually can't beat the original size and just
+	// burns VMAF-analysis time before landing in Review Queue anyway. Leave this
+	// disabled if you intentionally want AV1 sources re-encoded to HEVC/AVC for
+	// decoder-compatibility reasons (e.g. a device or platform that can't
+	// decode AV1). Default: false (SmartShrink still attempts AV1 sources).
+	SkipSmartShrinkForAV1 bool `yaml:"skip_smartshrink_for_av1"`
 }
 
 // defaultPosterCachePath returns a platform-appropriate poster cache directory.
@@ -245,19 +255,19 @@ func DefaultConfig() *Config {
 			Enabled: true,
 			Path:    defaultPosterCachePath(),
 		},
-		MediaPath:         "/media",
-		TempPath:          "", // defaults to os.TempDir()
-		OriginalHandling:  "replace",
-		Workers:           1,
-		FFmpegPath:        "ffmpeg",
-		FFprobePath:       "ffprobe",
-		QualityHEVC:       0, // 0 = use encoder-specific default
-		QualityAV1:        0, // 0 = use encoder-specific default
-		ScheduleEnabled:   false,
-		ScheduleStartHour: 22, // 10 PM
-		ScheduleEndHour:   6,  // 6 AM
-		LogLevel:          "info",
-		OutputFormat:      "preserve",
+		MediaPath:             "/media",
+		TempPath:              "", // defaults to os.TempDir()
+		OriginalHandling:      "replace",
+		Workers:               1,
+		FFmpegPath:            "ffmpeg",
+		FFprobePath:           "ffprobe",
+		QualityHEVC:           0, // 0 = use encoder-specific default
+		QualityAV1:            0, // 0 = use encoder-specific default
+		ScheduleEnabled:       false,
+		ScheduleStartHour:     22, // 10 PM
+		ScheduleEndHour:       6,  // 6 AM
+		LogLevel:              "info",
+		OutputFormat:          "preserve",
 		TonemapHDR:            false,
 		TonemapAlgorithm:      "hable",
 		MaxConcurrentAnalyses: 1,
@@ -266,6 +276,7 @@ func DefaultConfig() *Config {
 		TargetReductionPct:    40,
 		DefaultPreset:         "smartshrink-hevc",
 		DefaultQuality:        "good",
+		SkipSmartShrinkForAV1: false,
 		Notifications: NotificationsConfig{
 			Events: NotificationEventsConfig{
 				EncodeComplete:  false,

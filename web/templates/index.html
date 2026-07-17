@@ -3472,6 +3472,19 @@
                                 </label>
                             </div>
                         </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">Skip SmartShrink for AV1 Sources</div>
+                                <div class="setting-desc">AV1 already compresses better than HEVC/AVC, so re-encoding an AV1 source usually can't shrink it further. When enabled, AV1 files are sent straight to the Review Queue instead of running analysis/encode. Leave disabled if you want AV1 re-encoded to HEVC/AVC for device compatibility.</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle">
+                                    <input type="checkbox" id="setting-skip-smartshrink-av1"
+                                           onchange="updateSetting('skip_smartshrink_for_av1', this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
                         <div class="setting-item setting-item-stacked">
                             <div class="setting-info">
                                 <div class="setting-name">Simultaneous SmartShrink Analyses</div>
@@ -5153,6 +5166,9 @@
 
                 // Allow same-codec re-encoding (default false - skip already-encoded files)
                 document.getElementById('setting-allow-same-codec').checked = config.allow_same_codec === true;
+
+                // Skip SmartShrink for AV1 sources (default false - still attempts AV1)
+                document.getElementById('setting-skip-smartshrink-av1').checked = config.skip_smartshrink_for_av1 === true;
 
                 // Max concurrent analyses (default 1)
                 document.getElementById('setting-max-analyses').value = config.max_concurrent_analyses || 1;
