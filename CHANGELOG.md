@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-17
+
 ### Fixed
 - The "SmartShrink: no viable encode" log line and the corresponding Review
   Queue failure reason omitted the actual output/input file sizes and the
