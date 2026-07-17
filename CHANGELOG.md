@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The "SmartShrink: no viable encode" log line and the corresponding Review
+  Queue failure reason omitted the actual output/input file sizes and the
+  CRF/CQ the best attempt ran at, making it hard to diagnose from the log
+  alone why a file was rejected. Both now include `crf`, `output_size`, and
+  `input_size`. Files modified: `internal/jobs/worker.go`.
+
+### Added
+- New `skip_smartshrink_for_av1` config option (also exposed as a Settings
+  toggle: "Skip SmartShrink for AV1 Sources", default off). When enabled,
+  AV1-sourced files are routed straight to Review Queue instead of running
+  a full SmartShrink VMAF analysis/encode, since AV1 already compresses
+  better than HEVC/AVC at comparable quality and a re-encode usually can't
+  beat the original size. Left disabled by default so AV1 sources are still
+  re-encoded for decoder-compatibility use cases. Files modified:
+  `internal/config/config.go`, `internal/jobs/worker.go`,
+  `internal/api/handler.go`, `web/templates/index.html`.
+
 ## [1.2.4] - 2026-07-16
 
 ### Fixed

@@ -540,31 +540,32 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Return a sanitized config (no sensitive paths exposed)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"version":                 mediaforge.Version,
-		"media_path":              h.cfg.MediaPath,
-		"original_handling":       h.cfg.OriginalHandling,
-		"use_completed_dir":       h.cfg.UseCompletedDir,
-		"workers":                 h.cfg.Workers,
-		"has_temp_path":           h.cfg.TempPath != "",
-		"pushover_user_key":       h.cfg.PushoverUserKey,
-		"pushover_app_token":      h.cfg.PushoverAppToken,
-		"pushover_configured":     h.pushover.IsConfigured(),
-		"notify_on_complete":      h.cfg.NotifyOnComplete,
-		"quality_hevc":            h.cfg.QualityHEVC,
-		"quality_av1":             h.cfg.QualityAV1,
-		"default_quality_hevc":    defaultHEVC,
-		"default_quality_av1":     defaultAV1,
-		"hevc_encoder":            string(bestHEVC.Accel),
-		"av1_encoder":             string(bestAV1.Accel),
-		"schedule_enabled":        h.cfg.ScheduleEnabled,
-		"schedule_start_hour":     h.cfg.ScheduleStartHour,
-		"schedule_end_hour":       h.cfg.ScheduleEndHour,
-		"output_format":           h.cfg.OutputFormat,
-		"tonemap_hdr":             h.cfg.TonemapHDR,
-		"tonemap_algorithm":       h.cfg.TonemapAlgorithm,
-		"max_concurrent_analyses": h.cfg.MaxConcurrentAnalyses,
-		"log_level":               h.cfg.LogLevel,
-		"allow_same_codec":        h.cfg.AllowSameCodec,
+		"version":                  mediaforge.Version,
+		"media_path":               h.cfg.MediaPath,
+		"original_handling":        h.cfg.OriginalHandling,
+		"use_completed_dir":        h.cfg.UseCompletedDir,
+		"workers":                  h.cfg.Workers,
+		"has_temp_path":            h.cfg.TempPath != "",
+		"pushover_user_key":        h.cfg.PushoverUserKey,
+		"pushover_app_token":       h.cfg.PushoverAppToken,
+		"pushover_configured":      h.pushover.IsConfigured(),
+		"notify_on_complete":       h.cfg.NotifyOnComplete,
+		"quality_hevc":             h.cfg.QualityHEVC,
+		"quality_av1":              h.cfg.QualityAV1,
+		"default_quality_hevc":     defaultHEVC,
+		"default_quality_av1":      defaultAV1,
+		"hevc_encoder":             string(bestHEVC.Accel),
+		"av1_encoder":              string(bestAV1.Accel),
+		"schedule_enabled":         h.cfg.ScheduleEnabled,
+		"schedule_start_hour":      h.cfg.ScheduleStartHour,
+		"schedule_end_hour":        h.cfg.ScheduleEndHour,
+		"output_format":            h.cfg.OutputFormat,
+		"tonemap_hdr":              h.cfg.TonemapHDR,
+		"tonemap_algorithm":        h.cfg.TonemapAlgorithm,
+		"max_concurrent_analyses":  h.cfg.MaxConcurrentAnalyses,
+		"log_level":                h.cfg.LogLevel,
+		"allow_same_codec":         h.cfg.AllowSameCodec,
+		"skip_smartshrink_for_av1": h.cfg.SkipSmartShrinkForAV1,
 		// Intake pipeline
 		"intake_enabled":               h.cfg.Intake.Enabled,
 		"intake_watch_folder":          h.cfg.Intake.WatchFolder,
@@ -630,6 +631,7 @@ type UpdateConfigRequest struct {
 	MaxConcurrentAnalyses *int    `json:"max_concurrent_analyses,omitempty"`
 	LogLevel              *string `json:"log_level,omitempty"`
 	AllowSameCodec        *bool   `json:"allow_same_codec,omitempty"`
+	SkipSmartShrinkForAV1 *bool   `json:"skip_smartshrink_for_av1,omitempty"`
 	// Intake pipeline
 	IntakeEnabled             *bool    `json:"intake_enabled,omitempty"`
 	IntakeWatchFolder         *string  `json:"intake_watch_folder,omitempty"`
@@ -802,6 +804,9 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	if req.AllowSameCodec != nil {
 		h.cfg.AllowSameCodec = *req.AllowSameCodec
 		h.queue.SetAllowSameCodec(*req.AllowSameCodec)
+	}
+	if req.SkipSmartShrinkForAV1 != nil {
+		h.cfg.SkipSmartShrinkForAV1 = *req.SkipSmartShrinkForAV1
 	}
 
 	// Handle log level

@@ -1,6 +1,45 @@
 CURRENT STATE NOTE
 
-=== Latest session: fixed false "duplicate" on Review Queue re-encode that replaces a library file in place ===
+=== Latest session: SmartShrink log now shows output size/CRF on rejection; added AV1-source skip option ===
+
+User's log showed a job that failed SmartShrink ("SmartShrink: no viable
+encode") with no output file size anywhere in the log, making it hard to
+tell what CRF/size it landed on without digging through DEBUG lines. Root
+cause: `internal/jobs/worker.go` line ~968, the `logger.Warn("SmartShrink:
+no viable encode", "job_id", job.ID)` call omitted `result.OutputSize`,
+`inputSize`, and the CRF used — even though those values were already
+computed for the Review Queue `reason` string two lines later. Fixed by
+adding `crf`, `output_size`, `input_size` fields to both the log line and
+the reason string, so log and Review Queue now show the same info.
+
+Follow-up: the specific job that triggered this was an AV1 source file. AV1
+already compresses ~20-30% better than HEVC/AVC at comparable quality, so
+SmartShrink re-encoding an AV1 source to HEVC will frequently fail to beat
+the original size and land in Review Queue anyway, burning VMAF-analysis
+time first. User asked for this to be skippable, but as an *option* (not
+hardcoded) — they may sometimes want AV1 sources force-re-encoded to
+HEVC/AVC for a device/platform that lacks an AV1 decoder.
+
+Added `skip_smartshrink_for_av1` config field (default `false`, so existing
+behavior is unchanged unless explicitly enabled). When true,
+`runSmartShrinkAnalysis` (internal/jobs/worker.go) short-circuits with
+`shouldSkip=true` for any job where `job.VideoCodec` is `av1`
+(case-insensitive), using the same `SkipJob` path as the existing HDR/
+too-short skip checks — so it shows up in the job list tagged "skipped"
+with an explanatory reason, not silently dropped and not sent to Review Queue.
+Wired end-to-end: config struct + default (internal/config/config.go),
+GET /api/config response field + PUT /api/config request field + apply
+logic (internal/api/handler.go), and a new Settings-drawer toggle "Skip
+SmartShrink for AV1 Sources" under Transcode settings, next to Tonemap HDR
+(web/templates/index.html) — both the setting-item block and the
+loadSettings() checkbox population were added.
+
+Verified: `go build ./...`, `go vet ./...`, `go test ./...` (full suite)
+all pass. NOT yet verified live in the browser (Settings drawer toggle
+render/save round-trip, or an actual AV1-source job hitting the skip path)
+— recommend testing both before relying on this in production.
+
+=== Prior session: fixed false "duplicate" on Review Queue re-encode that replaces a library file in place ===
 
 User reported: re-encoding an existing library file (AVC "ER (1994) - S05E07
 - Hazed and Confused.mp4" -> HEVC) via Review Queue "Re-encode Custom"

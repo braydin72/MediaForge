@@ -963,9 +963,12 @@ func (w *Worker) processJob(job *Job) {
 			if float64(result.OutputSize) >= float64(inputSize) {
 				os.Remove(tempPath)
 				reason := fmt.Sprintf(
-					"no viable encode found within quality constraints: best attempt was %.0f%% of original size",
-					float64(result.OutputSize)/float64(inputSize)*100)
-				logger.Warn("SmartShrink: no viable encode", "job_id", job.ID)
+					"no viable encode found within quality constraints: best attempt was %.0f%% of original size (crf/cq=%d, output=%s, input=%s)",
+					float64(result.OutputSize)/float64(inputSize)*100, bestCRF,
+					util.FormatBytes(result.OutputSize), util.FormatBytes(inputSize))
+				logger.Warn("SmartShrink: no viable encode", "job_id", job.ID,
+					"crf", bestCRF, "output_size", util.FormatBytes(result.OutputSize),
+					"input_size", util.FormatBytes(inputSize))
 				_ = w.queue.FailJob(job.ID, reason)
 				// job.LibraryPath, when set, already carries the metadata-corrected name
 				// (resolved during intake before this job was enqueued); job.InputPath's
@@ -1118,6 +1121,14 @@ func (wp *WorkerPool) runSmartShrinkAnalysis(ctx context.Context, job *Job, pres
 	// Check before acquiring analysis slot so HDR jobs don't block SDR analyses.
 	if job.IsHDR {
 		return true, "SmartShrink does not support HDR content. Use a Compress preset or tonemap to SDR first", 0, 0, 0, false, nil
+	}
+
+	// AV1 sources already compress better than HEVC/AVC at comparable quality,
+	// so a SmartShrink re-encode usually can't beat the original size. Skip
+	// straight to Review Queue when configured to do so, rather than burning
+	// VMAF-analysis time on an encode that will likely be rejected anyway.
+	if wp.cfg.SkipSmartShrinkForAV1 && strings.EqualFold(job.VideoCodec, "av1") {
+		return true, "Source is already AV1; SmartShrink skipped (skip_smartshrink_for_av1 enabled)", 0, 0, 0, false, nil
 	}
 
 	// Update phase immediately so UI shows "Analyzing" while waiting for slot
