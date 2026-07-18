@@ -1,6 +1,24 @@
 CURRENT STATE NOTE
 
-=== Latest session: SmartShrink log now shows output size/CRF on rejection; added AV1-source skip option ===
+=== Latest session: released v1.3.0, synced docs ===
+
+Ran the `/release` skill: versioned CHANGELOG.md's `[Unreleased]` section as
+`[1.3.0] - 2026-07-17` (minor bump — the AV1-skip option below is new
+user-facing behavior), merged `develop` into `main`, confirmed Lint+Test
+green on `main`, tagged `v1.3.0`, pushed (triggered `release.yml` —
+GitHub Release + Windows installer built successfully, assets:
+MediaForge-Setup-1.3.0.exe, mediaforge.exe, mediaforge-tray.exe), synced
+`develop` back to `main` (fast-forward). `main`/`develop`/`v1.3.0` all
+confirmed at the same commit.
+
+Also added the missing `skip_smartshrink_for_av1` field to
+MEDIAFORGE_SPEC.md's `transcode:` config sample (`## Configuration
+(mediaforge.yaml)` section) — it was implemented in the prior session but
+never added to the spec's config reference.
+
+Nothing outstanding from this session.
+
+=== Prior session: SmartShrink log now shows output size/CRF on rejection; added AV1-source skip option ===
 
 User's log showed a job that failed SmartShrink ("SmartShrink: no viable
 encode") with no output file size anywhere in the log, making it hard to

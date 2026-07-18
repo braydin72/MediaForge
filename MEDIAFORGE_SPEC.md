@@ -338,6 +338,7 @@ transcode:
   target_reduction_pct: 40
   encoder_speed: "medium"                # "slowest"|"slower"|"slow"|"medium"|"fast"
   gpu: "cpu"                             # "nvidia" | "amd" | "intel" | "cpu"
+  skip_smartshrink_for_av1: false        # route AV1 sources straight to Review Queue instead of SmartShrink
 
 notifications:
   base_url: ""
