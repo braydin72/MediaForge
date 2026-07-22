@@ -1308,9 +1308,15 @@ func (w *Worker) verifyPostEncodeVMAF(ctx context.Context, job *Job, outputPath 
 		return 0, fmt.Errorf("no sample positions available")
 	}
 
-	// Separate subdirectories: ExtractSamples names files by position index
-	// (sample_0.mkv, sample_1.mkv, ...), which would collide if reference and
-	// output samples were extracted into the same directory.
+	// Separate subdirectories: ExtractSamplesAccurate names files by position
+	// index (sample_0.mkv, sample_1.mkv, ...), which would collide if
+	// reference and output samples were extracted into the same directory.
+	//
+	// Uses ExtractSamplesAccurate (frame-accurate re-encode), not
+	// ExtractSamples (stream copy): job.InputPath and outputPath are two
+	// independently-encoded files with unrelated keyframe schedules, so
+	// stream-copy extraction from each snaps to different actual content at
+	// the "same" position, producing meaningless VMAF comparisons.
 	refDir, err := os.MkdirTemp(w.cfg.GetTempDir(), "smartshrink_verify_ref_")
 	if err != nil {
 		return 0, fmt.Errorf("create temp dir: %w", err)
@@ -1323,13 +1329,13 @@ func (w *Worker) verifyPostEncodeVMAF(ctx context.Context, job *Job, outputPath 
 	}
 	defer os.RemoveAll(outDir)
 
-	refSamples, err := vmaf.ExtractSamples(ctx, w.cfg.FFmpegPath, job.InputPath, refDir, duration, positions)
+	refSamples, err := vmaf.ExtractSamplesAccurate(ctx, w.cfg.FFmpegPath, job.InputPath, refDir, duration, positions)
 	if err != nil {
 		return 0, fmt.Errorf("extract reference samples: %w", err)
 	}
 	defer vmaf.CleanupSamples(refSamples)
 
-	outSamples, err := vmaf.ExtractSamples(ctx, w.cfg.FFmpegPath, outputPath, outDir, duration, positions)
+	outSamples, err := vmaf.ExtractSamplesAccurate(ctx, w.cfg.FFmpegPath, outputPath, outDir, duration, positions)
 	if err != nil {
 		return 0, fmt.Errorf("extract output samples: %w", err)
 	}

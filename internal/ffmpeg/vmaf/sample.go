@@ -146,6 +146,69 @@ func ExtractSamples(ctx context.Context, ffmpegPath, inputPath, tempDir string,
 	return samples, nil
 }
 
+// ExtractSamplesAccurate extracts video samples at specified positions using
+// a lossless re-encode instead of stream copy. Slower than ExtractSamples,
+// but frame-accurate: with -ss before -i, ffmpeg only guarantees exact-time
+// seeking when re-encoding (it decodes from the nearest preceding keyframe
+// and discards frames until reaching the target time); stream copy instead
+// snaps to that keyframe itself. Two independently-encoded files (e.g. a
+// source and its transcoded output) place keyframes on unrelated schedules,
+// so stream-copy extraction from each can land on genuinely different
+// content at the "same" position — use this instead whenever samples from
+// two different files need to correspond to the same real timestamps (see
+// Worker.verifyPostEncodeVMAF). -crf 0 keeps the re-encode mathematically
+// lossless so it doesn't introduce its own quality distortion into the
+// VMAF comparison.
+func ExtractSamplesAccurate(ctx context.Context, ffmpegPath, inputPath, tempDir string,
+	videoDuration time.Duration, positions []float64) ([]*Sample, error) {
+
+	samples := make([]*Sample, 0, len(positions))
+
+	for i, pos := range positions {
+		startTime := time.Duration(float64(videoDuration) * pos)
+
+		// Ensure we don't go past end of video
+		if startTime+time.Duration(SampleDuration)*time.Second > videoDuration {
+			startTime = videoDuration - time.Duration(SampleDuration)*time.Second
+			if startTime < 0 {
+				startTime = 0
+			}
+		}
+
+		samplePath := filepath.Join(tempDir, fmt.Sprintf("sample_%d.mkv", i))
+
+		args := []string{
+			"-ss", fmt.Sprintf("%.3f", startTime.Seconds()),
+			"-i", inputPath,
+			"-t", fmt.Sprintf("%d", SampleDuration),
+			"-c:v", "libx264",
+			"-preset", "ultrafast",
+			"-crf", "0",
+			"-an", "-sn",
+			"-y",
+			samplePath,
+		}
+
+		cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			logger.Error("FFmpeg accurate sample extraction failed", "sample", i, "error", err, "stderr", lastLines(string(output), 5))
+			for _, s := range samples {
+				os.Remove(s.Path)
+			}
+			return nil, fmt.Errorf("failed to extract sample %d: %w (%s)", i, err, lastLines(string(output), 3))
+		}
+
+		samples = append(samples, &Sample{
+			Path:     samplePath,
+			Position: startTime,
+			Duration: time.Duration(SampleDuration) * time.Second,
+		})
+	}
+
+	return samples, nil
+}
+
 // CleanupSamples removes all sample files
 func CleanupSamples(samples []*Sample) {
 	for _, s := range samples {
