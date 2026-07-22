@@ -1302,11 +1302,25 @@ func (wp *WorkerPool) runSmartShrinkAnalysis(ctx context.Context, job *Job, pres
 // verification step to confirm the real output meets the effective
 // threshold before it's handed off to finalization/library delivery.
 func (w *Worker) verifyPostEncodeVMAF(ctx context.Context, job *Job, outputPath string) (float64, error) {
-	duration := time.Duration(job.Duration) * time.Millisecond
-	positions := vmaf.SamplePositions(duration, job.InputPath, w.cfg.VMafSampleCount)
+	srcDuration := time.Duration(job.Duration) * time.Millisecond
+	positions := vmaf.SamplePositions(srcDuration, job.InputPath, w.cfg.VMafSampleCount)
 	if len(positions) == 0 {
 		return 0, fmt.Errorf("no sample positions available")
 	}
+
+	// The output's real duration can drift slightly from the source's probed
+	// duration (container/timestamp differences from re-encoding). positions
+	// are fractional (0-1), so applying srcDuration's fraction to the output
+	// file compounds increasingly with each later position — a real bug
+	// caught in testing: sample 0 (near the start) scored fine while later
+	// samples scored near-zero because they seeked to the wrong point in the
+	// output. Probe the output's own duration and apply the same fractional
+	// positions to it independently.
+	outProbe, err := w.prober.Probe(ctx, outputPath)
+	if err != nil {
+		return 0, fmt.Errorf("probe output duration: %w", err)
+	}
+	outDuration := outProbe.Duration
 
 	// Separate subdirectories: ExtractSamplesAccurate names files by position
 	// index (sample_0.mkv, sample_1.mkv, ...), which would collide if
@@ -1329,13 +1343,13 @@ func (w *Worker) verifyPostEncodeVMAF(ctx context.Context, job *Job, outputPath 
 	}
 	defer os.RemoveAll(outDir)
 
-	refSamples, err := vmaf.ExtractSamplesAccurate(ctx, w.cfg.FFmpegPath, job.InputPath, refDir, duration, positions)
+	refSamples, err := vmaf.ExtractSamplesAccurate(ctx, w.cfg.FFmpegPath, job.InputPath, refDir, srcDuration, positions)
 	if err != nil {
 		return 0, fmt.Errorf("extract reference samples: %w", err)
 	}
 	defer vmaf.CleanupSamples(refSamples)
 
-	outSamples, err := vmaf.ExtractSamplesAccurate(ctx, w.cfg.FFmpegPath, outputPath, outDir, duration, positions)
+	outSamples, err := vmaf.ExtractSamplesAccurate(ctx, w.cfg.FFmpegPath, outputPath, outDir, outDuration, positions)
 	if err != nil {
 		return 0, fmt.Errorf("extract output samples: %w", err)
 	}
