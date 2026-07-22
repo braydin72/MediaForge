@@ -9,4 +9,11 @@ type AnalysisResult struct {
 	SkipReason  string  // Reason for skip
 	SamplesUsed int     // Number of samples analyzed
 	BestEffort  bool    // True if no CRF cleared the threshold; VMafScore is the best achievable ceiling
+
+	// CeilingVMAF and EffectiveThreshold are only set in adaptive-target mode
+	// (Analyzer.Adaptive). CeilingVMAF is the content's near-lossless VMAF
+	// ceiling; EffectiveThreshold is min(tier_threshold, CeilingVMAF-margin),
+	// the value actually used to drive the search.
+	CeilingVMAF        float64
+	EffectiveThreshold float64
 }

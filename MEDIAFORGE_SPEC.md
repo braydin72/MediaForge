@@ -339,6 +339,8 @@ transcode:
   encoder_speed: "medium"                # "slowest"|"slower"|"slow"|"medium"|"fast"
   gpu: "cpu"                             # "nvidia" | "amd" | "intel" | "cpu"
   skip_smartshrink_for_av1: false        # route AV1 sources straight to Review Queue instead of SmartShrink
+  smartshrink_adaptive_target: false     # EXPERIMENTAL: target content's real VMAF ceiling instead of always chasing the fixed tier threshold
+  vmaf_sample_count: 4                   # short clips sampled per source for VMAF estimation (3-6)
 
 notifications:
   base_url: ""

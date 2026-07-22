@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (experimental branch `experimental/adaptive-vmaf-target`, not merged)
+- New `smartshrink_adaptive_target` config option (default `false`, also
+  exposed as a Settings toggle: "Adaptive VMAF Target (Experimental)").
+  When enabled, SmartShrink probes the source content's real achievable
+  VMAF ceiling (a near-lossless sample score) before running the tier
+  search, and targets `min(tier_threshold, ceiling - margin)` instead of
+  always chasing the tier's fixed absolute threshold. Fixes jobs that
+  previously wasted search time chasing an unreachable threshold and then
+  landed in Review Queue reporting "best attempt was 117-200% of original
+  size" — the search now knows upfront when a tier is unreachable for a
+  given source and converges on the highest CRF close to that source's own
+  ceiling instead. Also adds a post-encode VMAF re-verification pass (using
+  the same deterministic sample positions as phase-1 analysis) on the real
+  full-file output before it's handed off to finalization/library delivery,
+  so a diverging sample-based prediction doesn't silently ship an
+  unverified file — on failure the job routes to Review Queue with a
+  distinct "post-encode VMAF verification failed" reason instead.
+- New `vmaf_sample_count` config option (default `4`, range 3-6, also
+  exposed as a Settings number input: "VMAF Sample Count"). Governs how
+  many short clips are sampled per source for all VMAF estimation
+  (phase-1 tier search, adaptive ceiling probe, and post-encode
+  verification) — more samples reduce sensitivity to any single atypical
+  clip skewing the average. Applies regardless of adaptive-target mode.
+  `SamplePositions` (`internal/ffmpeg/vmaf/sample.go`) generalized from a
+  hardcoded 3-anchor scheme to evenly-spaced anchors for any count.
+- Files modified: `internal/config/config.go`, `internal/ffmpeg/vmaf/sample.go`,
+  `internal/ffmpeg/vmaf/search.go`, `internal/ffmpeg/vmaf/analyze.go`,
+  `internal/ffmpeg/vmaf/vmaf.go`, `internal/jobs/worker.go`,
+  `internal/api/handler.go`, `web/templates/index.html`,
+  `MEDIAFORGE_SPEC.md`. Default (`smartshrink_adaptive_target: false`)
+  reproduces today's exact existing SmartShrink behavior unchanged.
+
 ## [1.3.0] - 2026-07-17
 
 ### Fixed

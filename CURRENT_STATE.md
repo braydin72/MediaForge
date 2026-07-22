@@ -1,6 +1,89 @@
 CURRENT STATE NOTE
 
-=== Latest session: released v1.3.0, synced docs ===
+=== Latest session: experimental adaptive VMAF target for SmartShrink (branch `experimental/adaptive-vmaf-target`, off `develop`, NOT merged) ===
+
+User reported real production logs showing SmartShrink jobs landing in
+Review Queue with "no viable encode found ... best attempt was 117-200% of
+original size". Root cause: SmartShrink's phase-1 CRF search
+(`interpolatedSearchCRF`, `internal/ffmpeg/vmaf/search.go`) always chases a
+fixed absolute VMAF threshold per quality tier (85/90/94). When the source
+content's real achievable quality ceiling sits below that threshold
+(common on already-efficiently-compressed sources or grainy/noisy content),
+the search has no way to know that upfront — it narrows toward near-lossless
+CRFs chasing an unreachable score, and only discovers the ceiling reactively
+once every CRF has failed. The existing best-effort fallback
+(`applyBestEffortFallback`) is a capped, coarse ±2-step/2.0-VMAF-tolerance
+probe that often isn't aggressive enough to actually beat the source size.
+
+Implemented an opt-in "adaptive VMAF target" mode entirely behind a new
+config flag `smartshrink_adaptive_target` (default `false` — existing
+behavior is completely unchanged unless explicitly enabled):
+- New ceiling probe: before the tier search runs, one extra sample-scoring
+  pass at the best-quality end of the CRF/bitrate range (`qRange.Min` /
+  `qRange.MaxMod`) establishes the content's real achievable VMAF ceiling.
+  New `AdaptiveBinarySearch` (`internal/ffmpeg/vmaf/search.go`) does this,
+  then computes `effectiveThreshold = min(tier_threshold, ceiling - 2.0)`
+  (`computeEffectiveThreshold`, unit-tested) and runs the existing
+  `interpolatedSearchCRF`/`interpolatedSearchBitrate` against that instead
+  of the raw tier threshold — so the search converges directly on the
+  highest CRF close to the content's own ceiling instead of wastefully
+  probing toward an unreachable number.
+- `internal/jobs/worker.go`'s SmartShrink retry loop now also uses this
+  effective threshold (when adaptive mode is on) instead of the raw tier
+  threshold, so it keeps pushing toward genuinely achievable smaller sizes.
+- New post-encode VMAF verification step (adaptive mode only, gated on
+  `preset.IsSmartShrink && cfg.SmartShrinkAdaptiveTarget`): after the real
+  full-file encode completes, re-extracts samples at the SAME deterministic
+  positions (`vmaf.SamplePositions(duration, job.InputPath, sampleCount)` —
+  no need to persist temp files across phases, positions are reproducible
+  from just those three inputs) from both `job.InputPath` and the real
+  output file, re-scores VMAF, and compares against
+  `effectiveThreshold - 1.0` tolerance. On failure, routes to Review Queue
+  with a new, distinct reason ("post-encode VMAF verification failed:
+  measured X, expected >= Y") instead of silently shipping an unverified
+  file — consistent with the project's "no silent failures" principle.
+  New `Worker.verifyPostEncodeVMAF` helper.
+- Also bumped VMAF sample count from a hardcoded 3 to a new configurable
+  `vmaf_sample_count` (default 4, range 3-6) — applies regardless of
+  adaptive mode, reduces sensitivity to any single atypical sample clip.
+  `SamplePositions` (`internal/ffmpeg/vmaf/sample.go`) generalized from
+  hardcoded `{0.25, 0.50, 0.75}` anchors to evenly-spaced anchors for any
+  count, with jitter range scaled down proportionally so windows never
+  overlap.
+- `runSmartShrinkAnalysis` (`internal/jobs/worker.go`) refactored from an
+  unwieldy 7-value return tuple into a `smartShrinkAnalysisResult` struct
+  (motivated directly by adding 2 more fields: `CeilingVMAF`,
+  `EffectiveThreshold`).
+- Config: `smartshrink_adaptive_target` (bool, default false) and
+  `vmaf_sample_count` (int, default 4, clamped 3-6 in `Load()`) added to
+  `internal/config/config.go`, wired through `GET`/`PUT /api/config`
+  (`internal/api/handler.go`) and a new Settings-drawer toggle + number
+  input (`web/templates/index.html`, next to the existing "Skip SmartShrink
+  for AV1 Sources" toggle). Both fields added to `MEDIAFORGE_SPEC.md`'s
+  `transcode:` config sample.
+
+Verified: `go build ./...`, `go vet ./...`, `go test ./...` (full suite,
+including new `TestComputeEffectiveThreshold` and updated/new
+`SamplePositions` tests covering count=3/4/5/6 spacing and non-overlap)
+all pass.
+
+NOT yet verified live — this needs real ffmpeg/VMAF and real media files
+which aren't available in this environment. Recommend the user build this
+branch, enable `smartshrink_adaptive_target: true`, and re-run a real
+SmartShrink job against a known hard-to-compress/low-ceiling source (e.g.
+the ER (1994) S01E12 file referenced further down this file that previously
+produced a 117-200% Review Queue rejection under the old fixed-threshold
+behavior) and confirm: (1) the log shows the new ceiling-probe score and
+effective threshold ("Adaptive VMAF ceiling probe complete" /
+"SmartShrink analysis complete" with `ceiling_vmaf`/`effective_threshold`),
+(2) the job either completes with a genuinely smaller output or lands in
+Review Queue with the new distinct post-encode-verification reason rather
+than the old "no viable encode ... 117-200%" message, (3) toggling the flag
+back off reproduces today's exact existing behavior unchanged. This branch
+(`experimental/adaptive-vmaf-target`) is intentionally NOT merged into
+`develop`/`main` — stays experimental pending that real-world validation.
+
+=== Prior session: released v1.3.0, synced docs ===
 
 Ran the `/release` skill: versioned CHANGELOG.md's `[Unreleased]` section as
 `[1.3.0] - 2026-07-17` (minor bump — the AV1-skip option below is new

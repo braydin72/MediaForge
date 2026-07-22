@@ -36,6 +36,12 @@ type SearchResult struct {
 	Iterations     int     // Number of quality levels tested (each test encodes all samples)
 	BestEffort     bool    // True if no CRF met the threshold; Quality/VMafScore reflect best found
 	BestEffortBase int     // Original best-effort CRF before plateau fallback climbed higher (0 if unchanged/not applicable)
+
+	// CeilingVMAF and EffectiveThreshold are only set by AdaptiveBinarySearch.
+	// CeilingVMAF is the near-lossless VMAF ceiling probed before the search;
+	// EffectiveThreshold is the (possibly lowered) threshold actually used.
+	CeilingVMAF        float64
+	EffectiveThreshold float64
 }
 
 // EncodeSampleFunc is a function that encodes a sample at the given quality
@@ -66,6 +72,87 @@ func BinarySearch(ctx context.Context, ffmpegPath string, referenceSamples []*Sa
 		return nil, fmt.Errorf("invalid CRF range: min %d >= max %d", qRange.Min, qRange.Max)
 	}
 	return interpolatedSearchCRF(scorer, qRange, threshold)
+}
+
+// ceilingSearchMargin is how far (in VMAF points) below the probed ceiling
+// the adaptive search's effective threshold is set. Without this margin,
+// requiring a score exactly equal to the ceiling would only ever be met at
+// (or very near) the same near-lossless quality used for the ceiling probe
+// itself, defeating the purpose of searching for a smaller file. This is
+// intentionally a separate constant from bestEffortFallbackTolerance: that
+// one governs a post-hoc fallback step, this one drives the primary search
+// target from the start.
+const ceilingSearchMargin = 2.0
+
+// computeEffectiveThreshold returns the threshold the adaptive search should
+// actually target: the tier's threshold if the content's ceiling clears it
+// (unchanged behavior), or the ceiling minus a small margin if the ceiling
+// falls short (so the search can converge on the highest CRF that still
+// scores close to what this content can ever achieve, instead of endlessly
+// chasing an unreachable tier threshold).
+func computeEffectiveThreshold(tierThreshold, ceilingScore, margin float64) float64 {
+	if ceilingScore-margin < tierThreshold {
+		return ceilingScore - margin
+	}
+	return tierThreshold
+}
+
+// AdaptiveBinarySearch is like BinarySearch, but first probes the content's
+// real achievable VMAF ceiling (scoring at the best-quality end of qRange)
+// and searches against min(threshold, ceiling-margin) instead of always the
+// raw tier threshold. This avoids the plain search wastefully narrowing
+// toward near-lossless CRFs chasing a threshold the content can never clear,
+// and lets it converge directly on the smallest file that's genuinely close
+// to this content's own quality ceiling.
+func AdaptiveBinarySearch(ctx context.Context, ffmpegPath string, referenceSamples []*Sample,
+	qRange QualityRange, threshold float64, height int, encodeSample EncodeSampleFunc) (*SearchResult, error) {
+
+	if len(referenceSamples) == 0 {
+		return nil, fmt.Errorf("no reference samples provided")
+	}
+
+	scorer := newSampleScorer(ctx, ffmpegPath, referenceSamples, height, encodeSample)
+
+	var ceilingScore float64
+	var err error
+	if qRange.UsesBitrate {
+		if qRange.MinMod >= qRange.MaxMod {
+			return nil, fmt.Errorf("invalid bitrate range: min %.3f >= max %.3f", qRange.MinMod, qRange.MaxMod)
+		}
+		ceilingScore, err = scorer.scoreModifier(qRange.MaxMod)
+	} else {
+		if qRange.Min >= qRange.Max {
+			return nil, fmt.Errorf("invalid CRF range: min %d >= max %d", qRange.Min, qRange.Max)
+		}
+		ceilingScore, err = scorer.scoreCRF(qRange.Min)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("ceiling probe: %w", err)
+	}
+
+	effectiveThreshold := computeEffectiveThreshold(threshold, ceilingScore, ceilingSearchMargin)
+
+	logger.Info("Adaptive VMAF ceiling probe complete",
+		"ceiling_vmaf", fmt.Sprintf("%.2f", ceilingScore),
+		"tier_threshold", threshold,
+		"effective_threshold", fmt.Sprintf("%.2f", effectiveThreshold))
+
+	var result *SearchResult
+	if qRange.UsesBitrate {
+		result, err = interpolatedSearchBitrate(scorer, qRange, effectiveThreshold)
+	} else {
+		result, err = interpolatedSearchCRF(scorer, qRange, effectiveThreshold)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, nil
+	}
+
+	result.CeilingVMAF = ceilingScore
+	result.EffectiveThreshold = effectiveThreshold
+	return result, nil
 }
 
 // sampleScorer handles encoding and VMAF scoring

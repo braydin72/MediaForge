@@ -335,6 +335,32 @@ func TestBestEffortFallbackAccepts(t *testing.T) {
 	}
 }
 
+func TestComputeEffectiveThreshold(t *testing.T) {
+	tests := []struct {
+		name          string
+		tierThreshold float64
+		ceilingScore  float64
+		margin        float64
+		want          float64
+	}{
+		{"ceiling well above tier", 95.0, 99.0, 2.0, 95.0},
+		{"ceiling exactly clears tier with margin", 95.0, 97.0, 2.0, 95.0},
+		{"ceiling below tier", 95.0, 94.0, 2.0, 92.0},
+		{"ceiling far below tier", 90.0, 66.0, 2.0, 64.0},
+		{"ceiling minus margin exactly equals tier", 95.0, 97.0001, 2.0, 95.0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := computeEffectiveThreshold(tt.tierThreshold, tt.ceilingScore, tt.margin)
+			if got != tt.want {
+				t.Errorf("computeEffectiveThreshold(%v, %v, %v) = %v, want %v",
+					tt.tierThreshold, tt.ceilingScore, tt.margin, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestVmafLerpModMidpointFallback specifically tests the zero/negative score diff fallback
 func TestVmafLerpModMidpointFallback(t *testing.T) {
 	// When scores are equal, should return midpoint

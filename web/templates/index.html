@@ -3485,6 +3485,30 @@
                                 </label>
                             </div>
                         </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">Adaptive VMAF Target (Experimental)</div>
+                                <div class="setting-desc">Probes each source's real achievable VMAF ceiling before searching, and targets whichever is lower: the quality tier's threshold, or the content's own ceiling. Avoids wasted search time and oversized outputs on content that can never reach the configured tier. Also re-verifies VMAF on the real output before delivery.</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle">
+                                    <input type="checkbox" id="setting-smartshrink-adaptive-target"
+                                           onchange="updateSetting('smartshrink_adaptive_target', this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">VMAF Sample Count</div>
+                                <div class="setting-desc">Number of short clips extracted from each source to estimate VMAF. More samples reduce sensitivity to any single atypical clip, at the cost of longer analysis time.</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="number" class="setting-input" id="setting-vmaf-sample-count"
+                                       min="3" max="6" style="width: 80px"
+                                       onchange="updateSetting('vmaf_sample_count', parseInt(this.value))">
+                            </div>
+                        </div>
                         <div class="setting-item setting-item-stacked">
                             <div class="setting-info">
                                 <div class="setting-name">Simultaneous SmartShrink Analyses</div>
@@ -5169,6 +5193,12 @@
 
                 // Skip SmartShrink for AV1 sources (default false - still attempts AV1)
                 document.getElementById('setting-skip-smartshrink-av1').checked = config.skip_smartshrink_for_av1 === true;
+
+                // Adaptive VMAF target (experimental, default false)
+                document.getElementById('setting-smartshrink-adaptive-target').checked = config.smartshrink_adaptive_target === true;
+
+                // VMAF sample count (default 4)
+                document.getElementById('setting-vmaf-sample-count').value = config.vmaf_sample_count || 4;
 
                 // Max concurrent analyses (default 1)
                 document.getElementById('setting-max-analyses').value = config.max_concurrent_analyses || 1;
