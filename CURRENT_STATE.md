@@ -1,6 +1,230 @@
 CURRENT STATE NOTE
 
-=== Latest session: released v1.3.0, synced docs ===
+=== Latest session (cont. once more): adaptive-target validated over ~45 real jobs, promoted to default, merged into develop ===
+
+Direct continuation of the two sessions below. After the post-encode
+verification removal (previous entry), continued watching the user's live
+queue in real time (Monitor tool tailing the log) through ~45 more real
+SmartShrink jobs across 6 different shows (Teenage Mutant Ninja Turtles
+2012, Star Wars Rebels, Earth 2 1994, Lost in Space 1965, S.W.A.T. 1975,
+Smallville 2001), covering both the "good" (85) and "excellent" (94) tiers
+and both branches of the adaptive logic (ceiling below tier, ceiling above
+tier). Zero false failures. Also incidentally confirmed the legitimate
+"no viable encode" safety net (pre-existing, unrelated code) correctly
+identified genuinely unshrinkable content (all of Earth 2 1994, one old
+Lost in Space episode) without adaptive-target overriding it.
+
+Separately noticed (not fixed, out of scope): a pre-existing bug where
+"no viable encode" jobs get automatically re-queued and reprocessed from
+scratch instead of staying resolved in Review Queue — watched the exact
+same Earth 2 episode ("Flower Child") get reprocessed 3 times with
+byte-identical results, including once across a ~7 hour unattended
+overnight gap. This burns real GPU time on guaranteed-to-fail files. Not
+investigated further this session (separate from adaptive-target) —
+flagged for a future session if the user wants it fixed.
+
+User decision after reviewing the validation results: promote
+`smartshrink_adaptive_target` to the default (was `false`, opt-in), move
+its Settings toggle out of the collapsed "Advanced" group into the
+always-visible "Transcoding" group, and merge the branch into `develop`.
+Implemented:
+- `internal/config/config.go`: `DefaultConfig()` now sets
+  `SmartShrinkAdaptiveTarget: true`; updated the field's doc comment
+  (was stale — still described the removed post-encode verification pass
+  and the old `false` default).
+- `web/templates/index.html`: moved the "Adaptive VMAF Target" toggle
+  from the `advanced-settings` group to the `Transcoding` group (right
+  after "Allow same-codec re-encoding"), dropped the "(Experimental)"
+  suffix from its label, and updated its description (removed the stale
+  post-encode-verification sentence, added "On by default."). Left
+  "VMAF Sample Count" in Advanced — it's a tuning knob, not a mode switch.
+- `MEDIAFORGE_SPEC.md` and `CHANGELOG.md` updated to reflect the new
+  default and the setting's new location; the CHANGELOG "Added" section
+  no longer says "not merged."
+
+Verified: `go build ./...`, `go vet ./...`, `go test ./...` (full suite)
+all pass after the default/UI changes.
+
+Merged `experimental/adaptive-vmaf-target` into `develop` (see git log for
+the merge commit). The branch is NOT deleted in case further follow-up
+work is wanted; `develop` is now the source of truth for this feature.
+
+Per explicit user instruction: after this merge, kept the Monitor tool
+watching the user's live log (same `%APPDATA%\Mediaforge\logs\mediaforge.log`
+tail) to continue observing the running queue, since the user said they
+have limited coding headway remaining this session/week and wants to
+mostly watch rather than keep making code changes. No further code changes
+should be made unless the user asks or a new real problem shows up in the
+log.
+
+=== Prior session (cont.): removed post-encode VMAF verification after live testing found a structural bug; adaptive-target threshold logic validated and kept ===
+
+Direct continuation of the adaptive-VMAF-target session below, same branch
+(`experimental/adaptive-vmaf-target`, off `develop`, still NOT merged). User
+deployed the feature to their live MediaForge install (via
+`update-mediaforge.ps1`) and ran a real batch of ~20 SmartShrink jobs
+(Teenage Mutant Ninja Turtles 2012 S02, Star Wars Rebels S01) with
+`smartshrink_adaptive_target: true`, while this session watched the live
+log in real time (via the Monitor tool tailing
+`%APPDATA%\Mediaforge\logs\mediaforge.log`).
+
+Ceiling probe + effective-threshold search + retry loop (the CORE adaptive-
+target logic, described below) worked correctly across every single job:
+correctly lowered the target when a source's ceiling fell below the tier
+threshold, correctly left the raw tier threshold untouched when the ceiling
+already cleared it, and the retry loop correctly pushed toward smaller
+files using whichever target applied. This part is validated against real
+production content and kept as-is.
+
+The post-encode verification step (also described below) did NOT hold up:
+- First false failure (TMNT S02E17, initial deploy): traced to
+  `ExtractSamples`'s stream-copy mode snapping to mismatched keyframes
+  between the source and the independently-encoded output — fixed by
+  adding `vmaf.ExtractSamplesAccurate` (lossless re-encode instead of
+  stream copy, for frame-accurate seeking).
+- Second false failure (Star Wars Rebels S01E04, after deploying the above
+  fix): per-sample scores degraded the further into the file the sample
+  was (sample 0 fine, samples 1-3 progressively worse) — traced to
+  `verifyPostEncodeVMAF` applying the SOURCE's probed duration to compute
+  seek fractions for BOTH the source AND the output extraction; fixed by
+  probing the output file's own real duration via `w.prober.Probe` and
+  applying the same fractional positions to it independently.
+- Third false failure (Star Wars Rebels S01E09, after deploying THAT fix
+  too) — at this point disabled `smartshrink_adaptive_target` live via the
+  running app's `PUT /api/config` (not a code change, just flipped the
+  config flag through the API to stop disrupting the user's live queue)
+  and investigated offline rather than guessing a fourth blind fix.
+  Reproduced the exact failure locally: re-ran the real transcode command
+  from the log against the real source file, confirmed via direct ffprobe
+  that source and output have IDENTICAL frame rate/frame count/start_time
+  (ruling out the duration theory entirely for this case), then extracted
+  the same 20-second sample pair my code would extract and ran the actual
+  VMAF scoring command with a per-frame CSV log
+  (`libvmaf=...:log_fmt=csv:log_path=...`). This revealed the real root
+  cause: score was correct (~80) for the first ~2 seconds (frame 0-46 of
+  the 20s/24fps clip) then collapsed to near-zero for the rest of the
+  clip. Spot-checking individual frames via `-ss` seeks at 1s/3s/5s/10s
+  confirmed the source and output ARE correctly content-aligned throughout
+  — so this isn't a timestamp/duration alignment problem at all. The real
+  issue: `libvmaf` pairs frames by sequence index, not timestamp. Two
+  independently re-extracted/re-encoded clips can end up with a differing
+  frame count somewhere early on (a single dropped/duplicated frame during
+  the lossless re-encode is enough — an ffmpeg "non monotonically
+  increasing dts" warning was present in the reproduction), and once that
+  happens every frame after that point compares mismatched content for the
+  rest of the clip. This is a structural problem with "independently
+  extract and compare two clips" as a verification method, not something
+  fixable by adjusting seek-time math — the third fix attempt in a row
+  would have been another guess, so it was not attempted.
+
+Decision (confirmed with user): keep the adaptive-target threshold logic
+(validated, real production benefit), remove the post-encode verification
+step entirely rather than attempt a fourth fix against live production
+traffic. Removed `Worker.verifyPostEncodeVMAF`
+(`internal/jobs/worker.go`), `vmaf.ExtractSamplesAccurate`
+(`internal/ffmpeg/vmaf/sample.go`) and its test, and the
+`postEncodeVerifyTolerance` constant. The call site in `processJob` that
+invoked verification (between the SmartShrink retry loop and the
+"output larger than input" check) was deleted outright, not gated behind a
+flag — there's no remaining code path that calls the removed functions.
+`smartshrink_adaptive_target` re-enabled via the API after the removal was
+deployed (build confirmed working, but NOT yet re-validated against a full
+live batch the way the threshold logic was above — recommend the user run
+another batch to confirm the simplified version behaves identically to the
+validated runs, now just without the verification step that was causing
+false failures).
+
+Verified: `go build ./...`, `go vet ./...`, `go test ./...` (full suite)
+all pass after the removal.
+
+Files modified this continuation: `internal/jobs/worker.go`,
+`internal/ffmpeg/vmaf/sample.go`, `internal/ffmpeg/vmaf/sample_test.go`,
+`CHANGELOG.md`.
+
+=== Prior session: experimental adaptive VMAF target for SmartShrink (branch `experimental/adaptive-vmaf-target`, off `develop`, NOT merged) ===
+
+User reported real production logs showing SmartShrink jobs landing in
+Review Queue with "no viable encode found ... best attempt was 117-200% of
+original size". Root cause: SmartShrink's phase-1 CRF search
+(`interpolatedSearchCRF`, `internal/ffmpeg/vmaf/search.go`) always chases a
+fixed absolute VMAF threshold per quality tier (85/90/94). When the source
+content's real achievable quality ceiling sits below that threshold
+(common on already-efficiently-compressed sources or grainy/noisy content),
+the search has no way to know that upfront — it narrows toward near-lossless
+CRFs chasing an unreachable score, and only discovers the ceiling reactively
+once every CRF has failed. The existing best-effort fallback
+(`applyBestEffortFallback`) is a capped, coarse ±2-step/2.0-VMAF-tolerance
+probe that often isn't aggressive enough to actually beat the source size.
+
+Implemented an opt-in "adaptive VMAF target" mode entirely behind a new
+config flag `smartshrink_adaptive_target` (default `false` — existing
+behavior is completely unchanged unless explicitly enabled):
+- New ceiling probe: before the tier search runs, one extra sample-scoring
+  pass at the best-quality end of the CRF/bitrate range (`qRange.Min` /
+  `qRange.MaxMod`) establishes the content's real achievable VMAF ceiling.
+  New `AdaptiveBinarySearch` (`internal/ffmpeg/vmaf/search.go`) does this,
+  then computes `effectiveThreshold = min(tier_threshold, ceiling - 2.0)`
+  (`computeEffectiveThreshold`, unit-tested) and runs the existing
+  `interpolatedSearchCRF`/`interpolatedSearchBitrate` against that instead
+  of the raw tier threshold — so the search converges directly on the
+  highest CRF close to the content's own ceiling instead of wastefully
+  probing toward an unreachable number.
+- `internal/jobs/worker.go`'s SmartShrink retry loop now also uses this
+  effective threshold (when adaptive mode is on) instead of the raw tier
+  threshold, so it keeps pushing toward genuinely achievable smaller sizes.
+- New post-encode VMAF verification step (adaptive mode only, gated on
+  `preset.IsSmartShrink && cfg.SmartShrinkAdaptiveTarget`): after the real
+  full-file encode completes, re-extracts samples at the SAME deterministic
+  positions (`vmaf.SamplePositions(duration, job.InputPath, sampleCount)` —
+  no need to persist temp files across phases, positions are reproducible
+  from just those three inputs) from both `job.InputPath` and the real
+  output file, re-scores VMAF, and compares against
+  `effectiveThreshold - 1.0` tolerance. On failure, routes to Review Queue
+  with a new, distinct reason ("post-encode VMAF verification failed:
+  measured X, expected >= Y") instead of silently shipping an unverified
+  file — consistent with the project's "no silent failures" principle.
+  New `Worker.verifyPostEncodeVMAF` helper.
+- Also bumped VMAF sample count from a hardcoded 3 to a new configurable
+  `vmaf_sample_count` (default 4, range 3-6) — applies regardless of
+  adaptive mode, reduces sensitivity to any single atypical sample clip.
+  `SamplePositions` (`internal/ffmpeg/vmaf/sample.go`) generalized from
+  hardcoded `{0.25, 0.50, 0.75}` anchors to evenly-spaced anchors for any
+  count, with jitter range scaled down proportionally so windows never
+  overlap.
+- `runSmartShrinkAnalysis` (`internal/jobs/worker.go`) refactored from an
+  unwieldy 7-value return tuple into a `smartShrinkAnalysisResult` struct
+  (motivated directly by adding 2 more fields: `CeilingVMAF`,
+  `EffectiveThreshold`).
+- Config: `smartshrink_adaptive_target` (bool, default false) and
+  `vmaf_sample_count` (int, default 4, clamped 3-6 in `Load()`) added to
+  `internal/config/config.go`, wired through `GET`/`PUT /api/config`
+  (`internal/api/handler.go`) and a new Settings-drawer toggle + number
+  input (`web/templates/index.html`, next to the existing "Skip SmartShrink
+  for AV1 Sources" toggle). Both fields added to `MEDIAFORGE_SPEC.md`'s
+  `transcode:` config sample.
+
+Verified: `go build ./...`, `go vet ./...`, `go test ./...` (full suite,
+including new `TestComputeEffectiveThreshold` and updated/new
+`SamplePositions` tests covering count=3/4/5/6 spacing and non-overlap)
+all pass.
+
+NOT yet verified live — this needs real ffmpeg/VMAF and real media files
+which aren't available in this environment. Recommend the user build this
+branch, enable `smartshrink_adaptive_target: true`, and re-run a real
+SmartShrink job against a known hard-to-compress/low-ceiling source (e.g.
+the ER (1994) S01E12 file referenced further down this file that previously
+produced a 117-200% Review Queue rejection under the old fixed-threshold
+behavior) and confirm: (1) the log shows the new ceiling-probe score and
+effective threshold ("Adaptive VMAF ceiling probe complete" /
+"SmartShrink analysis complete" with `ceiling_vmaf`/`effective_threshold`),
+(2) the job either completes with a genuinely smaller output or lands in
+Review Queue with the new distinct post-encode-verification reason rather
+than the old "no viable encode ... 117-200%" message, (3) toggling the flag
+back off reproduces today's exact existing behavior unchanged. This branch
+(`experimental/adaptive-vmaf-target`) is intentionally NOT merged into
+`develop`/`main` — stays experimental pending that real-world validation.
+
+=== Prior session: released v1.3.0, synced docs ===
 
 Ran the `/release` skill: versioned CHANGELOG.md's `[Unreleased]` section as
 `[1.3.0] - 2026-07-17` (minor bump — the AV1-skip option below is new

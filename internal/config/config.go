@@ -209,6 +209,22 @@ type Config struct {
 	// decoder-compatibility reasons (e.g. a device or platform that can't
 	// decode AV1). Default: false (SmartShrink still attempts AV1 sources).
 	SkipSmartShrinkForAV1 bool `yaml:"skip_smartshrink_for_av1"`
+
+	// SmartShrinkAdaptiveTarget makes SmartShrink probe the source content's
+	// real achievable VMAF ceiling before searching, and targets
+	// min(tier_threshold, ceiling) instead of always chasing the tier's
+	// fixed absolute threshold. Prevents wasted search time and oversized
+	// outputs on content whose quality ceiling sits below the configured
+	// tier. Default: true. Validated against ~45 real jobs across multiple
+	// shows and both tier ranges before being made the default.
+	SmartShrinkAdaptiveTarget bool `yaml:"smartshrink_adaptive_target"`
+
+	// VMafSampleCount is how many short clips SmartShrink extracts from the
+	// source to estimate VMAF (both for the tier search and, when
+	// SmartShrinkAdaptiveTarget is enabled, the ceiling probe). More samples
+	// reduce sensitivity to any single atypical clip (e.g. a recap card or
+	// black frame) skewing the average. Range: 3-6.
+	VMafSampleCount int `yaml:"vmaf_sample_count"`
 }
 
 // defaultPosterCachePath returns a platform-appropriate poster cache directory.
@@ -255,28 +271,30 @@ func DefaultConfig() *Config {
 			Enabled: true,
 			Path:    defaultPosterCachePath(),
 		},
-		MediaPath:             "/media",
-		TempPath:              "", // defaults to os.TempDir()
-		OriginalHandling:      "replace",
-		Workers:               1,
-		FFmpegPath:            "ffmpeg",
-		FFprobePath:           "ffprobe",
-		QualityHEVC:           0, // 0 = use encoder-specific default
-		QualityAV1:            0, // 0 = use encoder-specific default
-		ScheduleEnabled:       false,
-		ScheduleStartHour:     22, // 10 PM
-		ScheduleEndHour:       6,  // 6 AM
-		LogLevel:              "info",
-		OutputFormat:          "preserve",
-		TonemapHDR:            false,
-		TonemapAlgorithm:      "hable",
-		MaxConcurrentAnalyses: 1,
-		EncoderSpeed:          "medium",
-		TranscodeMode:         "smartshrink",
-		TargetReductionPct:    40,
-		DefaultPreset:         "smartshrink-hevc",
-		DefaultQuality:        "good",
-		SkipSmartShrinkForAV1: false,
+		MediaPath:                 "/media",
+		TempPath:                  "", // defaults to os.TempDir()
+		OriginalHandling:          "replace",
+		Workers:                   1,
+		FFmpegPath:                "ffmpeg",
+		FFprobePath:               "ffprobe",
+		QualityHEVC:               0, // 0 = use encoder-specific default
+		QualityAV1:                0, // 0 = use encoder-specific default
+		ScheduleEnabled:           false,
+		ScheduleStartHour:         22, // 10 PM
+		ScheduleEndHour:           6,  // 6 AM
+		LogLevel:                  "info",
+		OutputFormat:              "preserve",
+		TonemapHDR:                false,
+		TonemapAlgorithm:          "hable",
+		MaxConcurrentAnalyses:     1,
+		EncoderSpeed:              "medium",
+		TranscodeMode:             "smartshrink",
+		TargetReductionPct:        40,
+		DefaultPreset:             "smartshrink-hevc",
+		DefaultQuality:            "good",
+		SkipSmartShrinkForAV1:     false,
+		SmartShrinkAdaptiveTarget: true,
+		VMafSampleCount:           4,
 		Notifications: NotificationsConfig{
 			Events: NotificationEventsConfig{
 				EncodeComplete:  false,
@@ -366,6 +384,14 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.DefaultQuality == "" {
 		cfg.DefaultQuality = "good"
+	}
+
+	// Validate VMAF sample count (3-6)
+	if cfg.VMafSampleCount < 3 {
+		cfg.VMafSampleCount = 4
+	}
+	if cfg.VMafSampleCount > 6 {
+		cfg.VMafSampleCount = 6
 	}
 
 	// Intake defaults

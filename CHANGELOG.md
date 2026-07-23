@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- New `smartshrink_adaptive_target` config option, **default `true`**, also
+  exposed as a Settings toggle: "Adaptive VMAF Target" (Transcoding
+  section, no longer buried under Advanced). SmartShrink now probes the
+  source content's real achievable VMAF ceiling (a near-lossless sample
+  score) before running the tier search, and targets
+  `min(tier_threshold, ceiling - margin)` instead of always chasing the
+  tier's fixed absolute threshold. Fixes jobs that previously wasted
+  search time chasing an unreachable threshold and then landed in Review
+  Queue reporting "best attempt was 117-200% of original size" — the
+  search now knows upfront when a tier is unreachable for a given source
+  and converges on the highest CRF close to that source's own ceiling
+  instead. Validated against ~45 real jobs on a live queue across 6
+  different shows and both the "good" and "excellent" tiers before being
+  promoted to the default: ceiling probe + effective-threshold search +
+  retry loop behaved correctly in every case, in both directions (ceiling
+  below tier, ceiling above tier), with zero false failures after the
+  post-encode verification removal below.
+- New `vmaf_sample_count` config option (default `4`, range 3-6, also
+  exposed as a Settings number input: "VMAF Sample Count", under
+  Advanced). Governs how many short clips are sampled per source for VMAF
+  estimation (phase-1 tier search and the adaptive ceiling probe) — more
+  samples reduce sensitivity to any single atypical clip skewing the
+  average. Applies regardless of adaptive-target mode. `SamplePositions`
+  (`internal/ffmpeg/vmaf/sample.go`) generalized from a hardcoded
+  3-anchor scheme to evenly-spaced anchors for any count.
+- Files modified: `internal/config/config.go`, `internal/ffmpeg/vmaf/sample.go`,
+  `internal/ffmpeg/vmaf/search.go`, `internal/ffmpeg/vmaf/analyze.go`,
+  `internal/ffmpeg/vmaf/vmaf.go`, `internal/jobs/worker.go`,
+  `internal/api/handler.go`, `web/templates/index.html`,
+  `MEDIAFORGE_SPEC.md`. Set `smartshrink_adaptive_target: false` to
+  restore the old fixed-threshold-only behavior.
+
+### Removed
+- The post-encode VMAF re-verification pass described in an earlier version
+  of this entry was implemented, tested live, and then removed after real
+  production testing (~20 jobs) surfaced three distinct false-failure bugs
+  in a row: (1) stream-copy sample extraction snapping to mismatched
+  keyframes between the source and the independently-encoded output, (2)
+  applying the source's probed duration to seek into the output file, and
+  (3) — the real, structural issue — `libvmaf` pairs frames by sequence
+  index, not timestamp, so two independently re-encoded clips can drift
+  out of frame-count parity partway through even when correctly
+  time-aligned at the start, silently corrupting the rest of the
+  comparison. Confirmed by direct frame-by-frame inspection (per-frame
+  VMAF CSV log) on a real failing case: score was correct for the first
+  ~2 seconds then collapsed to near-zero for the remainder of the clip.
+  This is a harder problem than "compare two clips," not something worth
+  another blind fix — removed `Worker.verifyPostEncodeVMAF`,
+  `vmaf.ExtractSamplesAccurate`, and the `postEncodeVerifyTolerance`
+  constant. The adaptive-target threshold logic itself is unaffected and
+  keeps its live-validated behavior.
+
 ## [1.3.0] - 2026-07-17
 
 ### Fixed
