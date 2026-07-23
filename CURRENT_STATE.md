@@ -1,6 +1,63 @@
 CURRENT STATE NOTE
 
-=== Latest session (cont.): removed post-encode VMAF verification after live testing found a structural bug; adaptive-target threshold logic validated and kept ===
+=== Latest session (cont. once more): adaptive-target validated over ~45 real jobs, promoted to default, merged into develop ===
+
+Direct continuation of the two sessions below. After the post-encode
+verification removal (previous entry), continued watching the user's live
+queue in real time (Monitor tool tailing the log) through ~45 more real
+SmartShrink jobs across 6 different shows (Teenage Mutant Ninja Turtles
+2012, Star Wars Rebels, Earth 2 1994, Lost in Space 1965, S.W.A.T. 1975,
+Smallville 2001), covering both the "good" (85) and "excellent" (94) tiers
+and both branches of the adaptive logic (ceiling below tier, ceiling above
+tier). Zero false failures. Also incidentally confirmed the legitimate
+"no viable encode" safety net (pre-existing, unrelated code) correctly
+identified genuinely unshrinkable content (all of Earth 2 1994, one old
+Lost in Space episode) without adaptive-target overriding it.
+
+Separately noticed (not fixed, out of scope): a pre-existing bug where
+"no viable encode" jobs get automatically re-queued and reprocessed from
+scratch instead of staying resolved in Review Queue — watched the exact
+same Earth 2 episode ("Flower Child") get reprocessed 3 times with
+byte-identical results, including once across a ~7 hour unattended
+overnight gap. This burns real GPU time on guaranteed-to-fail files. Not
+investigated further this session (separate from adaptive-target) —
+flagged for a future session if the user wants it fixed.
+
+User decision after reviewing the validation results: promote
+`smartshrink_adaptive_target` to the default (was `false`, opt-in), move
+its Settings toggle out of the collapsed "Advanced" group into the
+always-visible "Transcoding" group, and merge the branch into `develop`.
+Implemented:
+- `internal/config/config.go`: `DefaultConfig()` now sets
+  `SmartShrinkAdaptiveTarget: true`; updated the field's doc comment
+  (was stale — still described the removed post-encode verification pass
+  and the old `false` default).
+- `web/templates/index.html`: moved the "Adaptive VMAF Target" toggle
+  from the `advanced-settings` group to the `Transcoding` group (right
+  after "Allow same-codec re-encoding"), dropped the "(Experimental)"
+  suffix from its label, and updated its description (removed the stale
+  post-encode-verification sentence, added "On by default."). Left
+  "VMAF Sample Count" in Advanced — it's a tuning knob, not a mode switch.
+- `MEDIAFORGE_SPEC.md` and `CHANGELOG.md` updated to reflect the new
+  default and the setting's new location; the CHANGELOG "Added" section
+  no longer says "not merged."
+
+Verified: `go build ./...`, `go vet ./...`, `go test ./...` (full suite)
+all pass after the default/UI changes.
+
+Merged `experimental/adaptive-vmaf-target` into `develop` (see git log for
+the merge commit). The branch is NOT deleted in case further follow-up
+work is wanted; `develop` is now the source of truth for this feature.
+
+Per explicit user instruction: after this merge, kept the Monitor tool
+watching the user's live log (same `%APPDATA%\Mediaforge\logs\mediaforge.log`
+tail) to continue observing the running queue, since the user said they
+have limited coding headway remaining this session/week and wants to
+mostly watch rather than keep making code changes. No further code changes
+should be made unless the user asks or a new real problem shows up in the
+log.
+
+=== Prior session (cont.): removed post-encode VMAF verification after live testing found a structural bug; adaptive-target threshold logic validated and kept ===
 
 Direct continuation of the adaptive-VMAF-target session below, same branch
 (`experimental/adaptive-vmaf-target`, off `develop`, still NOT merged). User

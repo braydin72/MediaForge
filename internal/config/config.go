@@ -210,21 +210,20 @@ type Config struct {
 	// decode AV1). Default: false (SmartShrink still attempts AV1 sources).
 	SkipSmartShrinkForAV1 bool `yaml:"skip_smartshrink_for_av1"`
 
-	// SmartShrinkAdaptiveTarget (experimental) makes SmartShrink probe the
-	// source content's real achievable VMAF ceiling before searching, and
-	// targets min(tier_threshold, ceiling) instead of always chasing the
-	// tier's fixed absolute threshold. Prevents wasted search time and
-	// oversized outputs on content whose quality ceiling sits below the
-	// configured tier. Also enables a post-encode VMAF re-verification pass
-	// on the real output before it's handed off to the library. Default:
-	// false (existing fixed-threshold behavior is unchanged).
+	// SmartShrinkAdaptiveTarget makes SmartShrink probe the source content's
+	// real achievable VMAF ceiling before searching, and targets
+	// min(tier_threshold, ceiling) instead of always chasing the tier's
+	// fixed absolute threshold. Prevents wasted search time and oversized
+	// outputs on content whose quality ceiling sits below the configured
+	// tier. Default: true. Validated against ~45 real jobs across multiple
+	// shows and both tier ranges before being made the default.
 	SmartShrinkAdaptiveTarget bool `yaml:"smartshrink_adaptive_target"`
 
 	// VMafSampleCount is how many short clips SmartShrink extracts from the
 	// source to estimate VMAF (both for the tier search and, when
-	// SmartShrinkAdaptiveTarget is enabled, the ceiling probe and post-encode
-	// verification). More samples reduce sensitivity to any single atypical
-	// clip (e.g. a recap card or black frame) skewing the average. Range: 3-6.
+	// SmartShrinkAdaptiveTarget is enabled, the ceiling probe). More samples
+	// reduce sensitivity to any single atypical clip (e.g. a recap card or
+	// black frame) skewing the average. Range: 3-6.
 	VMafSampleCount int `yaml:"vmaf_sample_count"`
 }
 
@@ -294,7 +293,7 @@ func DefaultConfig() *Config {
 		DefaultPreset:             "smartshrink-hevc",
 		DefaultQuality:            "good",
 		SkipSmartShrinkForAV1:     false,
-		SmartShrinkAdaptiveTarget: false,
+		SmartShrinkAdaptiveTarget: true,
 		VMafSampleCount:           4,
 		Notifications: NotificationsConfig{
 			Events: NotificationEventsConfig{
