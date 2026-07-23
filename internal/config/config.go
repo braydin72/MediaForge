@@ -164,7 +164,8 @@ type Config struct {
 
 	// OutputFormat is the container format for transcoded files: "mkv", "mp4", or "preserve"
 	// preserve = output matches source container
-	// MKV preserves all streams; MP4 transcodes audio to AAC and strips subtitles
+	// MKV preserves all streams; MP4 keeps audio as-is and converts text
+	// subtitles to mov_text (image-based subtitles aren't supported by MP4)
 	OutputFormat string `yaml:"output_format"`
 
 	// TonemapHDR enables automatic HDR to SDR conversion (default: false)
