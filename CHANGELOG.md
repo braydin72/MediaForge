@@ -40,6 +40,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MEDIAFORGE_SPEC.md`. Set `smartshrink_adaptive_target: false` to
   restore the old fixed-threshold-only behavior.
 
+### Fixed
+- Filenames with 3-digit episode numbers (e.g. `S23E250`, common on
+  syndicated daily shows like Judge Judy) were parsed with the episode
+  truncated to 2 digits (`S23E25`), causing TVDB to match a real but
+  wrong episode. The name+season/episode-found confidence weighting
+  scored that wrong match at 0.90 — high enough to bypass Review Queue
+  and LLM verification entirely — even though the parsed episode title
+  didn't match. Fixed by widening the episode capture group in all three
+  TV filename regexes (`internal/intake/parse.go`) from `\d{1,2}` to
+  `\d{1,3}`. Verified against the real failing filename: now parses as
+  `S23E250` and TVDB match confidence correctly reaches 1.0 on the actual
+  episode. Files modified: `internal/intake/parse.go`,
+  `internal/intake/parse_test.go`.
+
 ### Removed
 - The post-encode VMAF re-verification pass described in an earlier version
   of this entry was implemented, tested live, and then removed after real
