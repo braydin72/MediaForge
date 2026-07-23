@@ -121,9 +121,9 @@ jobs:
             BUILD_NUMBER=${{ github.run_number }}
             APP_VERSION=${{ steps.version.outputs.semver }}
           tags: |
-            ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:latest', env.REGISTRY, steps.image.outputs.name) || '' }}
             ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}', env.REGISTRY, steps.image.outputs.name, steps.version.outputs.tag) || '' }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/mediaforge:latest
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/mediaforge:latest', secrets.DOCKERHUB_USERNAME) || '' }}
             ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/mediaforge:{1}', secrets.DOCKERHUB_USERNAME, steps.version.outputs.tag) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
