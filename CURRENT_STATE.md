@@ -1,6 +1,90 @@
 CURRENT STATE NOTE
 
-=== Latest session: experimental adaptive VMAF target for SmartShrink (branch `experimental/adaptive-vmaf-target`, off `develop`, NOT merged) ===
+=== Latest session (cont.): removed post-encode VMAF verification after live testing found a structural bug; adaptive-target threshold logic validated and kept ===
+
+Direct continuation of the adaptive-VMAF-target session below, same branch
+(`experimental/adaptive-vmaf-target`, off `develop`, still NOT merged). User
+deployed the feature to their live MediaForge install (via
+`update-mediaforge.ps1`) and ran a real batch of ~20 SmartShrink jobs
+(Teenage Mutant Ninja Turtles 2012 S02, Star Wars Rebels S01) with
+`smartshrink_adaptive_target: true`, while this session watched the live
+log in real time (via the Monitor tool tailing
+`%APPDATA%\Mediaforge\logs\mediaforge.log`).
+
+Ceiling probe + effective-threshold search + retry loop (the CORE adaptive-
+target logic, described below) worked correctly across every single job:
+correctly lowered the target when a source's ceiling fell below the tier
+threshold, correctly left the raw tier threshold untouched when the ceiling
+already cleared it, and the retry loop correctly pushed toward smaller
+files using whichever target applied. This part is validated against real
+production content and kept as-is.
+
+The post-encode verification step (also described below) did NOT hold up:
+- First false failure (TMNT S02E17, initial deploy): traced to
+  `ExtractSamples`'s stream-copy mode snapping to mismatched keyframes
+  between the source and the independently-encoded output — fixed by
+  adding `vmaf.ExtractSamplesAccurate` (lossless re-encode instead of
+  stream copy, for frame-accurate seeking).
+- Second false failure (Star Wars Rebels S01E04, after deploying the above
+  fix): per-sample scores degraded the further into the file the sample
+  was (sample 0 fine, samples 1-3 progressively worse) — traced to
+  `verifyPostEncodeVMAF` applying the SOURCE's probed duration to compute
+  seek fractions for BOTH the source AND the output extraction; fixed by
+  probing the output file's own real duration via `w.prober.Probe` and
+  applying the same fractional positions to it independently.
+- Third false failure (Star Wars Rebels S01E09, after deploying THAT fix
+  too) — at this point disabled `smartshrink_adaptive_target` live via the
+  running app's `PUT /api/config` (not a code change, just flipped the
+  config flag through the API to stop disrupting the user's live queue)
+  and investigated offline rather than guessing a fourth blind fix.
+  Reproduced the exact failure locally: re-ran the real transcode command
+  from the log against the real source file, confirmed via direct ffprobe
+  that source and output have IDENTICAL frame rate/frame count/start_time
+  (ruling out the duration theory entirely for this case), then extracted
+  the same 20-second sample pair my code would extract and ran the actual
+  VMAF scoring command with a per-frame CSV log
+  (`libvmaf=...:log_fmt=csv:log_path=...`). This revealed the real root
+  cause: score was correct (~80) for the first ~2 seconds (frame 0-46 of
+  the 20s/24fps clip) then collapsed to near-zero for the rest of the
+  clip. Spot-checking individual frames via `-ss` seeks at 1s/3s/5s/10s
+  confirmed the source and output ARE correctly content-aligned throughout
+  — so this isn't a timestamp/duration alignment problem at all. The real
+  issue: `libvmaf` pairs frames by sequence index, not timestamp. Two
+  independently re-extracted/re-encoded clips can end up with a differing
+  frame count somewhere early on (a single dropped/duplicated frame during
+  the lossless re-encode is enough — an ffmpeg "non monotonically
+  increasing dts" warning was present in the reproduction), and once that
+  happens every frame after that point compares mismatched content for the
+  rest of the clip. This is a structural problem with "independently
+  extract and compare two clips" as a verification method, not something
+  fixable by adjusting seek-time math — the third fix attempt in a row
+  would have been another guess, so it was not attempted.
+
+Decision (confirmed with user): keep the adaptive-target threshold logic
+(validated, real production benefit), remove the post-encode verification
+step entirely rather than attempt a fourth fix against live production
+traffic. Removed `Worker.verifyPostEncodeVMAF`
+(`internal/jobs/worker.go`), `vmaf.ExtractSamplesAccurate`
+(`internal/ffmpeg/vmaf/sample.go`) and its test, and the
+`postEncodeVerifyTolerance` constant. The call site in `processJob` that
+invoked verification (between the SmartShrink retry loop and the
+"output larger than input" check) was deleted outright, not gated behind a
+flag — there's no remaining code path that calls the removed functions.
+`smartshrink_adaptive_target` re-enabled via the API after the removal was
+deployed (build confirmed working, but NOT yet re-validated against a full
+live batch the way the threshold logic was above — recommend the user run
+another batch to confirm the simplified version behaves identically to the
+validated runs, now just without the verification step that was causing
+false failures).
+
+Verified: `go build ./...`, `go vet ./...`, `go test ./...` (full suite)
+all pass after the removal.
+
+Files modified this continuation: `internal/jobs/worker.go`,
+`internal/ffmpeg/vmaf/sample.go`, `internal/ffmpeg/vmaf/sample_test.go`,
+`CHANGELOG.md`.
+
+=== Prior session: experimental adaptive VMAF target for SmartShrink (branch `experimental/adaptive-vmaf-target`, off `develop`, NOT merged) ===
 
 User reported real production logs showing SmartShrink jobs landing in
 Review Queue with "no viable encode found ... best attempt was 117-200% of

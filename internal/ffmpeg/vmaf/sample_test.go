@@ -16,16 +16,6 @@ func TestExtractSamplesSignature(t *testing.T) {
 	_ = err
 }
 
-func TestExtractSamplesAccurateSignature(t *testing.T) {
-	// Verify the function signature compiles
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := ExtractSamplesAccurate(ctx, "ffmpeg", "input.mkv", "/tmp", 60*time.Second, []float64{0.5})
-	// Error expected due to cancelled context
-	_ = err
-}
-
 func TestSamplePositions(t *testing.T) {
 	tests := []struct {
 		name       string

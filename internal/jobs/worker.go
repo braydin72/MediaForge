@@ -86,12 +86,6 @@ const (
 // vmaf.bestEffortFallbackTolerance's rationale.
 const smartShrinkFallbackTolerance = 2.0
 
-// postEncodeVerifyTolerance is how far (in VMAF points) below the effective
-// threshold a post-encode verification score may fall and still be accepted,
-// to account for measurement variance between sample-based prediction and
-// the real full-file output (adaptive-target mode only).
-const postEncodeVerifyTolerance = 1.0
-
 // runningJob tracks a job being processed by a worker.
 // Used by Resize and Pause to collect and manage running jobs.
 type runningJob struct {
@@ -1005,38 +999,6 @@ func (w *Worker) processJob(job *Job) {
 		}
 	}
 
-	// Post-encode VMAF verification (adaptive-target mode only): confirm the
-	// real full-file output actually achieves the target quality before
-	// handing it off to finalization/library delivery. The phase-1 search and
-	// retry loop above both predict quality from short samples; this
-	// re-measures against the real output using the same deterministic
-	// sample positions, catching any case where that prediction diverged
-	// from reality instead of silently shipping an unverified file.
-	if preset.IsSmartShrink && w.cfg.SmartShrinkAdaptiveTarget && smartShrinkEffectiveThreshold > 0 {
-		verifiedScore, verifyErr := w.verifyPostEncodeVMAF(jobCtx, job, tempPath)
-		if verifyErr != nil {
-			logger.Warn("SmartShrink: post-encode VMAF verification could not run, proceeding without it",
-				"job_id", job.ID, "error", verifyErr)
-		} else if verifiedScore < smartShrinkEffectiveThreshold-postEncodeVerifyTolerance {
-			os.Remove(tempPath)
-			reason := fmt.Sprintf(
-				"post-encode VMAF verification failed: measured %.1f, expected >= %.1f",
-				verifiedScore, smartShrinkEffectiveThreshold-postEncodeVerifyTolerance)
-			logger.Warn("SmartShrink: post-encode VMAF verification failed", "job_id", job.ID,
-				"measured_vmaf", verifiedScore, "expected_min", smartShrinkEffectiveThreshold-postEncodeVerifyTolerance)
-			_ = w.queue.FailJob(job.ID, reason)
-			correctedName := filepath.Base(job.InputPath)
-			if job.LibraryPath != "" {
-				correctedName = filepath.Base(job.LibraryPath)
-			}
-			w.queue.SendToReviewQueue(job.ID, job.InputPath, correctedName, reason, "")
-			return
-		} else {
-			logger.Info("SmartShrink: post-encode VMAF verification passed",
-				"job_id", job.ID, "measured_vmaf", verifiedScore, "effective_threshold", smartShrinkEffectiveThreshold)
-		}
-	}
-
 	// Check if transcoded file is larger than original
 	if result.OutputSize >= job.InputSize && !w.cfg.KeepLargerFiles {
 		// Delete the temp file and skip the job (not fail - this is expected behavior)
@@ -1292,70 +1254,6 @@ func (wp *WorkerPool) runSmartShrinkAnalysis(ctx context.Context, job *Job, pres
 		CeilingVMAF:        result.CeilingVMAF,
 		EffectiveThreshold: result.EffectiveThreshold,
 	}, nil
-}
-
-// verifyPostEncodeVMAF re-measures VMAF on the real full-file output
-// (outputPath) against job.InputPath, using the same deterministic sample
-// positions phase-1 analysis would have used (derived from duration,
-// job.InputPath, and the configured sample count — no need to persist any
-// state from the analysis phase). Used by the adaptive-target post-encode
-// verification step to confirm the real output meets the effective
-// threshold before it's handed off to finalization/library delivery.
-func (w *Worker) verifyPostEncodeVMAF(ctx context.Context, job *Job, outputPath string) (float64, error) {
-	srcDuration := time.Duration(job.Duration) * time.Millisecond
-	positions := vmaf.SamplePositions(srcDuration, job.InputPath, w.cfg.VMafSampleCount)
-	if len(positions) == 0 {
-		return 0, fmt.Errorf("no sample positions available")
-	}
-
-	// The output's real duration can drift slightly from the source's probed
-	// duration (container/timestamp differences from re-encoding). positions
-	// are fractional (0-1), so applying srcDuration's fraction to the output
-	// file compounds increasingly with each later position — a real bug
-	// caught in testing: sample 0 (near the start) scored fine while later
-	// samples scored near-zero because they seeked to the wrong point in the
-	// output. Probe the output's own duration and apply the same fractional
-	// positions to it independently.
-	outProbe, err := w.prober.Probe(ctx, outputPath)
-	if err != nil {
-		return 0, fmt.Errorf("probe output duration: %w", err)
-	}
-	outDuration := outProbe.Duration
-
-	// Separate subdirectories: ExtractSamplesAccurate names files by position
-	// index (sample_0.mkv, sample_1.mkv, ...), which would collide if
-	// reference and output samples were extracted into the same directory.
-	//
-	// Uses ExtractSamplesAccurate (frame-accurate re-encode), not
-	// ExtractSamples (stream copy): job.InputPath and outputPath are two
-	// independently-encoded files with unrelated keyframe schedules, so
-	// stream-copy extraction from each snaps to different actual content at
-	// the "same" position, producing meaningless VMAF comparisons.
-	refDir, err := os.MkdirTemp(w.cfg.GetTempDir(), "smartshrink_verify_ref_")
-	if err != nil {
-		return 0, fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(refDir)
-
-	outDir, err := os.MkdirTemp(w.cfg.GetTempDir(), "smartshrink_verify_out_")
-	if err != nil {
-		return 0, fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(outDir)
-
-	refSamples, err := vmaf.ExtractSamplesAccurate(ctx, w.cfg.FFmpegPath, job.InputPath, refDir, srcDuration, positions)
-	if err != nil {
-		return 0, fmt.Errorf("extract reference samples: %w", err)
-	}
-	defer vmaf.CleanupSamples(refSamples)
-
-	outSamples, err := vmaf.ExtractSamplesAccurate(ctx, w.cfg.FFmpegPath, outputPath, outDir, outDuration, positions)
-	if err != nil {
-		return 0, fmt.Errorf("extract output samples: %w", err)
-	}
-	defer vmaf.CleanupSamples(outSamples)
-
-	return vmaf.ScoreSamples(ctx, w.cfg.FFmpegPath, refSamples, outSamples, job.Height)
 }
 
 // quickSampleVMAF encodes one video sample at the given CRF and returns its VMAF score.
