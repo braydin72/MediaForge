@@ -15,6 +15,15 @@ import (
 type Analyzer struct {
 	FFmpegPath string
 	TempDir    string
+
+	// SampleCount is how many clips to extract for VMAF estimation. Defaults
+	// to 3 (legacy behavior) if left at zero.
+	SampleCount int
+
+	// Adaptive enables adaptive-target mode (experimental): probes the
+	// content's real achievable VMAF ceiling before searching, and targets
+	// min(threshold, ceiling) instead of always chasing the fixed threshold.
+	Adaptive bool
 }
 
 // NewAnalyzer creates a new VMAF analyzer
@@ -42,13 +51,19 @@ func (a *Analyzer) Analyze(ctx context.Context, inputPath string, videoDuration 
 	}
 	defer os.RemoveAll(analysisDir)
 
-	// Get sample positions (3 positions jittered around 25%, 50%, 75%)
-	positions := SamplePositions(videoDuration, inputPath)
+	sampleCount := a.SampleCount
+	if sampleCount < 1 {
+		sampleCount = 3
+	}
+
+	// Get sample positions (evenly spaced, jittered around each anchor)
+	positions := SamplePositions(videoDuration, inputPath, sampleCount)
 
 	logger.Info("Starting VMAF analysis",
 		"input", inputPath,
 		"samples", len(positions),
-		"threshold", threshold)
+		"threshold", threshold,
+		"adaptive", a.Adaptive)
 
 	// Extract reference samples using stream copy (fast)
 	extractStart := time.Now()
@@ -62,7 +77,12 @@ func (a *Analyzer) Analyze(ctx context.Context, inputPath string, videoDuration 
 
 	// Run binary search to find optimal quality
 	searchStart := time.Now()
-	result, err := BinarySearch(ctx, a.FFmpegPath, referenceSamples, qRange, threshold, height, encodeSample)
+	var result *SearchResult
+	if a.Adaptive {
+		result, err = AdaptiveBinarySearch(ctx, a.FFmpegPath, referenceSamples, qRange, threshold, height, encodeSample)
+	} else {
+		result, err = BinarySearch(ctx, a.FFmpegPath, referenceSamples, qRange, threshold, height, encodeSample)
+	}
 	searchDuration := time.Since(searchStart)
 	if err != nil {
 		return nil, fmt.Errorf("binary search: %w", err)
@@ -89,10 +109,12 @@ func (a *Analyzer) Analyze(ctx context.Context, inputPath string, videoDuration 
 	}
 
 	return &AnalysisResult{
-		OptimalCRF:  result.Quality,
-		QualityMod:  result.Modifier,
-		VMafScore:   result.VMafScore,
-		SamplesUsed: len(positions),
-		BestEffort:  result.BestEffort,
+		OptimalCRF:         result.Quality,
+		QualityMod:         result.Modifier,
+		VMafScore:          result.VMafScore,
+		SamplesUsed:        len(positions),
+		BestEffort:         result.BestEffort,
+		CeilingVMAF:        result.CeilingVMAF,
+		EffectiveThreshold: result.EffectiveThreshold,
 	}, nil
 }

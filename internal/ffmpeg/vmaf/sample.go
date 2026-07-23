@@ -35,18 +35,19 @@ type Sample struct {
 // 0.25 apart, so a range of 0.08 keeps windows well clear of overlapping.
 const sampleJitterRange = 0.08
 
-// SamplePositions returns the positions to sample, anchored at 25%/50%/75%
-// of video duration but jittered within sampleJitterRange of each anchor.
-// The jitter is seeded deterministically from seedKey (typically the input
-// file path), so re-analyzing the same file yields the same positions, but
-// different files don't all land on the exact same relative timestamp.
+// SamplePositions returns the positions to sample, anchored at count evenly
+// spaced points across video duration but jittered within a window around
+// each anchor. The jitter is seeded deterministically from seedKey (typically
+// the input file path), so re-analyzing the same file yields the same
+// positions, but different files don't all land on the exact same relative
+// timestamp.
 //
 // Fixed anchors previously let a recurring low-motion structural element at
 // a consistent relative position (e.g. a mid-episode recap card or bumper,
 // common in syndicated TV) score near-perfect VMAF regardless of CRF on
 // every episode of a series, skewing the averaged score high and masking
 // the real quality/CRF tradeoff of the actual content.
-func SamplePositions(videoDuration time.Duration, seedKey string) []float64 {
+func SamplePositions(videoDuration time.Duration, seedKey string, count int) []float64 {
 	seconds := videoDuration.Seconds()
 
 	// Handle zero/negative duration
@@ -59,7 +60,22 @@ func SamplePositions(videoDuration time.Duration, seedKey string) []float64 {
 		return []float64{0.5}
 	}
 
-	anchors := []float64{0.25, 0.50, 0.75}
+	if count < 1 {
+		count = 1
+	}
+
+	anchors := make([]float64, count)
+	for i := range anchors {
+		anchors[i] = (float64(i) + 0.5) / float64(count)
+	}
+
+	// Scale jitter down as count grows so adjacent anchor windows never
+	// overlap (anchors are 1/count apart; keep the window comfortably
+	// inside half that spacing).
+	jitterRange := sampleJitterRange
+	if maxRange := 0.4 / float64(count); maxRange < jitterRange {
+		jitterRange = maxRange
+	}
 
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(seedKey))
@@ -67,7 +83,7 @@ func SamplePositions(videoDuration time.Duration, seedKey string) []float64 {
 
 	positions := make([]float64, len(anchors))
 	for i, anchor := range anchors {
-		jitter := (rng.Float64()*2 - 1) * sampleJitterRange
+		jitter := (rng.Float64()*2 - 1) * jitterRange
 		positions[i] = anchor + jitter
 	}
 	return positions

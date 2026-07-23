@@ -25,9 +25,11 @@ type ParsedFilename struct {
 var (
 	// TV episode patterns — checked most-specific first to avoid SxxExx matching
 	// the start of SxxExxExx.
-	reTVMultiConcat = regexp.MustCompile(`(?i)S(\d{1,2})E(\d{1,2})E(\d{1,2})`)
-	reTVMultiHyphen = regexp.MustCompile(`(?i)S(\d{1,2})E(\d{1,2})-E(\d{1,2})`)
-	reTVSingle      = regexp.MustCompile(`(?i)S(\d{1,2})E(\d{1,2})`)
+	// Episode groups allow up to 3 digits: syndicated daily shows (Judge Judy,
+	// Maury, etc.) commonly exceed 99 episodes within a single season.
+	reTVMultiConcat = regexp.MustCompile(`(?i)S(\d{1,2})E(\d{1,3})E(\d{1,3})`)
+	reTVMultiHyphen = regexp.MustCompile(`(?i)S(\d{1,2})E(\d{1,3})-E(\d{1,3})`)
+	reTVSingle      = regexp.MustCompile(`(?i)S(\d{1,2})E(\d{1,3})`)
 
 	// Fansub and quality bracket groups: [SubGroup], [1080p], etc.
 	reBracketed = regexp.MustCompile(`\[[^\]]*\]`)

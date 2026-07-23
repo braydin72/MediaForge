@@ -186,6 +186,17 @@ func TestParseFilename(t *testing.T) {
 			wantEpisodeTitle: "Episode Title",
 		},
 		{
+			name:             "TV three-digit episode number (syndicated daily show)",
+			input:            "Judge Judy (1996) - S23E250 - Insulin Emergency ; Traded Then Stolen .ts",
+			wantTitle:        "Judge Judy",
+			wantYear:         1996,
+			wantIsTV:         true,
+			wantS:            23,
+			wantE:            250,
+			wantType:         "tv",
+			wantEpisodeTitle: "Insulin Emergency ; Traded Then Stolen",
+		},
+		{
 			name:      "TV single-digit season",
 			input:     "Seinfeld.s2e12.mkv",
 			wantTitle: "Seinfeld",

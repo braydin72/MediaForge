@@ -22,6 +22,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -55,6 +57,14 @@ jobs:
           else
             echo "tag=${{ steps.branch.outputs.name }}" >> $GITHUB_OUTPUT
           fi
+      - name: Determine app version
+        id: appver
+        run: |
+          # Nearest reachable release tag (vX.Y.Z -> X.Y.Z), suffixed so it's
+          # never mistaken for an actual tagged release. Falls back to 0.0.0-dev
+          # if no tags are reachable (shouldn't happen once a v* tag exists).
+          NEAREST=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+          echo "version=${NEAREST:-0.0.0}-dev" >> $GITHUB_OUTPUT
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -63,7 +73,9 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ steps.tag.outputs.tag }}
-          build-args: BUILD_NUMBER=${{ github.run_number }}
+          build-args: |
+            BUILD_NUMBER=${{ github.run_number }}
+            APP_VERSION=${{ steps.appver.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Summary
@@ -71,6 +83,7 @@ jobs:
           echo "### Dev Build Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Image: \`${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ steps.tag.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Version: \`${{ steps.appver.outputs.version }}+build.${{ github.run_number }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "To test:" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
