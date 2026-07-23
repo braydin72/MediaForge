@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-07-23
+
 ### Added
 - New `smartshrink_adaptive_target` config option, **default `true`**, also
   exposed as a Settings toggle: "Adaptive VMAF Target" (Transcoding
