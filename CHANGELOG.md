@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Tray menu had no way to stop intake independently of the encode queue —
+  "Pipeline", "Pause Queue", and "Stop Queue" all called `/api/queue/*`
+  (`internal/jobs/WorkerPool`) and cross-toggled each other, so pausing one
+  always paused the other too. The backend already had a fully separate,
+  correctly-scoped intake control (`POST /api/intake/pause` /
+  `/api/intake/resume`, wired to `Watcher.Pause()`/`Resume()`, which only
+  suspends scanning the Incoming folder for new files and leaves anything
+  already in the pipeline untouched) — it just wasn't exposed anywhere in
+  the tray. Restructured the tray menu (`cmd/tray/main.go`) into two
+  independent checkboxes with no cross-toggling: "Stop Pipeline" (calls
+  `/api/intake/pause`/`resume`, intake only) and "Pause Queue" (calls
+  `/api/queue/pause`/`start`, encode queue only — unaffected by the pause
+  fix above other than sharing that endpoint). Removed the old "Start
+  Queue"/"Stop Queue" buttons, which duplicated the checkbox and, in Stop
+  Queue's case, called the still-unimplemented `/api/queue/stop` stub.
+  Files modified: `cmd/tray/main.go`.
 - Pausing the encode queue (tray "Pause Queue", or either pause control in
   the web UI) cancelled and requeued whatever job was currently running,
   killing the in-flight ffmpeg process — the intended behavior is a soft

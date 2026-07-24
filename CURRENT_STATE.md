@@ -1,6 +1,55 @@
 CURRENT STATE NOTE
 
-=== Latest session: fixed Pause killing the running encode instead of just blocking new jobs; released v1.4.1 ===
+=== Latest session (cont.): tray menu now exposes intake pause separately from queue pause ===
+
+Direct continuation of the Pause fix below, same session. User clarified the
+exact intended model for pipeline controls after the Pause fix landed:
+- A tray control to stop intake, period — only stops files moving from the
+  Incoming folder into the pipeline. Does not touch the encode queue.
+- A separate "Pause Queue" control, period — only stops new jobs from
+  starting. Files can still be added to the queue while paused, and it does
+  not stop whatever job is currently encoding (this half was already fixed
+  below).
+- Per-item Cancel in the web UI queue list, period — already exists,
+  untouched.
+
+Investigated and found the backend for intake pause already existed and was
+fully wired (`POST /api/intake/pause` / `/api/intake/resume` /
+`GET /api/intake/status` in internal/api/router.go + handler.go, calling
+`Watcher.Pause()`/`Resume()` in internal/intake/watcher.go — `scan()`
+early-returns while paused, leaving in-flight processing untouched) but was
+never exposed in the tray or web UI. The tray's existing "Pipeline" checkbox,
+"Pause Queue" checkbox, and "Start Queue"/"Stop Queue" buttons all called
+`/api/queue/*` (WorkerPool) exclusively and cross-toggled each other
+(clicking "Pipeline" also flipped "Pause Queue" and vice versa) — there was
+no way to stop intake without also touching the queue, or vice versa.
+
+Fix (cmd/tray/main.go, buildTrayMenu + a new shared postAPI helper): replaced
+the old single conflated "Pipeline" checkbox and the separate "Start
+Queue"/"Stop Queue" buttons with two independent checkboxes with no
+cross-toggling: "Stop Pipeline" (calls /api/intake/pause /resume) and "Pause
+Queue" (calls /api/queue/pause /start, unchanged target from before).
+callQueueAPI/callIntakeAPI now both wrap a shared postAPI(path) helper
+instead of duplicating the POST-and-log logic. "Stop Queue" (which called the
+still-unimplemented /api/queue/stop no-op stub) was removed rather than kept
+as a non-functional menu item.
+
+Verified: go build ./..., go vet ./..., go test ./... all pass (cmd/tray is
+Windows-only, build tag verified on this Windows machine). NOT yet manually
+clicked through in a live tray session this round — recommend the user
+redeploy and confirm: unchecking "Stop Pipeline" alone leaves an in-progress
+encode running and the queue still accepting new jobs, and checking "Pause
+Queue" alone still lets new files land in Incoming and get added to the
+queue while no new job starts.
+
+Web UI note: not changed this round — the web UI's "Pause Queue" controls
+already only call /api/queue/pause (matches the desired model as of the fix
+below); there is currently no intake-pause control surfaced in the web UI
+either, only via this tray menu and the raw API. Not implemented since the
+user's ask was specifically about the tray icon; mention if they want parity
+in the web UI too.
+
+=== Prior session (cont.): fixed Pause killing the running encode instead of just blocking new jobs ===
 
 User reported (this was already flagged as open item #1 in the auto-memory
 open-bugs note from the prior session): pausing the encode queue (tray
@@ -60,10 +109,9 @@ requeued to "pending").
 Verified: go build ./..., go vet ./..., go test ./... (full suite,
 including the new test) all pass.
 
-Committed and released as v1.4.2 via /release (patch bump — bugfix only,
-no new user-facing surface beyond the JSON field rename). Confirm exact
-version/tag in git log if this note is read out of order relative to the
-release commit.
+Committed on develop. Released together with the follow-up tray-menu fix
+above via /release — confirm exact version/tag in git log if this note is
+read out of order relative to the release commit.
 
 NOT yet re-verified against a live pause-mid-encode run in this
 environment (no real ffmpeg encode was in flight during this session) —
