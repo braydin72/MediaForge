@@ -4209,7 +4209,7 @@
 
             showConfirmModal(
                 'Stop Queue',
-                'This will stop all running jobs. They will return to the queue but must restart from the beginning.',
+                'This will stop the queue from starting new jobs. Any job currently running will finish normally.',
                 async () => {
                     try {
                         await fetch('/api/queue/pause', { method: 'POST' });

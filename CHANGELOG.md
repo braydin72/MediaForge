@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-07-24
+
+### Fixed
+- Tray menu had no way to stop intake independently of the encode queue —
+  "Pipeline", "Pause Queue", and "Stop Queue" all called `/api/queue/*`
+  (`internal/jobs/WorkerPool`) and cross-toggled each other, so pausing one
+  always paused the other too. The backend already had a fully separate,
+  correctly-scoped intake control (`POST /api/intake/pause` /
+  `/api/intake/resume`, wired to `Watcher.Pause()`/`Resume()`, which only
+  suspends scanning the Incoming folder for new files and leaves anything
+  already in the pipeline untouched) — it just wasn't exposed anywhere in
+  the tray. Restructured the tray menu (`cmd/tray/main.go`) into two
+  independent checkboxes with no cross-toggling: "Stop Pipeline" (calls
+  `/api/intake/pause`/`resume`, intake only) and "Pause Queue" (calls
+  `/api/queue/pause`/`start`, encode queue only — unaffected by the pause
+  fix above other than sharing that endpoint). Removed the old "Start
+  Queue"/"Stop Queue" buttons, which duplicated the checkbox and, in Stop
+  Queue's case, called the still-unimplemented `/api/queue/stop` stub.
+  Files modified: `cmd/tray/main.go`.
+- Pausing the encode queue (tray "Pause Queue", or either pause control in
+  the web UI) cancelled and requeued whatever job was currently running,
+  killing the in-flight ffmpeg process — the intended behavior is a soft
+  pause: block new jobs from starting, let the current one finish. Root
+  cause: `WorkerPool.Pause()` (`internal/jobs/worker.go`) explicitly
+  cancelled and requeued every running job; the "let it finish" half of
+  pause already existed (the worker loop rechecks the paused flag before
+  picking up a new job) but was never reached because the running job was
+  killed first. Fixed: `Pause()` now only sets the paused flag and reports
+  how many jobs are still running to finish — it no longer touches
+  `Worker.currentJob` or the queue at all. API response field renamed
+  `requeued` → `in_progress` to reflect this (`POST /api/queue/pause`,
+  `internal/api/handler.go`). The web UI's "Stop Queue" confirmation dialog
+  (`web/templates/index.html`) previously promised "will stop all running
+  jobs ... must restart from the beginning" — updated to describe the
+  actual (soft-pause) behavior instead of promising a hard cancel the code
+  no longer performs. `docs/api/jobs.md` updated to match.
+  Files modified: `internal/jobs/worker.go`, `internal/jobs/worker_test.go`
+  (new `TestWorkerPoolPause_DoesNotCancelRunningJob`), `internal/api/handler.go`,
+  `web/templates/index.html`, `docs/api/jobs.md`.
+  Note: a true hard-cancel ("stop everything now, including the running
+  job") is not currently implemented anywhere — `WorkerPool.StopAll()` /
+  `POST /api/queue/stop` remain an unimplemented stub, unchanged by this
+  fix. If that's wanted later, it's a separate feature.
+
 ## [1.4.1] - 2026-07-24
 
 ### Fixed

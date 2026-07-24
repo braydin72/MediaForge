@@ -307,52 +307,28 @@ func (p *WorkerPool) IsPaused() bool {
 	return p.paused
 }
 
-// Pause stops all running jobs and prevents new jobs from starting.
-// Returns the number of jobs that were requeued.
+// Pause prevents new jobs from starting. Jobs already running are left to
+// finish normally — Pause does NOT cancel in-progress encodes. (An earlier
+// version cancelled and requeued running jobs here, which killed the
+// in-flight ffmpeg process on every pause; that behavior belongs to a hard
+// stop, not a pause, and callers expecting "pause lets the current job
+// finish" were getting a cancelled job instead.) Returns the number of jobs
+// currently running, which will complete before the pipeline goes idle.
 func (p *WorkerPool) Pause() int {
 	p.pausedMu.Lock()
 	p.paused = true
 	p.pausedMu.Unlock()
 
-	// Collect all running jobs
 	p.mu.Lock()
-	var runningJobs []runningJob
+	defer p.mu.Unlock()
+	count := 0
 	for _, w := range p.workers {
 		w.currentJobMu.Lock()
 		if w.currentJob != nil {
-			runningJobs = append(runningJobs, runningJob{
-				worker: w,
-				jobID:  w.currentJob.ID,
-			})
+			count++
 		}
 		w.currentJobMu.Unlock()
 	}
-	p.mu.Unlock()
-
-	// Sort running jobs by ID ascending (oldest first) so we can requeue in correct order
-	sort.Slice(runningJobs, func(i, j int) bool {
-		return runningJobs[i].jobID < runningJobs[j].jobID
-	})
-
-	// Requeue in REVERSE order (newest first) so oldest ends up at front of queue
-	// Requeue adds to front, so: requeue(3), requeue(2), requeue(1) → [1, 2, 3, ...]
-	count := 0
-	for i := len(runningJobs) - 1; i >= 0; i-- {
-		rj := runningJobs[i]
-		// Requeue FIRST while job is still "running" - this changes status to "pending"
-		if err := p.queue.Requeue(rj.jobID); err != nil {
-			logger.Warn("Failed to requeue job during pause", "job_id", rj.jobID, "error", err)
-			continue
-		}
-		count++
-
-		// Now cancel the job and wait for it to finish
-		done := rj.worker.CancelCurrentJob(rj.jobID)
-		if done != nil {
-			<-done
-		}
-	}
-
 	return count
 }
 

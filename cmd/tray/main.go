@@ -125,36 +125,47 @@ func mediaForgePath() string {
 
 // buildTrayMenu constructs the tray menu items, wires their click handlers, and
 // starts the background goroutine that refreshes the queue-depth label.
+//
+// "Stop Pipeline" and "Pause Queue" are deliberately separate, independent
+// controls, not two views onto the same toggle:
+//   - Stop Pipeline (/api/intake/pause, /api/intake/resume) only stops files
+//     from being pulled out of the Incoming folder into the pipeline. It does
+//     not touch the transcode queue — jobs already queued or encoding are
+//     completely unaffected.
+//   - Pause Queue (/api/queue/pause, /api/queue/start) only stops new jobs
+//     from starting. It does not touch intake — files can still be added to
+//     the queue while paused — and it does not cancel whatever job is
+//     currently encoding; that job finishes normally. Cancelling one specific
+//     queued/running job is done per-item from the web UI, not from here.
+//
+// An earlier version of this menu collapsed both concepts into one
+// checkbox (toggling "Pipeline" also silently paused the queue, and vice
+// versa), which meant there was no way to stop intake without also halting
+// the encoder or vice versa.
 func buildTrayMenu() {
 	systray.SetTitle("MediaForge")
 	systray.SetTooltip("MediaForge — Media Management")
 
-	// 1. Pipeline toggle (checked = running).
-	mPipeline := systray.AddMenuItemCheckbox("Pipeline", "Toggle the intake/transcode pipeline", true)
+	// 1. Intake control — checked = paused (Incoming folder not being scanned).
+	mIntake := systray.AddMenuItemCheckbox("Stop Pipeline", "Stop pulling new files from the Incoming folder", false)
 
-	// 2. Queue depth — display only.
+	// 2. Encode queue control — checked = paused (no new jobs starting).
+	mPauseQueue := systray.AddMenuItemCheckbox("Pause Queue", "Stop starting new jobs from the transcode queue", false)
+
+	// 3. Queue depth — display only.
 	mQueue := systray.AddMenuItem("Transcode Queue (0)", "Number of jobs pending/running")
 	mQueue.Disable()
 
-	systray.AddSeparator() // 3
+	systray.AddSeparator() // 4
 
-	// 4-6. Explicit queue controls.
-	mStart := systray.AddMenuItem("Start Queue", "Resume processing the transcode queue")
-	// Checked = queue paused. Toggling drives the pause/start API and keeps the
-	// Pipeline checkbox visually in sync (checked Pipeline = running).
-	mPause := systray.AddMenuItemCheckbox("Pause Queue", "Pause processing the transcode queue", false)
-	mStop := systray.AddMenuItem("Stop Queue", "Stop the transcode queue")
-
-	systray.AddSeparator() // 7
-
-	// 8-10. Config, restart, logs.
+	// 5-7. Config, restart, logs.
 	mConfig := systray.AddMenuItem("Config", "Open mediaforge.yaml")
 	mRestart := systray.AddMenuItem("Restart MediaForge", "Restart the mediaforge.exe server")
 	mLogs := systray.AddMenuItem("View Logs", "Open the current session log")
 
-	systray.AddSeparator() // 11
+	systray.AddSeparator() // 8
 
-	mExit := systray.AddMenuItem("Exit", "Stop MediaForge and close this icon") // 12
+	mExit := systray.AddMenuItem("Exit", "Stop MediaForge and close this icon") // 9
 
 	// Background: refresh the queue-depth label every 2 seconds.
 	go func() {
@@ -169,36 +180,22 @@ func buildTrayMenu() {
 	go func() {
 		for {
 			select {
-			case <-mPipeline.ClickedCh:
-				if mPipeline.Checked() {
-					mPipeline.Uncheck()
-					mPause.Check()
-					callQueueAPI("pause")
+			case <-mIntake.ClickedCh:
+				if mIntake.Checked() {
+					mIntake.Uncheck()
+					callIntakeAPI("resume")
 				} else {
-					mPipeline.Check()
-					mPause.Uncheck()
-					callQueueAPI("start")
+					mIntake.Check()
+					callIntakeAPI("pause")
 				}
-			case <-mStart.ClickedCh:
-				mPipeline.Check()
-				mPause.Uncheck()
-				callQueueAPI("start")
-			case <-mPause.ClickedCh:
-				if mPause.Checked() {
-					// Was paused, now unchecked -> resume.
-					mPause.Uncheck()
-					mPipeline.Check()
+			case <-mPauseQueue.ClickedCh:
+				if mPauseQueue.Checked() {
+					mPauseQueue.Uncheck()
 					callQueueAPI("start")
 				} else {
-					// Now checked -> pause.
-					mPause.Check()
-					mPipeline.Uncheck()
+					mPauseQueue.Check()
 					callQueueAPI("pause")
 				}
-			case <-mStop.ClickedCh:
-				mPipeline.Uncheck()
-				mPause.Check()
-				callQueueAPI("stop")
 			case <-mConfig.ClickedCh:
 				openFile(configPath())
 			case <-mRestart.ClickedCh:
@@ -248,10 +245,11 @@ func openLog() {
 	}
 }
 
-// callQueueAPI POSTs to /api/queue/{endpoint}. It fails silently (logging to
-// stderr) so a missing server never surfaces a dialog to the user.
-func callQueueAPI(endpoint string) error {
-	url := baseURL + "/api/queue/" + endpoint
+// postAPI POSTs to path (e.g. "/api/queue/pause") with no body. It fails
+// silently (logging to stderr) so a missing server never surfaces a dialog
+// to the user.
+func postAPI(path string) error {
+	url := baseURL + path
 	resp, err := http.Post(url, "application/json", nil) //nolint:noctx
 	if err != nil {
 		log.Printf("POST %s failed: %v", url, err)
@@ -263,6 +261,19 @@ func callQueueAPI(endpoint string) error {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// callQueueAPI POSTs to /api/queue/{endpoint} — controls the transcode queue
+// only (see buildTrayMenu's doc comment for the intake/queue distinction).
+func callQueueAPI(endpoint string) error {
+	return postAPI("/api/queue/" + endpoint)
+}
+
+// callIntakeAPI POSTs to /api/intake/{endpoint} — controls the intake
+// watcher only (see buildTrayMenu's doc comment for the intake/queue
+// distinction).
+func callIntakeAPI(endpoint string) error {
+	return postAPI("/api/intake/" + endpoint)
 }
 
 // getQueueCount returns the current queue depth (pending + running) from
