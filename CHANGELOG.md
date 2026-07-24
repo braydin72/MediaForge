@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Pausing the encode queue (tray "Pause Queue", or either pause control in
+  the web UI) cancelled and requeued whatever job was currently running,
+  killing the in-flight ffmpeg process — the intended behavior is a soft
+  pause: block new jobs from starting, let the current one finish. Root
+  cause: `WorkerPool.Pause()` (`internal/jobs/worker.go`) explicitly
+  cancelled and requeued every running job; the "let it finish" half of
+  pause already existed (the worker loop rechecks the paused flag before
+  picking up a new job) but was never reached because the running job was
+  killed first. Fixed: `Pause()` now only sets the paused flag and reports
+  how many jobs are still running to finish — it no longer touches
+  `Worker.currentJob` or the queue at all. API response field renamed
+  `requeued` → `in_progress` to reflect this (`POST /api/queue/pause`,
+  `internal/api/handler.go`). The web UI's "Stop Queue" confirmation dialog
+  (`web/templates/index.html`) previously promised "will stop all running
+  jobs ... must restart from the beginning" — updated to describe the
+  actual (soft-pause) behavior instead of promising a hard cancel the code
+  no longer performs. `docs/api/jobs.md` updated to match.
+  Files modified: `internal/jobs/worker.go`, `internal/jobs/worker_test.go`
+  (new `TestWorkerPoolPause_DoesNotCancelRunningJob`), `internal/api/handler.go`,
+  `web/templates/index.html`, `docs/api/jobs.md`.
+  Note: a true hard-cancel ("stop everything now, including the running
+  job") is not currently implemented anywhere — `WorkerPool.StopAll()` /
+  `POST /api/queue/stop` remain an unimplemented stub, unchanged by this
+  fix. If that's wanted later, it's a separate feature.
+
 ## [1.4.1] - 2026-07-24
 
 ### Fixed

@@ -180,6 +180,31 @@ func TestWorkerPoolCancel(t *testing.T) {
 	t.Log("Worker pool start/stop works correctly")
 }
 
+// TestWorkerPoolPause_DoesNotCancelRunningJob guards the fix for a real
+// production bug: Pause() used to cancel and requeue every in-progress job
+// (killing the in-flight ffmpeg process), even though the intended behavior
+// is a soft pause — block new jobs from starting, let the current one finish.
+func TestWorkerPoolPause_DoesNotCancelRunningJob(t *testing.T) {
+	job := &Job{ID: "job-1", Status: StatusRunning}
+	w := &Worker{currentJob: job}
+	pool := &WorkerPool{workers: []*Worker{w}}
+
+	count := pool.Pause()
+
+	if count != 1 {
+		t.Errorf("expected Pause to report 1 running job, got %d", count)
+	}
+	if !pool.IsPaused() {
+		t.Error("expected pool.IsPaused() to be true after Pause")
+	}
+	if w.currentJob == nil || w.currentJob.ID != "job-1" {
+		t.Error("expected the running job to be left in place, not cancelled")
+	}
+	if job.Status != StatusRunning {
+		t.Errorf("expected job status to remain %q (not requeued), got %q", StatusRunning, job.Status)
+	}
+}
+
 func TestWorkerPoolResize(t *testing.T) {
 	cfg := &config.Config{
 		Workers:     1,

@@ -1,6 +1,78 @@
 CURRENT STATE NOTE
 
-=== Latest session: fixed SmartShrink retry-loop finalization crash on a failed retry encode ===
+=== Latest session: fixed Pause killing the running encode instead of just blocking new jobs; released v1.4.1 ===
+
+User reported (this was already flagged as open item #1 in the auto-memory
+open-bugs note from the prior session): pausing the encode queue (tray
+"Pause Queue", or either pause control in the web UI — the header toggle
+and the footer "Stop Queue" button both call the same endpoint) stopped the
+currently-running encode instead of just preventing new encodes from
+starting. This is the same underlying mechanism that caused the SmartShrink
+finalization crash fixed in the prior session/release (v1.4.1) — that fix
+only stopped the crash side-effect of pause cancelling a job; it didn't
+change the fact that pause still cancelled the job at all.
+
+Root cause, confirmed by reading the code: `WorkerPool.Pause()`
+(internal/jobs/worker.go) explicitly collected every running job, requeued
+it via `queue.Requeue`, then called `CancelCurrentJob` — cancelling the
+job's context, which kills the in-flight ffmpeg process. The "let the
+current job finish, just block new ones" half of pause semantics already
+existed structurally (the worker's run() loop rechecks `pool.IsPaused()`
+before calling `queue.GetNext()` for a new job) — it just never got a
+chance to matter because the running job was killed first, every time.
+
+Fix (internal/jobs/worker.go, Pause() only): now just sets the paused flag
+and counts currently-running jobs for reporting — no longer touches
+`Worker.currentJob`, calls `CancelCurrentJob`, or touches the queue at all.
+The now-unused-here `runningJob` struct/`sort` import are still used
+elsewhere (SetWorkerCount's resize-down path, which legitimately does need
+to cancel jobs when shrinking worker count) so nothing else changed there.
+
+Also fixed two things that would otherwise have been left inconsistent by
+this change:
+- internal/api/handler.go PausePipeline: response field renamed
+  `requeued` -> `in_progress` (nothing is requeued anymore), doc comment
+  updated.
+- web/templates/index.html: the footer "Stop Queue" button's confirmation
+  modal previously said "This will stop all running jobs. They will return
+  to the queue but must restart from the beginning." — true before this
+  fix (Pause() used to hard-cancel), false after. Both the header pause
+  toggle and the footer "Stop Queue" button call the same
+  `/api/queue/pause` endpoint and always have — updated the footer modal's
+  text to describe the actual soft-pause behavior instead of building out
+  a separate hard-cancel code path. `WorkerPool.StopAll()` /
+  `POST /api/queue/stop` remain an unimplemented no-op stub (pre-existing,
+  explicitly TODO'd in the code) — a true hard-cancel action doesn't exist
+  anywhere in the app right now. Not implemented this session since it
+  wasn't asked for; flagged here in case the user wants a real "stop
+  everything now, including the running job" control later.
+- docs/api/jobs.md: Pause queue section updated to match (response field,
+  description).
+
+New test: internal/jobs/worker_test.go
+TestWorkerPoolPause_DoesNotCancelRunningJob — constructs a WorkerPool with
+a fake Worker holding a running Job directly (no real ffmpeg/queue needed,
+since the fixed Pause() no longer touches the queue), calls Pause(), and
+asserts: reported count is correct, pool.IsPaused() is true, the worker's
+currentJob is untouched, and the job's Status is still "running" (not
+requeued to "pending").
+
+Verified: go build ./..., go vet ./..., go test ./... (full suite,
+including the new test) all pass.
+
+Committed and released as v1.4.2 via /release (patch bump — bugfix only,
+no new user-facing surface beyond the JSON field rename). Confirm exact
+version/tag in git log if this note is read out of order relative to the
+release commit.
+
+NOT yet re-verified against a live pause-mid-encode run in this
+environment (no real ffmpeg encode was in flight during this session) —
+recommend the user redeploy (update-mediaforge.ps1) and confirm: start a
+real transcode, click Pause (either control), and confirm in the log that
+the running job's ffmpeg process is NOT killed and the job completes
+normally, while no new job starts until Resume is clicked.
+
+=== Prior session: fixed SmartShrink retry-loop finalization crash on a failed retry encode ===
 
 User pasted a real log from pausing the queue mid-job:
 `FFmpeg failed` (exit status 1, stderr trailing off mid mov_text subtitle

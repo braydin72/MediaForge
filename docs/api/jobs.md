@@ -183,14 +183,14 @@ curl -X POST http://localhost:8080/api/jobs/clear?status=complete
 POST /api/queue/pause
 ```
 
-Stop all running jobs and prevent new jobs from starting. Running jobs are cancelled and requeued at the front.
+Prevent new jobs from starting. Jobs already running are left to finish normally — they are not cancelled.
 
 **Response:**
 
 ```json
 {
   "paused": true,
-  "requeued": 2
+  "in_progress": 2
 }
 ```
 

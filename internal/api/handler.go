@@ -488,13 +488,14 @@ func (h *Handler) ClearQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 // PausePipeline handles POST /api/queue/pause
-// Stops all running jobs and prevents new jobs from starting.
+// Prevents new jobs from starting. Jobs already running are left to finish
+// normally, not cancelled — use StopPipeline for a hard cancel.
 // Called by the tray app menu and the web UI Stop button.
 func (h *Handler) PausePipeline(w http.ResponseWriter, r *http.Request) {
 	count := h.workerPool.Pause()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"paused":   true,
-		"requeued": count,
+		"paused":      true,
+		"in_progress": count,
 	})
 }
 
