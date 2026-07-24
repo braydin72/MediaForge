@@ -1,5 +1,107 @@
 CURRENT STATE NOTE
 
+=== Latest session: fixed SmartShrink retry-loop finalization crash on a failed retry encode ===
+
+User pasted a real log from pausing the queue mid-job:
+`FFmpeg failed` (exit status 1, stderr trailing off mid mov_text subtitle
+stream) -> `SmartShrink retry encode failed` -> `Job failed - finalization
+error: failed to copy temp to final location: ... The system cannot find
+the file specified`.
+
+Root cause (internal/jobs/worker.go, SmartShrink size-retry loop,
+~lines 925-969): every retry attempt reused the SAME tempPath as the prior
+(already-successful) attempt, explicitly `os.Remove(tempPath)`-ing it right
+before calling `attemptTranscode` again. If that retry's ffmpeg process then
+failed for any reason — including simply being killed because
+`WorkerPool.Pause()` cancelled the job's context mid-encode — the loop broke
+out and fell through to `result = bestResult`, which still pointed at the
+PREVIOUS successful result's metadata, but its backing file on disk had
+already been deleted and never recreated. Finalization then tried to copy a
+tempPath that no longer existed. This is a general bug (any retry failure
+for any reason loses the previous best output), not exclusively a
+pause-related one, though pause is what the user hit it via.
+
+Fix:
+- Each retry now encodes to a separate `tempPath + ".retry"` path instead of
+  overwriting tempPath directly. Only promoted (old tempPath removed,
+  `.retry` renamed onto tempPath) when the retry succeeds AND beats the
+  current best size — so a failed or worse retry can never destroy the
+  previously-best output that finalization will use.
+- Added an explicit `jobCtx.Err() == context.Canceled` check right after the
+  retry loop exits, mirroring the existing cancellation-handling block
+  around the initial (pre-retry) encode attempt earlier in the same
+  function. If the job was cancelled mid-retry (e.g. by Pause, which already
+  calls `queue.Requeue` before cancelling), it's now treated the same way as
+  that earlier check (log + `queue.CancelJob` or "interrupted by shutdown",
+  then return) instead of falling through into finalize/Review-Queue logic
+  and racing with whoever picks the requeued job up next.
+
+Verified: go build ./..., go vet ./..., go test ./... (full suite) all
+pass. NOT re-verified against a live pause-mid-SmartShrink-retry run in this
+environment (no real ffmpeg/media here) — recommend the user reproduce the
+original repro (pause the queue while a SmartShrink job is mid-retry) and
+confirm the job now either completes cleanly with the retry's output or is
+cleanly requeued/cancelled, with no more "finalization error: cannot find
+the file specified" in the log.
+
+Explicitly NOT addressed this session (separate, larger scope, per the
+user's own memory note from 2026-07-24): the fact that Pause() cancels the
+CURRENTLY RUNNING job at all, rather than letting it finish and only
+blocking new jobs from starting. The user has already flagged this as a
+distinct pause-semantics change they want to describe further before it's
+scoped — this session's fix only stops the crash-on-cancel side effect, it
+does not change what Pause() cancels.
+
+=== Prior session: fixed TVDB episode-title reconciliation always silently failing (malformed pagination URL) ===
+
+User reported a real production case: "Stargate SG-1 (1997) - S01E02 - The
+Enemy Within.mp4" (source combines TVDB's S01E01+E02 into one file, throwing
+every subsequent episode number in the season off by one) got moved to the
+library as "S01E02 - Children of the Gods (2).mp4" — the wrong episode
+number was kept and the correct filename-derived title ("The Enemy Within")
+was overwritten, backwards from the intended behavior (CLAUDE.md/prior
+sessions: on a title/number mismatch, trust the filename's episode title and
+correct the number, not the other way around).
+
+Root cause, found by reading internal/intake/tvdb.go: that reconciliation
+logic (findAdjacentSeasonEpisode then findEpisodeByTitle, added in an
+earlier session — see the "ReconcileWrongSeasonEpisode"/
+"ReconcileAdjacentSeasonOffset" tests further down this file) already exists
+and is structurally correct, but findEpisodeByTitle's whole-series page scan
+built its URL as `/v4/series/{id}/episodes/default/page/{n}` (page as a path
+segment) — not a valid TVDB v4 route. Every call returned HTTP 400 (confirmed
+in the user's real log: "TVDB: findEpisodeByTitle non-200 response ...
+status=400"), so the fallback silently returned ok=false every time it ran,
+and the reconciliation branch fell through with the mismatch un-corrected.
+The other working call, fetchEpisode, was already using the correct shape
+(`/v4/series/{id}/episodes/default?season=N`), which is what made the
+inconsistency easy to spot by comparison.
+
+Fix (internal/intake/tvdb.go, findEpisodeByTitle only): send `page` as a
+query parameter instead of a path segment, matching fetchEpisode's request
+shape. Also fixed two stale doc comments referencing the old URL shape.
+
+Two existing tests' mock servers were asserting against the old (bug-
+matching) URL shape and had to be updated: TestTVDBLookup_
+ReconcileWrongSeasonEpisode and TestTVDBLookup_ReconcileAdjacentSeasonOffset
+(internal/intake/tvdb_test.go) both routed their mock's page-scan response
+based on `strings.Contains(r.URL.Path, "/page/")` — switched both to
+`r.URL.Query().Get("page") != ""`. Without this the first test actually
+failed after the fix (asserted differently before only because the buggy
+mock happened to serve the season-fetch body for every request, including
+page-scan ones).
+
+Verified: go build ./... and go test ./... (full suite, internal/intake
+specifically) all pass, including the now-corrected
+ReconcileWrongSeasonEpisode test. Files modified: internal/intake/tvdb.go,
+internal/intake/tvdb_test.go, CHANGELOG.md. NOT yet re-verified against a
+live rerun of the actual Stargate SG-1 file — recommend rebuilding/
+redeploying and either re-running intake on a similarly-mis-numbered file or
+re-triggering the existing S01E02 entry (if it's still sitting in the
+library with the wrong name) to confirm the log now shows "TVDB: corrected
+season/episode by episode name" with new_episode=3 (or whatever TVDB's real
+numbering is) instead of the earlier silent-failure path.
+
 === Latest session (cont. once more): adaptive-target validated over ~45 real jobs, promoted to default, merged into develop ===
 
 Direct continuation of the two sessions below. After the post-encode

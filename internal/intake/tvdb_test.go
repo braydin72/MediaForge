@@ -533,7 +533,7 @@ func TestTVDBLookup_ReconcileWrongSeasonEpisode(t *testing.T) {
 		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
 		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, searchBody) },
 		"/v4/series": func(r *http.Request) *http.Response {
-			if strings.Contains(r.URL.Path, "/page/") {
+			if r.URL.Query().Get("page") != "" {
 				return jsonResp(http.StatusOK, pagedBody)
 			}
 			return jsonResp(http.StatusOK, s48Body)
@@ -661,7 +661,7 @@ func TestTVDBLookup_ReconcileAdjacentSeasonOffset(t *testing.T) {
 		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
 		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, searchBody) },
 		"/v4/series": func(r *http.Request) *http.Response {
-			if strings.Contains(r.URL.Path, "/page/") {
+			if r.URL.Query().Get("page") != "" {
 				// Whole-series scan finds nothing — the adjacent-season check must
 				// be what resolves this, not the fallback.
 				return jsonResp(http.StatusOK, map[string]interface{}{
