@@ -471,7 +471,7 @@ func (c *TVDBClient) findAdjacentSeasonEpisode(ctx context.Context, seriesID, se
 	return nil, false
 }
 
-// tvdbEpisode is the per-episode shape from GET /v4/series/{id}/episodes/default/page/{n}.
+// tvdbEpisode is the per-episode shape from GET /v4/series/{id}/episodes/default?page={n}.
 type tvdbEpisode struct {
 	ID           int    `json:"id"`
 	Name         string `json:"name"`
@@ -535,7 +535,7 @@ func (c *TVDBClient) fetchEpisode(ctx context.Context, seriesID, season, episode
 }
 
 // findEpisodeByTitle searches every episode of a series for one whose name matches
-// title, paginating GET /v4/series/{id}/episodes/default/page/{n}. It returns the
+// title, paginating GET /v4/series/{id}/episodes/default?page={n}. It returns the
 // single best match only when its similarity is strong (>= 0.90) and unambiguous
 // (clearly ahead of the runner-up) — otherwise ok is false and the caller should
 // fall back to the Review Queue rather than guess. Special/season-0 episodes are
@@ -548,12 +548,15 @@ func (c *TVDBClient) findEpisodeByTitle(ctx context.Context, seriesID int, title
 	pagesScanned, episodesScanned := 0, 0
 
 	for page := 0; page < maxPages; page++ {
-		url := fmt.Sprintf("%s/v4/series/%d/episodes/default/page/%d", tvdbBaseURL, seriesID, page)
+		url := fmt.Sprintf("%s/v4/series/%d/episodes/default", tvdbBaseURL, seriesID)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			logger.Debug("TVDB: findEpisodeByTitle request build failed", "series_id", seriesID, "page", page, "error", err)
 			return nil, false
 		}
+		q := req.URL.Query()
+		q.Set("page", strconv.Itoa(page))
+		req.URL.RawQuery = q.Encode()
 		req.Header.Set("Authorization", "Bearer "+c.token)
 
 		resp, err := c.httpClient.Do(req)

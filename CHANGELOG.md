@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-07-24
+
+### Fixed
+- `internal/jobs/worker.go`: SmartShrink's size-retry loop crashed job
+  finalization when a retry encode failed (e.g. the in-flight ffmpeg
+  process gets killed because the user paused the queue mid-retry) —
+  logged `Job failed - finalization error: ... The system cannot find the
+  file specified`. Root cause: each retry attempt reused the same temp
+  path as the previous (already-successful) attempt, deleting it before
+  re-encoding; if that re-encode then failed, the loop fell through to
+  finalize using the last good in-memory result even though its backing
+  file no longer existed on disk. Fixed by encoding each retry to a
+  separate `.retry` path and only promoting it (delete-then-rename onto
+  the real temp path) when it actually succeeds and beats the current
+  best, so a failed or worse retry never destroys the previously-best
+  output. Also added explicit cancellation handling after the retry loop
+  (mirroring the existing check around the initial encode attempt): if
+  the job's context was cancelled mid-retry, the job is treated as
+  cancelled/already-requeued (by `WorkerPool.Pause()`) instead of
+  attempting finalization/Review-Queue routing.
+- `internal/intake/tvdb.go`: episode-name reconciliation (trusting the
+  filename's episode title over a mismatched S/E number, and correcting
+  the number instead of overwriting the title) always failed silently.
+  `findEpisodeByTitle`'s whole-series page scan built the pagination URL
+  as a path segment (`/v4/series/{id}/episodes/default/page/{n}`), which
+  isn't a valid TVDB v4 route and returned HTTP 400 on every call — so
+  the fallback never found a match, and files with an off-by-one/combined
+  source episode (e.g. Stargate SG-1 S01E02 "The Enemy Within" being
+  filed as "Children of the Gods (2)") kept the wrong episode number with
+  only the title overwritten. Fixed to send `page` as a query parameter,
+  matching the working `fetchEpisode` request shape.
+- Files modified: `internal/intake/tvdb.go`, `internal/intake/tvdb_test.go`
+  (two mock routes updated from path-based to query-param-based page
+  detection to match the corrected request shape).
+
 ## [1.4.0] - 2026-07-23
 
 ### Added

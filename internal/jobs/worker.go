@@ -949,23 +949,57 @@ func (w *Worker) processJob(job *Job) {
 
 				logger.Info("SmartShrink retry: re-encoding at higher CRF", "job_id", job.ID, "crf", currentCRF)
 				_ = w.queue.UpdateJobPhase(job.ID, PhaseEncoding)
-				os.Remove(tempPath)
 
-				retryResult, retryErr := w.attemptTranscode(jobCtx, job, preset, tempPath,
+				// Encode retries to a separate path rather than overwriting tempPath
+				// directly: a retry that fails or scores worse must not destroy the
+				// currently-best output, which finalization below will use.
+				retryTempPath := tempPath + ".retry"
+				os.Remove(retryTempPath)
+
+				retryResult, retryErr := w.attemptTranscode(jobCtx, job, preset, retryTempPath,
 					duration, currentCRF, currentCRF, qualityMod, totalFrames, tonemapParams, useSoftwareDecode, subtitleIndices, subtitleConvertIndices, outputFmt)
 				if retryErr != nil {
 					logger.Warn("SmartShrink retry encode failed", "job_id", job.ID, "error", retryErr)
+					os.Remove(retryTempPath)
 					break
 				}
 
 				if retryResult.OutputSize < bestResult.OutputSize {
+					os.Remove(tempPath)
+					if renameErr := os.Rename(retryTempPath, tempPath); renameErr != nil {
+						logger.Warn("SmartShrink retry: failed to promote retry output", "job_id", job.ID, "error", renameErr)
+						os.Remove(retryTempPath)
+						break
+					}
 					bestResult = retryResult
 					bestCRF = currentCRF
+				} else {
+					os.Remove(retryTempPath)
 				}
 				if float64(retryResult.OutputSize) <= float64(inputSize)*sizeTarget {
 					break // achieved 40% reduction target
 				}
 			}
+
+			// A retry can fail because the job's context was cancelled (e.g. the
+			// user paused the queue mid-retry-encode, which kills the in-flight
+			// ffmpeg process and produces an ffmpeg error indistinguishable from a
+			// genuine encode failure at the retryErr check above). WorkerPool.Pause()
+			// has already requeued this job, so falling through to finalize/Review-
+			// Queue logic here would race with whoever picks it up next. Handle it
+			// the same way the initial-encode cancellation check earlier in this
+			// function does, instead of treating it as a normal retry-loop exit.
+			if jobCtx.Err() == context.Canceled {
+				os.Remove(tempPath)
+				if w.ctx.Err() != context.Canceled && job.Status == StatusRunning {
+					logger.Info("Job cancelled", "job_id", job.ID)
+					_ = w.queue.CancelJob(job.ID)
+				} else if w.ctx.Err() == context.Canceled {
+					logger.Info("Job interrupted by shutdown", "job_id", job.ID)
+				}
+				return
+			}
+
 			result = bestResult
 
 			if smartShrinkBestEffort && float64(result.OutputSize) < float64(inputSize) {
