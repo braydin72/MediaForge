@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-07-24
+
 ### Fixed
 - Tray menu had no way to stop intake independently of the encode queue —
   "Pipeline", "Pause Queue", and "Stop Queue" all called `/api/queue/*`
