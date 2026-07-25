@@ -306,7 +306,7 @@ func TestOrchestrator_TVDBSuccessStopsChain(t *testing.T) {
 		IsTV: true, Season: 1, Episode: 1,
 	}
 
-	result, err := orch.LookupTV(context.Background(), parsed, 0.60)
+	result, err := orch.LookupTV(context.Background(), parsed, 0, 0.60)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestOrchestrator_FallsThroughToOMDb(t *testing.T) {
 		IsTV: true, Season: 1, Episode: 1,
 	}
 
-	result, err := orch.LookupTV(context.Background(), parsed, 0.60)
+	result, err := orch.LookupTV(context.Background(), parsed, 0, 0.60)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestOrchestrator_AllSourcesFail_NoMatch(t *testing.T) {
 	orch := NewOrchestrator(tvdb, tmdb, omdb)
 	parsed := &ParsedFilename{Title: "Nonexistent Show XYZZY", IsTV: true, Season: 1, Episode: 1}
 
-	_, err := orch.LookupTV(context.Background(), parsed, 0.60)
+	_, err := orch.LookupTV(context.Background(), parsed, 0, 0.60)
 	if err == nil {
 		t.Fatal("expected NoMatchError, got nil")
 	}
@@ -375,7 +375,7 @@ func TestOrchestrator_NilClientsSkipped(t *testing.T) {
 	orch := NewOrchestrator(nil, nil, nil)
 	parsed := &ParsedFilename{Title: "Breaking Bad", IsTV: true, Season: 1, Episode: 1}
 
-	_, err := orch.LookupTV(context.Background(), parsed, 0.60)
+	_, err := orch.LookupTV(context.Background(), parsed, 0, 0.60)
 	if err == nil {
 		t.Fatal("expected NoMatchError for nil clients, got nil")
 	}

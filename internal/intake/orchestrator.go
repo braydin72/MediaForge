@@ -24,6 +24,14 @@ type LookupResult struct {
 	TVDBNetwork    string // populated from TVDB
 	PosterPath     string // populated from TMDB
 	Confidence     float64
+
+	// Episode2 is set (TVDB only) when this file was confirmed to contain two
+	// consecutive TVDB episodes numbered as one by the source. 0 otherwise.
+	Episode2 int
+	// MultiPartUnconfirmed is set (TVDB only) when the filename suggests a
+	// combined multi-part episode but it could not be confirmed via duration
+	// — callers should route to Review Queue rather than guess.
+	MultiPartUnconfirmed bool
 }
 
 // NoMatchError is returned when all configured lookup sources fail or produce
@@ -94,12 +102,14 @@ func (o *Orchestrator) LookupMovie(ctx context.Context, parsed *ParsedFilename, 
 }
 
 // LookupTV runs TVDB → TMDB → OMDb. Same stop/fallback semantics as LookupMovie.
-func (o *Orchestrator) LookupTV(ctx context.Context, parsed *ParsedFilename, reviewThreshold float64) (*LookupResult, error) {
+// probeDuration (the source file's real duration) is used only by TVDB, to
+// confirm a suspected combined multi-part episode; pass 0 to skip that check.
+func (o *Orchestrator) LookupTV(ctx context.Context, parsed *ParsedFilename, probeDuration time.Duration, reviewThreshold float64) (*LookupResult, error) {
 	var best *LookupResult
 	var reasons []string
 
 	if o.TVDB != nil {
-		raw, err := o.TVDB.Lookup(ctx, parsed)
+		raw, err := o.TVDB.Lookup(ctx, parsed, probeDuration)
 		if err != nil {
 			reasons = append(reasons, "TVDB: "+err.Error())
 		} else {
@@ -163,9 +173,11 @@ func fromTVDB(r *TVDBResult, parsed *ParsedFilename) *LookupResult {
 		TVDBNetwork:    r.Network,
 		Season:         r.Season,
 		Episode:        r.Episode,
-		EpisodeTitle:   r.EpisodeTitle,
-		EpisodeAirDate: r.EpisodeAirDate,
-		Confidence:     r.Confidence,
+		EpisodeTitle:         r.EpisodeTitle,
+		EpisodeAirDate:       r.EpisodeAirDate,
+		Confidence:           r.Confidence,
+		Episode2:             r.Episode2,
+		MultiPartUnconfirmed: r.MultiPartUnconfirmed,
 	}
 }
 

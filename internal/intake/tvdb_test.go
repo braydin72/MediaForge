@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // roundTripFunc adapts a function to the http.RoundTripper interface.
@@ -95,7 +96,7 @@ func TestTVDBLookup_Success(t *testing.T) {
 		IsTV: true, Season: 1, Episode: 1,
 	}
 
-	result, err := client.Lookup(context.Background(), parsed)
+	result, err := client.Lookup(context.Background(), parsed, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -140,7 +141,7 @@ func TestTVDBLookup_SeriesFoundEpisodeNotFound(t *testing.T) {
 		IsTV: true, Season: 5, Episode: 16,
 	}
 
-	result, err := client.Lookup(context.Background(), parsed)
+	result, err := client.Lookup(context.Background(), parsed, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestTVDBLookup_NoSeriesMatch(t *testing.T) {
 		IsTV: true, Season: 1, Episode: 1,
 	}
 
-	_, err := client.Lookup(context.Background(), parsed)
+	_, err := client.Lookup(context.Background(), parsed, 0)
 	if err == nil {
 		t.Fatal("expected error for no series match, got nil")
 	}
@@ -195,7 +196,7 @@ func TestTVDBLookup_NoSeriesMatch_404(t *testing.T) {
 
 	parsed := &ParsedFilename{Title: "Unknown Show", IsTV: true, Season: 1, Episode: 1}
 
-	_, err := client.Lookup(context.Background(), parsed)
+	_, err := client.Lookup(context.Background(), parsed, 0)
 	if err == nil {
 		t.Fatal("expected error for 404 search, got nil")
 	}
@@ -220,7 +221,7 @@ func TestTVDBLookup_AuthFailure(t *testing.T) {
 
 	parsed := &ParsedFilename{Title: "Breaking Bad", IsTV: true, Season: 1, Episode: 1}
 
-	_, err := client.Lookup(context.Background(), parsed)
+	_, err := client.Lookup(context.Background(), parsed, 0)
 	if err == nil {
 		t.Fatal("expected error for auth failure, got nil")
 	}
@@ -246,7 +247,7 @@ func TestTVDBLookup_EmptyAPIKey(t *testing.T) {
 
 	parsed := &ParsedFilename{Title: "Breaking Bad", IsTV: true, Season: 1, Episode: 1}
 
-	_, err := client.Lookup(context.Background(), parsed)
+	_, err := client.Lookup(context.Background(), parsed, 0)
 	if err == nil {
 		t.Fatal("expected error for empty API key, got nil")
 	}
@@ -271,7 +272,7 @@ func TestTVDBLookup_RateLimit(t *testing.T) {
 
 	parsed := &ParsedFilename{Title: "Breaking Bad", IsTV: true, Season: 1, Episode: 1}
 
-	_, err := client.Lookup(context.Background(), parsed)
+	_, err := client.Lookup(context.Background(), parsed, 0)
 	if err == nil {
 		t.Fatal("expected rate limit error, got nil")
 	}
@@ -303,7 +304,7 @@ func TestTVDBLookup_TokenCached(t *testing.T) {
 	parsed := &ParsedFilename{Title: "Breaking Bad", IsTV: true, Season: 1, Episode: 1}
 
 	for i := 0; i < 3; i++ {
-		if _, err := client.Lookup(context.Background(), parsed); err != nil {
+		if _, err := client.Lookup(context.Background(), parsed, 0); err != nil {
 			t.Fatalf("lookup %d failed: %v", i, err)
 		}
 	}
@@ -379,7 +380,7 @@ func TestSelectBestSeries_EpisodeNameDisambiguates(t *testing.T) {
 		ParsedEpisodeTitle: "Pilot",
 	}
 
-	result, err := client.Lookup(context.Background(), parsed)
+	result, err := client.Lookup(context.Background(), parsed, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -417,7 +418,7 @@ func TestTVDBLookup_EpisodeSeasonQueryParam(t *testing.T) {
 		IsTV: true, Season: 5, Episode: 9,
 	}
 
-	result, err := client.Lookup(context.Background(), parsed)
+	result, err := client.Lookup(context.Background(), parsed, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -449,7 +450,7 @@ func TestTVDBLookup_TWD_EpisodeYearMatch(t *testing.T) {
 		ParsedEpisodeTitle: "Here's Not Here",
 	}
 
-	result, err := twdMockClient().Lookup(context.Background(), parsed)
+	result, err := twdMockClient().Lookup(context.Background(), parsed, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -470,7 +471,7 @@ func TestTVDBLookup_TWD_PremiereYearMatch(t *testing.T) {
 		ParsedEpisodeTitle: "Here's Not Here",
 	}
 
-	result, err := twdMockClient().Lookup(context.Background(), parsed)
+	result, err := twdMockClient().Lookup(context.Background(), parsed, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -490,7 +491,7 @@ func TestTVDBLookup_TWD_NoYearNoTitle(t *testing.T) {
 		Episode: 4,
 	}
 
-	result, err := twdMockClient().Lookup(context.Background(), parsed)
+	result, err := twdMockClient().Lookup(context.Background(), parsed, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -548,7 +549,7 @@ func TestTVDBLookup_ReconcileWrongSeasonEpisode(t *testing.T) {
 		ParsedEpisodeTitle: "Her Last Call",
 	}
 
-	result, err := client.Lookup(context.Background(), parsed)
+	result, err := client.Lookup(context.Background(), parsed, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -701,7 +702,7 @@ func TestTVDBLookup_ReconcileAdjacentSeasonOffset(t *testing.T) {
 		ParsedEpisodeTitle: "Her Last Call",
 	}
 
-	result, err := client.Lookup(context.Background(), parsed)
+	result, err := client.Lookup(context.Background(), parsed, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -713,6 +714,104 @@ func TestTVDBLookup_ReconcileAdjacentSeasonOffset(t *testing.T) {
 	}
 	if !result.EpisodeFound {
 		t.Error("EpisodeFound: want true after reconciliation")
+	}
+}
+
+// TestTVDBLookup_CombinedMultiPartConfirmedByDuration reproduces the real
+// Stargate SG-1 case: the source combines TVDB's S01E01+E02 (the two-part
+// pilot) into one file numbered E01, with a title that says so ("Children
+// of the Gods Parts 1 & 2"). The probed file duration matches both
+// episodes' TVDB runtimes summed, so Episode2 should be set.
+func TestTVDBLookup_CombinedMultiPartConfirmedByDuration(t *testing.T) {
+	searchBody := map[string]interface{}{
+		"data": []map[string]interface{}{
+			{"tvdb_id": "72449", "name": "Stargate SG-1", "year": "1997", "network": "Showtime"},
+		},
+	}
+	season1Body := map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 1, "name": "Children of the Gods (1)", "aired": "1997-07-27", "seasonNumber": 1, "number": 1, "runtime": 46},
+				{"id": 2, "name": "Children of the Gods (2)", "aired": "1997-07-27", "seasonNumber": 1, "number": 2, "runtime": 46},
+			},
+		},
+	}
+
+	client := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
+		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, searchBody) },
+		"/v4/series": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, season1Body) },
+	}))
+
+	parsed := &ParsedFilename{
+		Title:              "Stargate SG-1",
+		Year:               1997,
+		IsTV:               true,
+		Season:             1,
+		Episode:            1,
+		ParsedEpisodeTitle: "Children of the Gods Parts 1 & 2",
+	}
+
+	result, err := client.Lookup(context.Background(), parsed, 92*time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Episode2 != 2 {
+		t.Errorf("Episode2: want 2, got %d", result.Episode2)
+	}
+	if result.MultiPartUnconfirmed {
+		t.Error("MultiPartUnconfirmed: want false when duration confirms the combined episode")
+	}
+	if result.Season != 1 || result.Episode != 1 {
+		t.Errorf("season/episode: want S01E01 unchanged, got S%02dE%02d", result.Season, result.Episode)
+	}
+}
+
+// TestTVDBLookup_CombinedMultiPartUnconfirmed covers the same title-signal
+// case as above, but with no probe duration available (e.g. ffprobe failed,
+// or the manual-search API path which never has a real file to probe) — the
+// duration check can't confirm it, so the caller must be told to route this
+// to Review Queue rather than silently guessing either interpretation.
+func TestTVDBLookup_CombinedMultiPartUnconfirmed(t *testing.T) {
+	searchBody := map[string]interface{}{
+		"data": []map[string]interface{}{
+			{"tvdb_id": "72449", "name": "Stargate SG-1", "year": "1997", "network": "Showtime"},
+		},
+	}
+	season1Body := map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 1, "name": "Children of the Gods (1)", "aired": "1997-07-27", "seasonNumber": 1, "number": 1, "runtime": 46},
+				{"id": 2, "name": "Children of the Gods (2)", "aired": "1997-07-27", "seasonNumber": 1, "number": 2, "runtime": 46},
+			},
+		},
+	}
+
+	client := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
+		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, searchBody) },
+		"/v4/series": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, season1Body) },
+	}))
+
+	parsed := &ParsedFilename{
+		Title:              "Stargate SG-1",
+		Year:               1997,
+		IsTV:               true,
+		Season:             1,
+		Episode:            1,
+		ParsedEpisodeTitle: "Children of the Gods Parts 1 & 2",
+	}
+
+	// probeDuration=0 means "no probe available" — Lookup must not guess.
+	result, err := client.Lookup(context.Background(), parsed, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Episode2 != 0 {
+		t.Errorf("Episode2: want 0 when unconfirmed, got %d", result.Episode2)
+	}
+	if !result.MultiPartUnconfirmed {
+		t.Error("MultiPartUnconfirmed: want true when duration can't confirm the combined episode")
 	}
 }
 

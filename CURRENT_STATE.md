@@ -1,6 +1,98 @@
 CURRENT STATE NOTE
 
-=== Latest session (cont.): tray menu now exposes intake pause separately from queue pause ===
+=== Latest session (cont.): combined multi-part episode detection + naming ===
+
+Direct continuation of the same session, resuming the scoping paused
+earlier when the user wanted to verify the TVDB title-reconciliation fix
+live first (that verification and the pause/tray fixes above are now
+released as v1.4.1/v1.4.2). This closes out open-bugs.md item #2
+(multi-episode naming) plus the harder "single-numbered file that TVDB
+considers two episodes" case surfaced by the live Stargate SG-1 test.
+
+Design, confirmed with the user via AskUserQuestion before implementing:
+- Destination filename/title keeps the SOURCE's own episode title (e.g.
+  "Children of the Gods_ Parts 1 & 2", sanitized) rather than combining or
+  replacing it with TVDB's per-episode titles — the source file was written
+  for exactly this combined content.
+- If the title signal fires (filename title says "Parts 1 & 2" etc.) but
+  duration can't confirm it actually contains both episodes, route to
+  Review Queue rather than guess (no-silent-failures principle).
+
+Implementation:
+- internal/intake/tvdb.go: new reMultiPartTitle regex + isMultiPartTitle
+  helper (catches "Parts 1 & 2", "Part 1 and 2", "1 & 2", etc., case-
+  insensitive). tvdbEpisode gained Runtime int (TVDB's per-episode minutes,
+  json "runtime"). TVDBResult gained Episode2 int and MultiPartUnconfirmed
+  bool. Lookup's signature gained a probeDuration time.Duration param
+  (probe.Duration from the intake pipeline; 0 skips the check, used by the
+  manual-search API path which has no real file to probe). New detection
+  block after the existing episode-name-reconciliation logic: when the
+  resolved episode's title matches the multi-part pattern, fetches
+  episode+1 via the existing fetchEpisode helper and compares
+  probeDuration against (episode.Runtime + nextEpisode.Runtime)*1min with
+  15% tolerance (new multiPartRuntimeTolerancePct const) — confirmed sets
+  Episode2, unconfirmed sets MultiPartUnconfirmed and logs why (no runtime
+  data vs. duration mismatch, distinguishable in the log).
+- internal/intake/orchestrator.go: LookupResult gained Episode2/
+  MultiPartUnconfirmed (TV-only, zero-value for movie/TMDB/OMDb results).
+  LookupTV gained the same probeDuration param, passed through to
+  TVDB.Lookup; fromTVDB converter carries the two new fields.
+- internal/intake/watcher.go: resolveAndGate now computes probeDuration
+  from probe.Duration (nil-safe — probe can be nil in some call paths,
+  guarded explicitly; this was actually a LATENT nil-deref bug this change
+  would have introduced for the TV path, caught by an existing test
+  passing probe=nil, fixed with a nil check before the change was
+  committed). New early-exit: if result.MultiPartUnconfirmed, routes to
+  Review Queue with a reason mentioning "multi-part episode" before the
+  normal confidence-threshold gating runs. Metadata-merge block: when
+  result.Episode2 > 0, merges it into parsed.Episode2 AND sets
+  parsed.EpisodeTitle = parsed.ParsedEpisodeTitle (the source's own title)
+  instead of the normal `parsed.EpisodeTitle = result.EpisodeTitle`
+  (TVDB's title) — this is the one place in the file where TVDB's title is
+  deliberately NOT trusted, per the user's explicit design decision above.
+- internal/intake/naming.go: applyNamingTemplate's {episode:02d} token now
+  renders "01-E02" (not just "01") when parsed.Episode2 > 0, producing
+  "S01E01-E02" from the existing "S{season:02d}E{episode:02d}" template
+  shape. This also fixes the naming side of the OTHER, simpler case noted
+  in open-bugs.md item #2: a filename that already encodes a range like
+  S01E01E02 was correctly parsed into Episode/Episode2 by parse.go
+  already, but the naming template never read Episode2 — now it does,
+  for both sources of Episode2 (filename-parsed and TVDB-confirmed).
+- internal/api/handler.go: the manual-search LookupTV call site
+  (SearchReviewEntry) updated for the new probeDuration param, passing 0
+  (no real file to probe from a manual title search).
+
+New tests:
+- internal/intake/tvdb_test.go: TestTVDBLookup_CombinedMultiPartConfirmedByDuration
+  (92-minute probe matches two 46-minute TVDB runtimes -> Episode2=2) and
+  TestTVDBLookup_CombinedMultiPartUnconfirmed (probeDuration=0 ->
+  MultiPartUnconfirmed=true, Episode2=0). Both reproduce the real Stargate
+  SG-1 S01E01 case (tvdb_id 72449, "Children of the Gods (1)"/"(2)").
+- internal/intake/watcher_test.go: two new shared fixtures
+  (combinedEpisodeMockTVDB, combinedEpisodeParsed) plus
+  TestResolveAndGate_MultiPartUnconfirmedRoutesToReview (nil probe -> ok=false,
+  1 review queue entry, reason mentions "multi-part") and
+  TestResolveAndGate_MultiPartConfirmedKeepsSourceTitle (92min probe ->
+  ok=true, parsed.Episode2=2, parsed.EpisodeTitle stays the source's own
+  title, not TVDB's).
+- internal/intake/naming_test.go: TestApplyNamingTemplateEpisode2Range
+  (Episode2=2 -> "S01E01-E02" in the rendered filename) and
+  TestApplyNamingTemplateSingleEpisodeUnaffected (regression guard: a
+  normal single-episode file's rendered name is unchanged by this feature).
+
+Verified: go build ./..., go vet ./..., go test ./... (full suite,
+including all 6 new tests) all pass.
+
+NOT yet committed/released as of writing this note, and NOT yet verified
+against a live intake run — recommend the user redeploy
+(update-mediaforge.ps1) and re-drop the actual Stargate SG-1 combined pilot
+file (or any similarly-combined episode) to confirm in the log: "TVDB:
+confirmed combined multi-part episode" appears with the right
+episode/episode2 numbers, and the file lands in the library as
+"...S01E01-E02 - <source's own title>.mp4" instead of just "S01E01 -
+Children of the Gods (1).mp4" as it did before this feature existed.
+
+=== Prior session (cont.): tray menu now exposes intake pause separately from queue pause ===
 
 Direct continuation of the Pause fix below, same session. User clarified the
 exact intended model for pipeline controls after the Pause fix landed:
