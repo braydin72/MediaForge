@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-07-24
+
+### Added
+- Combined multi-part episode detection for TV intake: a source that merges
+  two consecutive TVDB episodes into one file numbered as a single episode
+  (e.g. a two-part pilot like Stargate SG-1's "Children of the Gods Parts 1
+  & 2", numbered `S01E01` by the source but covering TVDB's E01+E02) is now
+  detected and named `S01E01-E02` instead of silently filing under just
+  `E01` and losing the second episode. Detection requires two independent
+  signals before acting: (1) the filename's parsed episode title matches a
+  "Parts 1 & 2" / "Part 1 and 2" pattern, and (2) the probed file duration
+  matches the sum of both TVDB episodes' listed runtimes within 15%
+  tolerance. If the title signal fires but duration can't confirm it (no
+  TVDB runtime data, or no probe duration available), the file routes to
+  Review Queue with a distinct reason rather than guessing — consistent
+  with the project's no-silent-failures principle. Per an explicit design
+  decision: the destination file keeps the *source's own* episode title
+  (it was written for this exact file) rather than being overwritten with
+  TVDB's single-episode title, which would only describe half the content.
+  `internal/intake/naming.go`'s `{episode:02d}` template token now also
+  correctly renders a range for the pre-existing (but previously
+  ineffective) case where the filename itself already encodes a range like
+  `S01E01E02` — that case parsed `Episode2` before this change but the
+  naming template never read it, silently dropping the second episode.
+  Files modified: `internal/intake/tvdb.go`, `internal/intake/orchestrator.go`,
+  `internal/intake/watcher.go`, `internal/intake/naming.go`,
+  `internal/api/handler.go` (LookupTV call site updated for the new
+  probeDuration param), plus new tests in `internal/intake/tvdb_test.go`,
+  `internal/intake/watcher_test.go`, `internal/intake/naming_test.go`.
+
 ## [1.4.2] - 2026-07-24
 
 ### Fixed

@@ -370,18 +370,30 @@ func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *Parse
 		reviewThreshold = 0.60
 	}
 
+	var probeDuration time.Duration
+	if probe != nil {
+		probeDuration = probe.Duration
+	}
+
 	var (
 		result *LookupResult
 		err    error
 	)
 	if parsed.IsTV {
-		result, err = w.Orchestrator.LookupTV(ctx, parsed, reviewThreshold)
+		result, err = w.Orchestrator.LookupTV(ctx, parsed, probeDuration, reviewThreshold)
 	} else {
-		result, err = w.Orchestrator.LookupMovie(ctx, parsed, probe.Duration, reviewThreshold)
+		result, err = w.Orchestrator.LookupMovie(ctx, parsed, probeDuration, reviewThreshold)
 	}
 	if err != nil {
 		reason := "no metadata match found: " + err.Error()
 		logger.Warn("Intake: metadata lookup failed", "file", filename, "error", err)
+		w.sendToReviewQueue(path, reason, probe, "")
+		return nil, false
+	}
+
+	if result.MultiPartUnconfirmed {
+		reason := fmt.Sprintf("possible combined multi-part episode (%q) — could not confirm via duration, needs manual review", parsed.ParsedEpisodeTitle)
+		logger.Warn("Intake: combined multi-part episode unconfirmed", "file", filename, "reason", reason)
 		w.sendToReviewQueue(path, reason, probe, "")
 		return nil, false
 	}
@@ -439,7 +451,15 @@ func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *Parse
 	if result.Episode > 0 {
 		parsed.Episode = result.Episode
 	}
-	parsed.EpisodeTitle = result.EpisodeTitle
+	if result.Episode2 > 0 {
+		// Confirmed combined multi-part episode: keep the source's own title
+		// (it was written for this exact file) instead of overwriting it with
+		// TVDB's single-episode title, which would only describe half of it.
+		parsed.Episode2 = result.Episode2
+		parsed.EpisodeTitle = parsed.ParsedEpisodeTitle
+	} else {
+		parsed.EpisodeTitle = result.EpisodeTitle
+	}
 	return result, true
 }
 

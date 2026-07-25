@@ -1565,7 +1565,7 @@ func (h *Handler) SearchReviewEntry(w http.ResponseWriter, r *http.Request) {
 	var result *intake.LookupResult
 	var lookupErr error
 	if parsed.IsTV {
-		result, lookupErr = orch.LookupTV(r.Context(), parsed, 0.0)
+		result, lookupErr = orch.LookupTV(r.Context(), parsed, 0, 0.0)
 	} else {
 		result, lookupErr = orch.LookupMovie(r.Context(), parsed, 0, 0.0)
 	}

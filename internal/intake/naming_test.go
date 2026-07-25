@@ -44,3 +44,44 @@ func TestApplyNamingTemplateColonInShowTitle(t *testing.T) {
 		t.Errorf("show folder = %q, want %q", folder, want)
 	}
 }
+
+// TestApplyNamingTemplateEpisode2Range guards the combined-episode naming fix:
+// a file confirmed to cover two consecutive episodes (Episode2 set) must
+// render both numbers in the destination filename, not silently drop the
+// second one.
+func TestApplyNamingTemplateEpisode2Range(t *testing.T) {
+	parsed := &ParsedFilename{
+		Title:        "Stargate SG-1",
+		Year:         1997,
+		MediaType:    "tv",
+		Season:       1,
+		Episode:      1,
+		Episode2:     2,
+		EpisodeTitle: "Children of the Gods Parts 1 & 2",
+	}
+
+	got := applyNamingTemplate("{show} - S{season:02d}E{episode:02d} - {episode_title}", parsed)
+	want := "Stargate SG-1 - S01E01-E02 - Children of the Gods Parts 1 & 2"
+	if got != want {
+		t.Errorf("applyNamingTemplate = %q, want %q", got, want)
+	}
+}
+
+// TestApplyNamingTemplateSingleEpisodeUnaffected guards against a regression
+// where the Episode2 change accidentally alters normal single-episode naming.
+func TestApplyNamingTemplateSingleEpisodeUnaffected(t *testing.T) {
+	parsed := &ParsedFilename{
+		Title:        "Stargate SG-1",
+		Year:         1997,
+		MediaType:    "tv",
+		Season:       1,
+		Episode:      3,
+		EpisodeTitle: "The Enemy Within",
+	}
+
+	got := applyNamingTemplate("{show} - S{season:02d}E{episode:02d} - {episode_title}", parsed)
+	want := "Stargate SG-1 - S01E03 - The Enemy Within"
+	if got != want {
+		t.Errorf("applyNamingTemplate = %q, want %q", got, want)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +17,25 @@ import (
 const (
 	tvdbBaseURL  = "https://api4.thetvdb.com"
 	tvdbTokenTTL = 29 * 24 * time.Hour // tokens are valid 30 days; refresh a day early
+
+	// multiPartRuntimeTolerancePct is how far a file's probed duration may
+	// differ from the sum of two TVDB episodes' listed runtimes and still be
+	// accepted as confirmation that the file actually contains both episodes.
+	multiPartRuntimeTolerancePct = 15
 )
+
+// reMultiPartTitle matches filename episode titles that describe a combined
+// multi-part episode (e.g. "Children of the Gods Parts 1 & 2", "Part 1 and 2",
+// "Pilot 1-2"). Used as the first-pass signal for detecting a source file that
+// numbers a double-length episode as a single episode; see the multi-part
+// detection block in Lookup for the full (title + duration) confirmation.
+var reMultiPartTitle = regexp.MustCompile(`(?i)\bparts?\s*1\s*(?:&|\+|and|-|to)\s*2\b|\b1\s*&\s*2\b`)
+
+// isMultiPartTitle reports whether title looks like it describes two combined
+// episodes (e.g. "Parts 1 & 2") rather than a single episode.
+func isMultiPartTitle(title string) bool {
+	return reMultiPartTitle.MatchString(title)
+}
 
 // TVDBResult holds the matched metadata from a successful TVDB lookup.
 type TVDBResult struct {
@@ -30,6 +49,18 @@ type TVDBResult struct {
 	EpisodeTitle   string
 	EpisodeAirDate string
 	Confidence     float64
+
+	// Episode2 is set when the filename's episode title suggests this single
+	// file actually contains two consecutive TVDB episodes (e.g. a combined
+	// series-premiere two-parter numbered as one file) and a duration check
+	// against TVDB's per-episode runtimes confirmed it. 0 when not applicable.
+	Episode2 int
+	// MultiPartUnconfirmed is set when the filename's title suggests a
+	// combined multi-part episode but the duration check could not confirm
+	// it (no runtime data from TVDB, or no probe duration available). The
+	// caller should route to Review Queue rather than guess — see Lookup's
+	// doc comment.
+	MultiPartUnconfirmed bool
 }
 
 // TVDBError is a structured TVDB API error. The Reason field is safe to surface
@@ -82,7 +113,7 @@ func NewTVDBClient(apiKey string, httpClient *http.Client) *TVDBClient {
 // Override shortcuts (applied after the weighted sum):
 //   - Exact name + episode found + title match in filename → 1.0
 //   - Exact name + episode found + no title in filename   → 0.90
-func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBResult, error) {
+func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename, probeDuration time.Duration) (*TVDBResult, error) {
 	if c.apiKey == "" {
 		return nil, &TVDBError{
 			Code:   "no_api_key",
@@ -125,6 +156,8 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBR
 	}
 
 	if parsed.IsTV && parsed.Season > 0 && parsed.Episode > 0 {
+		var epRuntime int // minutes; tracks whichever episode result currently reflects
+
 		logger.Debug("TVDB: fetching episode",
 			"tvdb_id", best.TVDBIDStr, "season", parsed.Season, "episode", parsed.Episode)
 		ep, err := c.fetchEpisode(ctx, best.intID(), parsed.Season, parsed.Episode)
@@ -140,6 +173,7 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBR
 			result.Episode = ep.Number
 			result.EpisodeTitle = ep.Name
 			result.EpisodeAirDate = ep.Aired
+			epRuntime = ep.Runtime
 			logger.Debug("TVDB: episode found", "title", ep.Name, "aired", ep.Aired)
 		}
 
@@ -176,6 +210,46 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename) (*TVDBR
 					result.Episode = match.Number
 					result.EpisodeTitle = match.Name
 					result.EpisodeAirDate = match.Aired
+					epRuntime = match.Runtime
+				}
+			}
+		}
+
+		// Combined multi-part episode detection: the filename's episode title
+		// (e.g. "Children of the Gods Parts 1 & 2") suggests this one file
+		// actually contains two consecutive TVDB episodes, numbered as a single
+		// episode by the source. Only act on a text-signal match if a duration
+		// check against TVDB's runtimes for episode N and N+1 also confirms it
+		// — never guess from the title alone (CLAUDE.md: no silent failures).
+		if result.EpisodeFound && parsed.ParsedEpisodeTitle != "" && isMultiPartTitle(parsed.ParsedEpisodeTitle) {
+			nextEp, nextErr := c.fetchEpisode(ctx, best.intID(), result.Season, result.Episode+1)
+			if nextErr != nil {
+				logger.Info("TVDB: possible combined multi-part episode, could not fetch next episode to confirm",
+					"series", best.Name, "season", result.Season, "episode", result.Episode, "error", nextErr)
+				result.MultiPartUnconfirmed = true
+			} else {
+				confirmed := false
+				if probeDuration > 0 && epRuntime > 0 && nextEp.Runtime > 0 {
+					expected := time.Duration(epRuntime+nextEp.Runtime) * time.Minute
+					diff := probeDuration - expected
+					if diff < 0 {
+						diff = -diff
+					}
+					if diff <= expected*multiPartRuntimeTolerancePct/100 {
+						confirmed = true
+					}
+				}
+				if confirmed {
+					result.Episode2 = nextEp.Number
+					logger.Info("TVDB: confirmed combined multi-part episode",
+						"series", best.Name, "season", result.Season, "episode", result.Episode,
+						"episode2", nextEp.Number, "probe_duration", probeDuration)
+				} else {
+					result.MultiPartUnconfirmed = true
+					logger.Info("TVDB: possible combined multi-part episode, duration unconfirmed",
+						"series", best.Name, "season", result.Season, "episode", result.Episode,
+						"next_episode", nextEp.Number, "probe_duration", probeDuration,
+						"episode_runtime_min", epRuntime, "next_episode_runtime_min", nextEp.Runtime)
 				}
 			}
 		}
@@ -478,6 +552,7 @@ type tvdbEpisode struct {
 	Aired        string `json:"aired"`
 	SeasonNumber int    `json:"seasonNumber"`
 	Number       int    `json:"number"`
+	Runtime      int    `json:"runtime"` // minutes; 0 if TVDB has no runtime data for this episode
 }
 
 // fetchEpisode retrieves a specific episode from TVDB using the default episode order.

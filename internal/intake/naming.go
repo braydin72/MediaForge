@@ -93,12 +93,21 @@ func applyNamingTemplate(tmpl string, parsed *ParsedFilename) string {
 		yearStr = fmt.Sprintf("%d", parsed.Year)
 	}
 
+	// A file covering two consecutive episodes (either the filename itself
+	// encoded a range like S01E01E02, or TVDB reconciliation confirmed a
+	// combined multi-part episode) renders as "E01-E02" instead of just "E01"
+	// so the second episode isn't silently dropped from the destination name.
+	episodeStr := fmt.Sprintf("%02d", parsed.Episode)
+	if parsed.Episode2 > 0 {
+		episodeStr = fmt.Sprintf("%02d-E%02d", parsed.Episode, parsed.Episode2)
+	}
+
 	replacer := strings.NewReplacer(
 		"{title}", sanitizePathComponent(parsed.Title),
 		"{show}", sanitizePathComponent(parsed.Title),
 		"{year}", yearStr,
 		"{season:02d}", fmt.Sprintf("%02d", parsed.Season),
-		"{episode:02d}", fmt.Sprintf("%02d", parsed.Episode),
+		"{episode:02d}", episodeStr,
 		"{episode_title}", sanitizePathComponent(parsed.EpisodeTitle),
 	)
 	result := replacer.Replace(tmpl)

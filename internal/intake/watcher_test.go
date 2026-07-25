@@ -202,6 +202,113 @@ func TestResolveAndGateLowConfidenceToReview(t *testing.T) {
 	}
 }
 
+// combinedEpisodeMockTVDB builds a TVDB mock reproducing the real Stargate
+// SG-1 case: season 1 has two episodes, "Children of the Gods (1)" and "(2)",
+// each with a 46-minute TVDB runtime, and the filename's parsed episode title
+// is "Children of the Gods Parts 1 & 2" (a combined two-part pilot numbered
+// as a single episode by the source).
+func combinedEpisodeMockTVDB() *TVDBClient {
+	searchBody := map[string]interface{}{
+		"data": []map[string]interface{}{
+			{"tvdb_id": "72449", "name": "Stargate SG-1", "year": "1997", "network": "Showtime"},
+		},
+	}
+	season1Body := map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 1, "name": "Children of the Gods (1)", "aired": "1997-07-27", "seasonNumber": 1, "number": 1, "runtime": 46},
+				{"id": 2, "name": "Children of the Gods (2)", "aired": "1997-07-27", "seasonNumber": 1, "number": 2, "runtime": 46},
+			},
+		},
+	}
+	return newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
+		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, searchBody) },
+		"/v4/series": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, season1Body) },
+	}))
+}
+
+func combinedEpisodeParsed() ParsedFilename {
+	return ParsedFilename{
+		Title:              "Stargate SG-1",
+		IsTV:               true,
+		MediaType:          "tv",
+		Season:             1,
+		Episode:            1,
+		ParsedEpisodeTitle: "Children of the Gods Parts 1 & 2",
+	}
+}
+
+// TestResolveAndGate_MultiPartUnconfirmedRoutesToReview verifies that a
+// combined-episode title signal without a confirming probe duration (nil
+// probe — ffprobe unavailable, or no real file behind this lookup) routes to
+// Review Queue instead of silently guessing whether the file really is a
+// combined episode.
+func TestResolveAndGate_MultiPartUnconfirmedRoutesToReview(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.NewSQLiteStore(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer st.Close()
+
+	cfg := config.IntakeConfig{}
+	w := NewWatcher(&cfg, "ffprobe", st)
+	w.Orchestrator = &Orchestrator{TVDB: combinedEpisodeMockTVDB()}
+
+	parsed := combinedEpisodeParsed()
+	result, ok := w.resolveAndGate(context.Background(), "/incoming/Stargate SG-1 (1997) - S01E01 - Children of the Gods_ Parts 1 & 2.mp4", &parsed, nil)
+	if ok {
+		t.Fatalf("resolveAndGate: want ok=false for unconfirmed multi-part episode, got true (result=%+v)", result)
+	}
+
+	entries, err := st.GetReviewQueue()
+	if err != nil {
+		t.Fatalf("GetReviewQueue: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("review queue count: want 1, got %d", len(entries))
+	}
+	if !strings.Contains(entries[0].Reason, "multi-part") {
+		t.Errorf("review queue reason = %q, want it to mention the multi-part episode", entries[0].Reason)
+	}
+}
+
+// TestResolveAndGate_MultiPartConfirmedKeepsSourceTitle verifies that once
+// the duration check confirms a combined episode, resolveAndGate merges
+// Episode2 into parsed and keeps the filename's own episode title instead of
+// overwriting it with TVDB's single-episode title (which would only
+// describe half the file) — this was an explicit design decision, not the
+// default "always trust TVDB's title" behavior used elsewhere.
+func TestResolveAndGate_MultiPartConfirmedKeepsSourceTitle(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.NewSQLiteStore(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer st.Close()
+
+	cfg := config.IntakeConfig{}
+	w := NewWatcher(&cfg, "ffprobe", st)
+	w.Orchestrator = &Orchestrator{TVDB: combinedEpisodeMockTVDB()}
+
+	parsed := combinedEpisodeParsed()
+	probe := &ffmpeg.ProbeResult{Duration: 92 * time.Minute}
+	result, ok := w.resolveAndGate(context.Background(), "/incoming/Stargate SG-1 (1997) - S01E01 - Children of the Gods_ Parts 1 & 2.mp4", &parsed, probe)
+	if !ok {
+		t.Fatalf("resolveAndGate: want ok=true for confirmed multi-part episode, got false")
+	}
+	if result.Episode2 != 2 {
+		t.Errorf("result.Episode2 = %d, want 2", result.Episode2)
+	}
+	if parsed.Episode2 != 2 {
+		t.Errorf("parsed.Episode2 = %d, want 2", parsed.Episode2)
+	}
+	if parsed.EpisodeTitle != "Children of the Gods Parts 1 & 2" {
+		t.Errorf("parsed.EpisodeTitle = %q, want the source's own title, not TVDB's single-episode title", parsed.EpisodeTitle)
+	}
+}
+
 // TestWatcherIgnoresNonVideo verifies that non-video files are ignored.
 func TestWatcherIgnoresNonVideo(t *testing.T) {
 	dir := t.TempDir()
