@@ -398,6 +398,14 @@ func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *Parse
 		return nil, false
 	}
 
+	if result.TitleMismatchUnresolved {
+		reason := fmt.Sprintf("episode title in filename (%q) does not match TVDB's episode at S%02dE%02d (%q), and no confident alternate episode was found — needs manual review",
+			parsed.ParsedEpisodeTitle, result.Season, result.Episode, result.EpisodeTitle)
+		logger.Warn("Intake: unresolved episode title mismatch", "file", filename, "reason", reason)
+		w.sendToReviewQueue(path, reason, probe, "")
+		return nil, false
+	}
+
 	if result.Confidence < reviewThreshold {
 		reason := fmt.Sprintf("low confidence match (%.0f%%) for %q", result.Confidence*100, result.Title)
 		logger.Warn("Intake: confidence below review threshold", "file", filename, "confidence", result.Confidence)

@@ -37,6 +37,38 @@ func isMultiPartTitle(title string) bool {
 	return reMultiPartTitle.MatchString(title)
 }
 
+// reTrailingPartSuffix matches a trailing " (N)" TVDB commonly appends to an
+// episode name to disambiguate a title reused across a multi-parter (e.g.
+// "Politics (1)" / "Politics (2)"). Filenames from the source almost never
+// include this — see stripTrailingPartSuffix.
+var reTrailingPartSuffix = regexp.MustCompile(`\s*\(\d+\)\s*$`)
+
+func stripTrailingPartSuffix(s string) string {
+	return reTrailingPartSuffix.ReplaceAllString(s, "")
+}
+
+// bestTitleSimilarity compares a and b, and also compares each with a
+// trailing " (N)" TVDB disambiguator suffix stripped (see
+// reTrailingPartSuffix), returning the highest resulting score. Without this,
+// a filename's bare "Politics" scores well below TVDB's confidence bar
+// against "Politics (1)" even though it's the correct episode — a real
+// production case (TVDB episode 85770) that caused a genuinely-matching
+// episode to be rejected as unconfident and routed to Review Queue.
+func bestTitleSimilarity(a, b string) float64 {
+	sim := stringSimilarity(a, b)
+	if strippedA := stripTrailingPartSuffix(a); strippedA != a {
+		if s := stringSimilarity(strippedA, b); s > sim {
+			sim = s
+		}
+	}
+	if strippedB := stripTrailingPartSuffix(b); strippedB != b {
+		if s := stringSimilarity(a, strippedB); s > sim {
+			sim = s
+		}
+	}
+	return sim
+}
+
 // TVDBResult holds the matched metadata from a successful TVDB lookup.
 type TVDBResult struct {
 	SeriesID       int
@@ -61,6 +93,13 @@ type TVDBResult struct {
 	// caller should route to Review Queue rather than guess — see Lookup's
 	// doc comment.
 	MultiPartUnconfirmed bool
+	// TitleMismatchUnresolved is set when the filename's episode title didn't
+	// match the episode found at the parsed S/E, and reconciliation (adjacent-
+	// season check + whole-series title search) failed to find a confident
+	// replacement. EpisodeTitle/Season/Episode still reflect the ORIGINAL
+	// (mismatched) episode in this case — callers must not treat it as a
+	// normal match; route to Review Queue instead.
+	TitleMismatchUnresolved bool
 }
 
 // TVDBError is a structured TVDB API error. The Reason field is safe to surface
@@ -211,6 +250,23 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename, probeDu
 					result.EpisodeTitle = match.Name
 					result.EpisodeAirDate = match.Aired
 					epRuntime = match.Runtime
+				} else {
+					// Reconciliation couldn't find a confident replacement. Do NOT let
+					// the originally-fetched (mismatched) episode stand as if it were a
+					// normal match — it already proved it's the wrong episode; keeping
+					// its title/number and scoring it normally previously let a clearly
+					// wrong match (e.g. filename "Politics" silently confidence-scored
+					// against TVDB's "There But For the Grace of God") sail past the
+					// review threshold on name+year+"an episode exists here" alone,
+					// with the 15%-weighted title mismatch too small to catch it. Flag
+					// it instead so the caller routes to Review Queue — trust the title,
+					// and if we can't find where it really belongs, don't guess.
+					logger.Warn("TVDB: episode title mismatch could not be resolved, flagging for review",
+						"series", best.Name,
+						"filename_episode", parsed.ParsedEpisodeTitle,
+						"season", result.Season, "episode", result.Episode,
+						"unresolved_tvdb_title", result.EpisodeTitle)
+					result.TitleMismatchUnresolved = true
 				}
 			}
 		}
@@ -535,7 +591,7 @@ func (c *TVDBClient) findAdjacentSeasonEpisode(ctx context.Context, seriesID, se
 		if err != nil {
 			continue
 		}
-		if sim := stringSimilarity(ep.Name, title); sim >= 0.90 {
+		if sim := bestTitleSimilarity(ep.Name, title); sim >= 0.90 {
 			logger.Debug("TVDB: adjacent-season episode name match",
 				"series_id", seriesID, "tried_season", s, "episode", episode,
 				"tvdb_episode", ep.Name, "similarity", fmt.Sprintf("%.2f", sim))
@@ -666,7 +722,7 @@ func (c *TVDBClient) findEpisodeByTitle(ctx context.Context, seriesID int, title
 			if ep.SeasonNumber <= 0 || ep.Name == "" {
 				continue // skip specials / unnamed
 			}
-			sim := stringSimilarity(ep.Name, title)
+			sim := bestTitleSimilarity(ep.Name, title)
 			switch {
 			case sim > bestSim:
 				runnerUpSim = bestSim

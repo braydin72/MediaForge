@@ -1,6 +1,87 @@
 CURRENT STATE NOTE
 
-=== Latest session (cont.): combined multi-part episode detection + naming ===
+=== Latest session (cont.): two more reconciliation bugs found live, after v1.5.0 shipped ===
+
+Direct continuation of the same session. User built/deployed/tested v1.5.0
+live (combined multi-part episode detection) and ran a real Stargate SG-1
+S01 batch through it. Reported two things, traced from real log excerpts:
+
+1. "S01E19 and S01E20 both are trying to go to the same file but have 2
+   different episode titles" — filename "Politics" (source S01E20) and
+   filename "There But For the Grace of God" (source S01E19) were both
+   landing at the same destination path. Root cause: episode-title
+   reconciliation (findAdjacentSeasonEpisode -> findEpisodeByTitle,
+   existing logic) correctly detected the mismatch for "Politics" (TVDB's
+   actual S01E20 is "There But For the Grace of God", similarity 0.10) and
+   correctly searched the whole series for "Politics" — but rejected the
+   real match ("Politics (1)" at S01E21, similarity only 0.80 against the
+   bare filename title) as "not confident enough" (needs >=0.90), then
+   SILENTLY fell back to keeping the original wrong episode
+   ("There But For the Grace of God") as if it were a normal match. Worse:
+   this scored confidence 0.87 (name+year+"episode exists" components
+   alone are enough; the 15%-weighted title-mismatch penalty wasn't enough
+   to drag it below the 0.85 auto-accept threshold) — meaning this would
+   have SILENTLY overwritten the library with the wrong title if an
+   unrelated duplicate-file collision hadn't happened to catch it first.
+2. User clarified when asked: TVDB's "(1)" suffix here doesn't mean a
+   same-titled two-parter — "Politics" and its story-continuation episode
+   have genuinely DIFFERENT titles, TVDB just tacks "(1)" onto the first
+   half of a two-part STORYLINE regardless of whether the second half
+   shares the name. (This matters for the fix design: stripping the
+   suffix generically, without assuming a matching "(2)" title exists
+   elsewhere, is the correct approach — which is what was already
+   implemented, so no further change was needed for this clarification.)
+
+Two fixes, both in internal/intake/tvdb.go:
+1. New TVDBResult.TitleMismatchUnresolved bool, set in the mismatch branch
+   when neither findAdjacentSeasonEpisode nor findEpisodeByTitle finds a
+   confident match (mirrors the MultiPartUnconfirmed pattern from earlier
+   this session). Propagated through orchestrator.go's LookupResult (same
+   pattern as Episode2/MultiPartUnconfirmed) and fromTVDB. watcher.go's
+   resolveAndGate checks it immediately after the MultiPartUnconfirmed
+   check, BEFORE the Confidence threshold checks, and routes to Review
+   Queue with a reason naming both the filename's title and TVDB's
+   (wrong) title at that number — so a result already proven mismatched
+   can never sail through on a high raw confidence score again.
+2. New bestTitleSimilarity(a, b) + stripTrailingPartSuffix (regex
+   `\s*\(\d+\)\s*$`): compares two titles both raw AND with either side's
+   trailing " (N)" TVDB disambiguator stripped, returning the max
+   similarity. Used in findEpisodeByTitle's per-candidate scoring and
+   findAdjacentSeasonEpisode's >=0.90 check (both previously used bare
+   stringSimilarity). "Politics" vs "Politics (1)" now scores 1.0 after
+   stripping instead of 0.80, so it clears the 0.90 confident-match bar
+   and resolves correctly to the real episode (S01E21) instead of leaving
+   the file stuck on the wrong number.
+
+Test changes (internal/intake/tvdb_test.go, watcher_test.go): the original
+test written for item 1 (TestTVDBLookup_UnresolvedTitleMismatchFlagged /
+TestResolveAndGate_UnresolvedTitleMismatchRoutesToReview) used the real
+"Politics (1)" mock data and asserted TitleMismatchUnresolved=true — this
+started FAILING once fix 2 was added, because the fix means "Politics" now
+correctly resolves instead of staying unresolved. This is the CORRECT
+outcome (bug fixed), not a regression — renamed/repurposed those two tests
+into positive-path regression tests (TestTVDBLookup_ReconcileTitleWithPartSuffix /
+TestResolveAndGate_ReconcilesTitleWithPartSuffix, asserting the correct
+S01E21 resolution), and added a new TestTVDBLookup_GenuinelyUnresolvedTitleMismatchFlagged
+with a totally-unrelated filename title (no plausible match at all) to keep
+coverage of the TitleMismatchUnresolved flag itself.
+
+Verified: go build ./..., go vet ./..., go test ./... (full suite,
+including all new/renamed tests) all pass.
+
+Committed on develop (single commit covering both fixes + test changes).
+CHANGELOG.md/CURRENT_STATE.md updated as a same-session follow-up commit
+(missed doing this in the same commit as the code change — noting so a
+future session doesn't wonder why the split). NOT yet redeployed/re-tested
+live against the actual remaining S01E19/S01E20-area files in the user's
+real batch — recommend rebuilding via update-mediaforge.ps1 and confirming
+in the log that "Politics" now resolves straight to
+"TVDB: corrected season/episode by episode name ... new_episode=21
+matched_title=\"Politics (1)\"" instead of the old silent-wrong-fallback
+behavior, and that any remaining episodes in the S01E19-22 area file
+correctly instead of continuing to collide.
+
+=== Prior session (cont.): combined multi-part episode detection + naming ===
 
 Direct continuation of the same session, resuming the scoping paused
 earlier when the user wanted to verify the TVDB title-reconciliation fix

@@ -564,6 +564,132 @@ func TestTVDBLookup_ReconcileWrongSeasonEpisode(t *testing.T) {
 	}
 }
 
+// TestTVDBLookup_ReconcileTitleWithPartSuffix reproduces a real production
+// case (TVDB episode 85770): filename says "Politics" at S01E20, but TVDB's
+// S01E20 is "There But For the Grace of God" (total mismatch). The real
+// episode is TVDB's S01E21, named "Politics (1)" — a two-parter, since TVDB
+// appends " (N)" to disambiguate reused titles. Raw string similarity between
+// "Politics" and "Politics (1)" scores only 0.80, below the 0.90 confidence
+// bar, which used to reject this as "not confident enough" even though it's
+// unambiguously the right episode. bestTitleSimilarity strips that
+// disambiguator suffix before comparing, so this must now resolve cleanly.
+func TestTVDBLookup_ReconcileTitleWithPartSuffix(t *testing.T) {
+	searchBody := map[string]interface{}{
+		"data": []map[string]interface{}{
+			{"tvdb_id": "72449", "name": "Stargate SG-1", "year": "1997", "network": "Showtime"},
+		},
+	}
+	s20Body := map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 1, "name": "There But For the Grace of God", "aired": "1998-02-20", "seasonNumber": 1, "number": 20},
+				{"id": 2, "name": "Within the Serpent's Grasp", "aired": "1998-02-13", "seasonNumber": 1, "number": 19},
+			},
+		},
+	}
+	pagedBody := map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 1, "name": "There But For the Grace of God", "aired": "1998-02-20", "seasonNumber": 1, "number": 20},
+				{"id": 3, "name": "Politics (1)", "aired": "1998-02-27", "seasonNumber": 1, "number": 21},
+				{"id": 4, "name": "Within the Serpent's Grasp (2)", "aired": "1998-03-06", "seasonNumber": 1, "number": 22},
+			},
+		},
+		"links": map[string]interface{}{"next": ""},
+	}
+
+	client := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
+		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, searchBody) },
+		"/v4/series": func(r *http.Request) *http.Response {
+			if r.URL.Query().Get("page") != "" {
+				return jsonResp(http.StatusOK, pagedBody)
+			}
+			return jsonResp(http.StatusOK, s20Body)
+		},
+	}))
+
+	parsed := &ParsedFilename{
+		Title:              "Stargate SG-1",
+		Year:               1997,
+		IsTV:               true,
+		Season:             1,
+		Episode:            20,
+		ParsedEpisodeTitle: "Politics",
+	}
+
+	result, err := client.Lookup(context.Background(), parsed, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TitleMismatchUnresolved {
+		t.Error("TitleMismatchUnresolved: want false — \"Politics\" should confidently resolve to \"Politics (1)\"")
+	}
+	if result.Season != 1 || result.Episode != 21 {
+		t.Errorf("season/episode: want S01E21, got S%02dE%02d", result.Season, result.Episode)
+	}
+	if result.EpisodeTitle != "Politics (1)" {
+		t.Errorf("EpisodeTitle: want %q, got %q", "Politics (1)", result.EpisodeTitle)
+	}
+}
+
+// TestTVDBLookup_GenuinelyUnresolvedTitleMismatchFlagged covers the case
+// bestTitleSimilarity's " (N)" stripping does NOT help with: a filename
+// episode title that doesn't resemble anything in the series at all. This
+// must still be flagged via TitleMismatchUnresolved rather than silently
+// falling back to the original (wrong) episode.
+func TestTVDBLookup_GenuinelyUnresolvedTitleMismatchFlagged(t *testing.T) {
+	searchBody := map[string]interface{}{
+		"data": []map[string]interface{}{
+			{"tvdb_id": "72449", "name": "Stargate SG-1", "year": "1997", "network": "Showtime"},
+		},
+	}
+	s20Body := map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 1, "name": "There But For the Grace of God", "aired": "1998-02-20", "seasonNumber": 1, "number": 20},
+			},
+		},
+	}
+	pagedBody := map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 1, "name": "There But For the Grace of God", "aired": "1998-02-20", "seasonNumber": 1, "number": 20},
+				{"id": 3, "name": "Politics (1)", "aired": "1998-02-27", "seasonNumber": 1, "number": 21},
+			},
+		},
+		"links": map[string]interface{}{"next": ""},
+	}
+
+	client := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
+		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, searchBody) },
+		"/v4/series": func(r *http.Request) *http.Response {
+			if r.URL.Query().Get("page") != "" {
+				return jsonResp(http.StatusOK, pagedBody)
+			}
+			return jsonResp(http.StatusOK, s20Body)
+		},
+	}))
+
+	parsed := &ParsedFilename{
+		Title:              "Stargate SG-1",
+		Year:               1997,
+		IsTV:               true,
+		Season:             1,
+		Episode:            20,
+		ParsedEpisodeTitle: "Completely Unrelated Xyzzy Title",
+	}
+
+	result, err := client.Lookup(context.Background(), parsed, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.TitleMismatchUnresolved {
+		t.Error("TitleMismatchUnresolved: want true when no candidate resembles the filename title at all")
+	}
+}
+
 // TestSelectBestSeries_PunctuationNormalizedForNameMatch reproduces a real
 // production bug: the filename parser turns "20_20" into the title "20 20"
 // (space), but TVDB lists the real show as "20/20" (slash). Comparing raw

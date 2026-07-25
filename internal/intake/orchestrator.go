@@ -32,6 +32,12 @@ type LookupResult struct {
 	// combined multi-part episode but it could not be confirmed via duration
 	// — callers should route to Review Queue rather than guess.
 	MultiPartUnconfirmed bool
+	// TitleMismatchUnresolved is set (TVDB only) when the filename's episode
+	// title didn't match TVDB's episode at the parsed S/E and no confident
+	// alternate could be found — Season/Episode/EpisodeTitle still reflect
+	// the original mismatched episode. Callers must route to Review Queue
+	// rather than treat this as a normal match.
+	TitleMismatchUnresolved bool
 }
 
 // NoMatchError is returned when all configured lookup sources fail or produce
@@ -173,11 +179,12 @@ func fromTVDB(r *TVDBResult, parsed *ParsedFilename) *LookupResult {
 		TVDBNetwork:    r.Network,
 		Season:         r.Season,
 		Episode:        r.Episode,
-		EpisodeTitle:         r.EpisodeTitle,
-		EpisodeAirDate:       r.EpisodeAirDate,
-		Confidence:           r.Confidence,
-		Episode2:             r.Episode2,
-		MultiPartUnconfirmed: r.MultiPartUnconfirmed,
+		EpisodeTitle:            r.EpisodeTitle,
+		EpisodeAirDate:          r.EpisodeAirDate,
+		Confidence:              r.Confidence,
+		Episode2:                r.Episode2,
+		MultiPartUnconfirmed:    r.MultiPartUnconfirmed,
+		TitleMismatchUnresolved: r.TitleMismatchUnresolved,
 	}
 }
 

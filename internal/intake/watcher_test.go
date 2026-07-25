@@ -309,6 +309,79 @@ func TestResolveAndGate_MultiPartConfirmedKeepsSourceTitle(t *testing.T) {
 	}
 }
 
+// TestResolveAndGate_ReconcilesTitleWithPartSuffix reproduces the real
+// "Politics" production case end-to-end through resolveAndGate: the
+// filename's episode title ("Politics") doesn't match TVDB's episode at the
+// parsed S/E (S01E20, "There But For the Grace of God"), but the real
+// episode — S01E21, "Politics (1)" — is found and accepted once the
+// bestTitleSimilarity fix strips TVDB's " (N)" disambiguator suffix before
+// comparing. parsed.Season/Episode must end up corrected to 1/21.
+func TestResolveAndGate_ReconcilesTitleWithPartSuffix(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.NewSQLiteStore(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer st.Close()
+
+	searchBody := map[string]interface{}{
+		"data": []map[string]interface{}{
+			{"tvdb_id": "72449", "name": "Stargate SG-1", "year": "1997", "network": "Showtime"},
+		},
+	}
+	s20Body := map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 1, "name": "There But For the Grace of God", "aired": "1998-02-20", "seasonNumber": 1, "number": 20},
+				{"id": 2, "name": "Within the Serpent's Grasp", "aired": "1998-02-13", "seasonNumber": 1, "number": 19},
+			},
+		},
+	}
+	pagedBody := map[string]interface{}{
+		"data": map[string]interface{}{
+			"episodes": []map[string]interface{}{
+				{"id": 1, "name": "There But For the Grace of God", "aired": "1998-02-20", "seasonNumber": 1, "number": 20},
+				{"id": 3, "name": "Politics (1)", "aired": "1998-02-27", "seasonNumber": 1, "number": 21},
+			},
+		},
+		"links": map[string]interface{}{"next": ""},
+	}
+	tvdb := newMockTVDBClient("validkey", routeByPath(map[string]func(*http.Request) *http.Response{
+		"/v4/login":  func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, loginOKBody) },
+		"/v4/search": func(r *http.Request) *http.Response { return jsonResp(http.StatusOK, searchBody) },
+		"/v4/series": func(r *http.Request) *http.Response {
+			if r.URL.Query().Get("page") != "" {
+				return jsonResp(http.StatusOK, pagedBody)
+			}
+			return jsonResp(http.StatusOK, s20Body)
+		},
+	}))
+
+	cfg := config.IntakeConfig{}
+	w := NewWatcher(&cfg, "ffprobe", st)
+	w.Orchestrator = &Orchestrator{TVDB: tvdb}
+
+	parsed := ParsedFilename{
+		Title:              "Stargate SG-1",
+		Year:               1997,
+		IsTV:               true,
+		MediaType:          "tv",
+		Season:             1,
+		Episode:            20,
+		ParsedEpisodeTitle: "Politics",
+	}
+	result, ok := w.resolveAndGate(context.Background(), "/incoming/Stargate SG-1 (1997) - S01E20 - Politics.mp4", &parsed, nil)
+	if !ok {
+		t.Fatalf("resolveAndGate: want ok=true, \"Politics\" should reconcile to S01E21, got false")
+	}
+	if result.TitleMismatchUnresolved {
+		t.Error("TitleMismatchUnresolved: want false — should have resolved via the part-suffix-stripped match")
+	}
+	if parsed.Season != 1 || parsed.Episode != 21 {
+		t.Errorf("parsed season/episode: want S01E21, got S%02dE%02d", parsed.Season, parsed.Episode)
+	}
+}
+
 // TestWatcherIgnoresNonVideo verifies that non-video files are ignored.
 func TestWatcherIgnoresNonVideo(t *testing.T) {
 	dir := t.TempDir()
