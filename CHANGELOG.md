@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Two related bugs found from a real Stargate SG-1 batch that caused two
+  different-titled episodes ("Politics" and "There But For the Grace of
+  God") to both try filing to the same destination path:
+  1. When episode-title reconciliation detected a mismatch but couldn't
+     find a confident replacement episode, it silently fell back to the
+     original (wrong) episode and scored it as a normal match — high
+     enough to sail past both review thresholds on name+year+"an episode
+     exists here" alone, since the title-similarity component (15% weight)
+     wasn't enough to catch it on its own. New `TVDBResult.TitleMismatchUnresolved`
+     is set whenever reconciliation fails to find a confident match;
+     `resolveAndGate` now checks it before ever consulting `Confidence`
+     and routes to Review Queue instead of guessing.
+  2. The reconciliation search itself was rejecting genuinely correct
+     matches: TVDB appends `" (N)"` to disambiguate a title reused across
+     a multi-part story (e.g. `"Politics (1)"`), even when the other part
+     has an unrelated title. Raw string similarity between `"Politics"`
+     and `"Politics (1)"` scored only 0.80 — just under the 0.90
+     confidence bar — so a real match was rejected as "not confident
+     enough." New `bestTitleSimilarity` (`internal/intake/tvdb.go`) strips
+     a trailing `" (N)"` suffix before comparing, used in both
+     `findEpisodeByTitle` and `findAdjacentSeasonEpisode`. This is what
+     actually resolves "Politics" to its real TVDB episode (S01E21)
+     instead of leaving it stuck on the wrong one.
+  Files modified: `internal/intake/tvdb.go`, `internal/intake/orchestrator.go`,
+  `internal/intake/watcher.go`, plus new/updated tests in
+  `internal/intake/tvdb_test.go` and `internal/intake/watcher_test.go`.
+
 ## [1.5.0] - 2026-07-24
 
 ### Added
