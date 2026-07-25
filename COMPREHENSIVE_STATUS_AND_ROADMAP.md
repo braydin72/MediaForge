@@ -5,6 +5,133 @@
 
 ---
 
+## Planning Added 2026-07-25 — Review Queue Actions & Pipeline Control Buttons
+
+Two items requested by the user for future implementation, based on live testing
+of v1.4.x/v1.5.0. **No code was written for either — plan only, pending review.**
+
+### A. Review Queue: context-aware actions + bulk actions beyond Discard
+
+**Problems observed live:**
+- Every non-duplicate Review Queue entry renders the same four buttons —
+  Pick Selected / Search Manually / Discard / Re-encode Custom
+  (`actionsHTML` in `web/templates/index.html`, ~line 5930) — regardless of
+  *why* the entry is there. For an entry created by an encode failure (e.g.
+  "SmartShrink: no viable encode"), "Pick Selected" is dead: `reviewPick()`
+  (~line 6078) always alerts "Select a candidate first" because no candidate
+  list was ever populated for that entry type — clicking it does nothing
+  useful, exactly as reported.
+- Duplicate entries already get the right, narrower button set (Replace /
+  Keep Existing) via a client-side check: `isDuplicate = e.reason.startsWith('duplicate:')`
+  (~line 5890). This is the only category the UI distinguishes today.
+- Bulk selection exists (checkboxes + `reviewUpdateBulk()`), but the only
+  bulk action wired up is `reviewDiscardSelected()` (~line 6166). No bulk
+  Replace, no bulk Re-encode Custom — every other resolution is one-by-one.
+
+**Root cause:** `ReviewEntry` (`internal/store/sqlite.go` ~line 130) has no
+structured category — only a free-text `Reason string`. `sendToReviewQueue`
+(`internal/intake/watcher.go`) and `SendToReviewQueue`
+(`internal/jobs/worker.go`) are called from ~15 distinct sites with
+different reason strings and no shared taxonomy for the frontend to key off.
+
+**Real categories found in the current code** (a starting taxonomy, not
+final):
+1. **Duplicate at destination** — already handled correctly (Replace / Keep Existing).
+2. **Metadata/identification failure** — no TVDB/TMDB/OMDb match, low
+   confidence, LLM rejected or unavailable. Needs Pick Selected / Search
+   Manually / Discard. Re-encode Custom doesn't apply — nothing has been
+   transcoded yet.
+3. **Encode/transcode failure** — SmartShrink no viable encode, fixed-
+   reduction target unachievable, post-encode move failed. Needs Re-encode
+   Custom / Discard. Pick Selected is the dead button reported live.
+4. **Unresolved multi-part episode / unresolved title mismatch** (new in
+   this session's TVDB reconciliation work) — metadata partially resolved
+   but ambiguous. Needs Search Manually / Discard, and possibly a dedicated
+   "confirm this is/isn't a combined episode" action rather than a generic
+   candidate picker.
+5. **System/path failures** — codec detection failed, staging move failed,
+   queue-add failed, library move failed, could not resolve library path.
+   Usually retry-oriented. Note: an earlier session removed a "Retry"/
+   "Re-add" review action (see `internal/api/handler.go` history/
+   `CURRENT_STATE.md`) — understand why before reintroducing something
+   similar for this category, don't just re-add blindly.
+
+**Proposed direction (needs decision before implementing):**
+- Add a `Category` field (string enum) to `ReviewEntry`, set explicitly at
+  each `sendToReviewQueue`/`SendToReviewQueue` call site instead of the
+  frontend sniffing the reason string.
+- `actionsHTML` switches on `e.category` instead of the current single
+  `isDuplicate` ternary, rendering the right button set per category.
+- Add `reviewReplaceSelected()` for bulk duplicate resolution, and a bulk
+  re-encode flow — this needs a shared settings panel (preset/quality/CRF/
+  speed/format) applied to every selected item at once, since today's
+  Re-encode Custom form (`reviewToggleCustom`, ~line 6105) is per-card and
+  inline, not designed to apply to multiple entries.
+- Decide UX for a mixed-category bulk selection (e.g. a duplicate and an
+  encode-failure entry selected together) — likely: only show actions valid
+  for every selected entry's category, hide/disable the rest.
+
+**Status:** Not started — plan only.
+
+### B. Pipeline/queue control buttons — Pause/Resume, Stop Pipeline/Start, Stop Everything/Restart
+
+**Problems observed live:**
+- Clicking "Pause Queue" gives no feedback that a pause is pending while the
+  current encode finishes — the button "flashes" then nothing visibly
+  changes until the running job completes and it flips to "Resume". No
+  "Pausing… (finishing current job)" intermediate state exists.
+- The footer "Stop All" button (`pauseQueue()` in `web/templates/index.html`)
+  calls the *same* `/api/queue/pause` endpoint as the header toggle. Its
+  confirm-dialog text was corrected this session to stop overpromising a
+  hard cancel it doesn't perform, but the underlying redundancy — two
+  differently-labeled buttons doing the identical soft-pause action — was
+  not resolved.
+
+**Current real controls, as they exist right now:**
+- Header "Pause Queue"/"Resume Encode Queue" toggle → `POST /api/queue/pause`
+  / `/api/queue/start` (encode queue only, soft pause — fixed this session,
+  `WorkerPool.Pause()`/`Unpause()`).
+- Footer "Stop All" → same `/api/queue/pause` endpoint, misleadingly labeled
+  relative to what it actually does.
+- Tray "Stop Pipeline" checkbox → `POST /api/intake/pause` /
+  `/api/intake/resume` (intake only, added this session via
+  `Watcher.Pause()`/`Resume()`) — **web UI has no equivalent control at all.**
+- `WorkerPool.StopAll()` / `POST /api/queue/stop` — unimplemented no-op
+  stub (`// TODO: define final semantics`). A true hard-cancel does not
+  exist anywhere in the app today.
+
+**User's requested target design — three independent pause/resume pairs,
+replacing the current header toggle + footer "Stop All":**
+1. **Pause Queue / Resume Queue** — blocks new jobs from starting; the
+   currently-running job (if any) finishes normally. Backend already
+   correct (`WorkerPool.Pause()`/`Unpause()`, fixed this session) — this is
+   a UI-only gap: add a visible "Pausing… (finishing current job)" state
+   between click and the queue actually going idle, instead of silence.
+2. **Stop Pipeline / Start Pipeline** — stops intake from moving new files
+   out of the Incoming folder. Backend already correct and exposed in the
+   tray (`Watcher.Pause()`/`Resume()` via `/api/intake/pause`/`/resume`,
+   added this session) — needs the equivalent buttons added to the web UI,
+   which currently has zero intake control.
+3. **Stop Everything / Restart** — a genuine hard stop: cancel the
+   currently-running job AND stop intake. Does not exist anywhere yet.
+   `WorkerPool.StopAll()` needs real implementation — likely reintroducing
+   the cancel-and-requeue logic that was deliberately removed from
+   `Pause()` earlier this session, but as its own explicit action, combined
+   with calling `Watcher.Pause()`. Open design question: does "Stop
+   Everything" discard the current job's progress entirely (requeue to
+   pending, matching the old pre-this-session `Pause()` behavior) or mark
+   it failed? Recommend requeue, to match the semantics the code already
+   had before this session repurposed `Pause()`.
+
+Once the web UI catches up, the tray menu (`cmd/tray/main.go`) should
+probably grow the same third "Stop Everything" control — it currently only
+has 2 of the 3 concepts (Stop Pipeline, Pause Queue).
+
+**Status:** Not started — plan only, including the hard-stop semantics
+decision above, which needs your call before implementation.
+
+---
+
 ## Session Summary (Planning Chat)
 
 This session produced detailed plans for 6 major improvement areas. No code was written; all output is planning documentation.
