@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-07-25
+
 ### Fixed
 - Two related bugs found from a real Stargate SG-1 batch that caused two
   different-titled episodes ("Politics" and "There But For the Grace of
