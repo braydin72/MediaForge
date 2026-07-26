@@ -34,7 +34,11 @@ Release); this skill is what produces that tag correctly in the first place.
    `## [X.Y.Z] - <today's date>` and add a fresh empty `## [Unreleased]`
    section above it. This must happen *before* the merge/tag, not after —
    the tagged commit's CHANGELOG.md should already describe what's in it.
-   Commit this on `develop` (`docs(changelog): prepare vX.Y.Z release`).
+   Also update `templates/mediaforge.xml`: set `<Changes>` to
+   `vX.Y.Z — see CHANGELOG.md on GitHub for full release notes.` and
+   `<Date>` to today's date (YYYY-MM-DD) — this is the Unraid Community
+   Applications template and it does not update itself. Commit both files
+   together on `develop` (`docs(changelog): prepare vX.Y.Z release`).
 2. **Push `develop`**: `git push origin develop`.
 3. **Merge into `main`**: `git checkout main`, `git merge --no-ff develop -m
    "Merge develop into main for vX.Y.Z"`.
