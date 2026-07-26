@@ -462,6 +462,16 @@ func (m *mockReviewStore) BulkUpdateReviewQueueStatus(ids []string, status strin
 	}
 	return nil
 }
+func (m *mockReviewStore) ConvertReviewEntryToDuplicate(id, reason, duplicateInfoJSON string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if e := m.entries[id]; e != nil {
+		e.Reason = reason
+		e.DuplicateInfo = duplicateInfoJSON
+		e.Category = string(store.ReviewCategoryDuplicate)
+	}
+	return nil
+}
 
 // waitFor polls cond every 10ms for up to 2s, failing the test if it never becomes true.
 // Used to observe the outcome of the async review-replace move goroutine.
@@ -621,11 +631,22 @@ func TestResolveReviewEntry_DuplicateAtDestination(t *testing.T) {
 		t.Fatalf("expected 409 for duplicate destination, got %d body=%s", w.Code, w.Body.String())
 	}
 	// Entry stays pending; source is untouched (no silent loss).
-	if ms.entries[entry.ID].Status != "pending" {
-		t.Errorf("expected entry still pending, got %s", ms.entries[entry.ID].Status)
+	got := ms.entries[entry.ID]
+	if got.Status != "pending" {
+		t.Errorf("expected entry still pending, got %s", got.Status)
 	}
 	if _, err := os.Stat(entry.OriginalPath); err != nil {
 		t.Errorf("expected source untouched, stat err: %v", err)
+	}
+	// Ambiguous (no probeable video data on either side in this test) — the
+	// entry should be converted in place into a duplicate-conflict entry so
+	// the UI can show the comparison panel and Replace/Keep Existing, instead
+	// of a dead-end plain-text reason with no way to act on it.
+	if got.Category != string(store.ReviewCategoryDuplicate) {
+		t.Errorf("expected category converted to duplicate, got %q", got.Category)
+	}
+	if got.DuplicateInfo == "" {
+		t.Error("expected DuplicateInfo to be populated so the UI can show the comparison panel")
 	}
 }
 

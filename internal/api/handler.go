@@ -24,6 +24,7 @@ import (
 	"github.com/braydin72/mediaforge/internal/notify"
 	"github.com/braydin72/mediaforge/internal/pushover"
 	"github.com/braydin72/mediaforge/internal/store"
+	"github.com/braydin72/mediaforge/internal/upgrade"
 	"github.com/braydin72/mediaforge/internal/util"
 	"github.com/google/uuid"
 )
@@ -41,6 +42,7 @@ type ReviewQueueStore interface {
 	UpdateReviewQueueStatus(id, status string) error
 	UpdateReviewEntryReason(id, reason string) error
 	BulkUpdateReviewQueueStatus(ids []string, status string) error
+	ConvertReviewEntryToDuplicate(id, reason, duplicateInfoJSON string) error
 }
 
 // isMetadataPickCategory reports whether a review entry's category supports
@@ -1294,13 +1296,53 @@ func (h *Handler) ResolveReviewEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Never auto-overwrite an existing file at the destination (spec: duplicates go
-	// to manual decision, not silent overwrite).
+	// Never silently overwrite an existing file at the destination — unless
+	// it's an unambiguous upgrade per the same auto-resolution rules the
+	// intake pipeline uses (internal/upgrade). Ambiguous cases are converted
+	// in place into a duplicate-conflict entry (DuplicateInfo + category)
+	// instead of a dead-end plain-text reason, so the UI shows the
+	// incoming/existing comparison and Replace/Keep Existing actions.
 	if _, statErr := os.Stat(libraryPath); statErr == nil {
-		newReason := "file already exists at library destination: " + libraryPath
-		_ = h.reviewStore.UpdateReviewEntryReason(id, newReason)
-		writeError(w, http.StatusConflict, newReason)
-		return
+		prober := ffmpeg.NewProber(h.cfg.FFprobePath)
+		probeCtx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+		incoming := probeDuplicateFileInfo(probeCtx, prober, entry.OriginalPath)
+		existing := probeDuplicateFileInfo(probeCtx, prober, libraryPath)
+		cancel()
+
+		decision, decisionReason := upgrade.Review, ""
+		if h.cfg.Intake.DuplicateResolution != "manual" {
+			decision, decisionReason = upgrade.Decide(dupFileInfoToUpgrade(incoming), dupFileInfoToUpgrade(existing), h.cfg.Intake.DuplicateBitrateUpgradeThreshold)
+		}
+
+		switch decision {
+		case upgrade.Replace:
+			logger.Info("Review resolve: duplicate auto-resolved, replacing existing library file",
+				"entry_id", id, "dst", libraryPath, "reason", decisionReason)
+			jobID := h.startReplaceMove(id, entry.OriginalPath, libraryPath)
+			writeJSON(w, http.StatusAccepted, map[string]string{"status": "replacing", "job_id": jobID, "reason": decisionReason})
+			return
+		case upgrade.Keep:
+			logger.Info("Review resolve: duplicate auto-resolved, keeping existing library file",
+				"entry_id", id, "dst", libraryPath, "reason", decisionReason)
+			if err := os.Remove(entry.OriginalPath); err != nil && !os.IsNotExist(err) {
+				logger.Warn("Review resolve: failed to remove incoming file after auto-keep", "entry_id", id, "error", err)
+			}
+			if err := h.reviewStore.UpdateReviewQueueStatus(id, "discarded"); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"status": "kept_existing", "reason": decisionReason})
+			return
+		default:
+			newReason := "duplicate: file already exists at destination " + libraryPath
+			dupCtx := intake.DuplicateContext{Incoming: incoming, Existing: existing}
+			dupJSON, _ := json.Marshal(dupCtx)
+			if err := h.reviewStore.ConvertReviewEntryToDuplicate(id, newReason, string(dupJSON)); err != nil {
+				logger.Warn("Review resolve: failed to convert entry to duplicate", "entry_id", id, "error", err)
+			}
+			writeError(w, http.StatusConflict, newReason)
+			return
+		}
 	}
 
 	if err := util.SafeMove(entry.OriginalPath, libraryPath); err != nil {
@@ -1442,6 +1484,29 @@ func (h *Handler) ReplaceReviewEntry(w http.ResponseWriter, r *http.Request) {
 
 	jobID := h.startReplaceMove(id, incoming, existing)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "replacing", "job_id": jobID})
+}
+
+// probeDuplicateFileInfo builds an intake.DuplicateFileInfo for one side of a
+// duplicate comparison. Best-effort — a probe failure leaves codec/resolution
+// zero-valued rather than erroring, matching intake's own duplicate probing.
+func probeDuplicateFileInfo(ctx context.Context, prober *ffmpeg.Prober, path string) intake.DuplicateFileInfo {
+	info := intake.DuplicateFileInfo{Path: path}
+	if stat, err := os.Stat(path); err == nil {
+		info.FileSizeB = stat.Size()
+	}
+	if probe, err := prober.Probe(ctx, path); err == nil {
+		info.Codec = probe.VideoCodec
+		info.Width = probe.Width
+		info.Height = probe.Height
+		info.BitrateBps = probe.Bitrate
+	}
+	return info
+}
+
+// dupFileInfoToUpgrade adapts an intake.DuplicateFileInfo to upgrade.FileInfo
+// for upgrade.Decide.
+func dupFileInfoToUpgrade(f intake.DuplicateFileInfo) upgrade.FileInfo {
+	return upgrade.FileInfo{Codec: f.Codec, Width: f.Width, Height: f.Height, BitrateBps: f.BitrateBps}
 }
 
 // parseDuplicatePaths extracts the incoming/existing file paths from a

@@ -1,6 +1,70 @@
 CURRENT STATE NOTE
 
-=== Latest session (cont. once more): the REAL bug — restart + auto-resolve silently overrides pending manual Review Queue decisions ===
+=== Latest session (cont. yet again): third live bug — ResolveReviewEntry ("Pick Selected") had its own dead-end duplicate check ===
+
+Direct continuation, found while live-testing v1.7.0 right after release. User
+manually identified a multi-part episode (S10E06) via Search Manually + Pick
+Selected; it hit a duplicate at the resolved destination and displayed a
+plain-text "file already exists at library destination: ..." reason with only
+Pick Selected/Search Manually/Discard buttons — no comparison, no way to act
+on it, and no auto-resolution applied even though the bitrate difference was
+obviously a real upgrade (confirmed manually: 8.06 vs 4.78 Mbps, ~69% higher).
+
+Root cause: `ResolveReviewEntry` (internal/api/handler.go, backs the
+"Pick Selected" manual-search flow used for metadata_failure and
+unresolved_multipart categories) had its OWN separate, older
+duplicate-at-destination check — written before this session's auto-resolution
+work — that just wrote a plain reason string via
+`UpdateReviewEntryReason` and returned 409, completely bypassing both
+`internal/upgrade`'s auto-resolution rules AND the DuplicateInfo/category
+mechanism the UI needs to render the comparison panel + Replace/Keep
+Existing buttons. This was a THIRD duplicate-check call site (distinct from
+the intake watcher's `checkDuplicate` and the post-encode path in
+`jobs/worker.go`, both already wired to auto-resolution earlier this
+session) that got missed.
+
+Fix (internal/api/handler.go):
+- On a duplicate-at-destination, probes both files (new
+  `probeDuplicateFileInfo` helper) and runs the same `upgrade.Decide` check.
+- `upgrade.Replace` → kicks off the same async `startReplaceMove` used by
+  the Review Queue's Replace button (progress bar, resolves the entry on
+  completion).
+- `upgrade.Keep` → removes the incoming file, marks the entry "discarded".
+- Ambiguous → new `SQLiteStore.ConvertReviewEntryToDuplicate(id, reason,
+  duplicateInfoJSON)` (internal/store/sqlite.go) converts the entry in
+  place: sets `DuplicateInfo` + `category = "duplicate"` so a subsequent
+  reload of the Review Queue renders the existing duplicate-comparison UI
+  (`web/templates/index.html`'s category-based rendering already handles
+  this — no frontend changes needed, confirmed by inspection).
+- New `ReviewQueueStore` interface method + mock implementation
+  (internal/api/handler_test.go).
+- Updated `TestResolveReviewEntry_DuplicateAtDestination` to also assert the
+  ambiguous case now converts to `category="duplicate"` with populated
+  `DuplicateInfo`, on top of the pre-existing 409/pending/source-untouched
+  assertions (still ambiguous in the test since the placeholder test files
+  have no real probeable video data).
+
+Verified live end-to-end immediately after redeploying (build 210): re-ran
+Pick Selected on the same S10E06 entry — log showed "Review resolve:
+duplicate auto-resolved, replacing existing library file" followed by
+"Review: replaced existing file with incoming", confirming the full chain
+(manual resolve → auto-resolution check → async move → completion) works.
+
+Minor, NOT fixed this session (cosmetic only, no data-safety impact):
+after that successful resolve, the Review Queue card didn't disappear from
+the live page until the user manually refreshed, even though the
+`/resolve` response was a success status that should have triggered
+`reviewPick()`'s existing `reviewRemoveCard(id)` call (web/templates/
+index.html:6212-6214) immediately. Root cause not identified — user
+confirmed a manual refresh correctly showed the queue empty (server-side
+state was correct throughout), so this is a live-UI-refresh gap only, not
+a backend defect. Flagged here for a future session if it recurs/annoys.
+
+Verified: `go build ./...`, `go vet ./...`, `go test ./...` (full suite)
+all pass. Redeployed via `update-mediaforge.ps1` (build 210) before the
+live verification above.
+
+=== Prior session (cont. once more): the REAL bug — restart + auto-resolve silently overrides pending manual Review Queue decisions ===
 
 Direct continuation. The `reviewMoveMu` serialization fix (below) turned out
 NOT to be the actual root cause of anything observed live — a real 24-file

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-07-26
+
+### Fixed
+- `ResolveReviewEntry` (the "Pick Selected" manual-search resolve flow, used
+  for metadata_failure/unresolved_multipart entries) had its own separate,
+  older duplicate-at-destination check that never applied the new
+  auto-resolution rules and never gave a comparison/Replace/Keep-Existing UI
+  on conflict — it just left a dead-end plain-text reason with nothing
+  actionable. Confirmed live: a manually-identified multi-part episode hit
+  exactly this dead end. Fixed by running the same `internal/upgrade` check
+  used everywhere else first (auto-replaces/auto-keeps unambiguous upgrades
+  the same way), and, for ambiguous cases, converting the entry in place
+  into a proper duplicate-conflict entry (new
+  `SQLiteStore.ConvertReviewEntryToDuplicate`) with populated
+  `DuplicateInfo`/category so refreshing the Review Queue shows the
+  incoming/existing comparison and working actions instead of a dead end.
+  Files modified: `internal/api/handler.go`, `internal/store/sqlite.go`.
+
 ## [1.7.0] - 2026-07-26
 
 ### Fixed
