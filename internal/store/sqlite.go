@@ -934,6 +934,23 @@ func (s *SQLiteStore) UpdateReviewEntryReason(id, reason string) error {
 	return err
 }
 
+// ConvertReviewEntryToDuplicate turns an existing (non-duplicate) review
+// entry into a duplicate-conflict entry in place: sets reason, duplicate_info,
+// and category so the UI shows the incoming/existing comparison panel and
+// Replace/Keep Existing actions instead of a dead-end plain-text reason.
+// Used when a manual "Pick Selected" resolve (ResolveReviewEntry) discovers
+// a conflict at the resolved destination.
+func (s *SQLiteStore) ConvertReviewEntryToDuplicate(id, reason, duplicateInfoJSON string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(
+		`UPDATE review_queue SET reason = ?, duplicate_info = ?, category = ? WHERE id = ?`,
+		reason, duplicateInfoJSON, string(ReviewCategoryDuplicate), id,
+	)
+	return err
+}
+
 // Close closes the database connection.
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()
