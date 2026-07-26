@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-07-26
+
 ### Fixed
 - Intake's in-memory "already seen" tracking (`Watcher.known`) resets on every
   process restart, so a restart could make the next folder scan treat a file

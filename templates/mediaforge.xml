@@ -57,7 +57,7 @@
   <Requires>For hardware acceleration, GPU passthrough is required. See Overview for setup instructions.</Requires>
 
   <!-- Optional change log text -->
-  <Changes>v1.6.0 — see CHANGELOG.md on GitHub for full release notes.</Changes>
+  <Changes>v1.7.0 — see CHANGELOG.md on GitHub for full release notes.</Changes>
 
   <!-- Optional date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS) -->
   <Date>2026-07-26</Date>
