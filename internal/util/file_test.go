@@ -1,6 +1,7 @@
 package util
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -189,4 +190,88 @@ func TestSafeMove(t *testing.T) {
 			tc.run(t, dir)
 		})
 	}
+}
+
+func TestSafeMoveWithProgress(t *testing.T) {
+	t.Run("same-device rename reports single 100% callback", func(t *testing.T) {
+		dir := t.TempDir()
+		src := filepath.Join(dir, "src.txt")
+		dst := filepath.Join(dir, "dst.txt")
+		if err := os.WriteFile(src, []byte("hello"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		var calls int
+		var lastCopied, lastTotal int64
+		err := SafeMoveWithProgress(src, dst, func(copied, total int64) {
+			calls++
+			lastCopied, lastTotal = copied, total
+		})
+		if err != nil {
+			t.Fatalf("SafeMoveWithProgress: %v", err)
+		}
+		if calls != 1 {
+			t.Errorf("calls = %d, want 1", calls)
+		}
+		if lastCopied != lastTotal || lastTotal != int64(len("hello")) {
+			t.Errorf("final progress = %d/%d, want %d/%d", lastCopied, lastTotal, len("hello"), len("hello"))
+		}
+	})
+
+	t.Run("EXDEV fallback reports final 100% callback", func(t *testing.T) {
+		dir := t.TempDir()
+		src := filepath.Join(dir, "src.txt")
+		dst := filepath.Join(dir, "dst.txt")
+		content := []byte("cross-device content")
+		if err := os.WriteFile(src, content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		calls := 0
+		orig := renameFn
+		t.Cleanup(func() { renameFn = orig })
+		renameFn = func(oldpath, newpath string) error {
+			calls++
+			if calls == 1 {
+				return exdevErr(oldpath, newpath)
+			}
+			return os.Rename(oldpath, newpath)
+		}
+
+		var lastCopied, lastTotal int64
+		var reports int
+		err := SafeMoveWithProgress(src, dst, func(copied, total int64) {
+			reports++
+			lastCopied, lastTotal = copied, total
+		})
+		if err != nil {
+			t.Fatalf("SafeMoveWithProgress: %v", err)
+		}
+		if reports == 0 {
+			t.Fatal("expected at least one progress report")
+		}
+		if lastCopied != lastTotal || lastTotal != int64(len(content)) {
+			t.Errorf("final progress = %d/%d, want %d/%d", lastCopied, lastTotal, len(content), len(content))
+		}
+
+		got, err := os.ReadFile(dst)
+		if err != nil {
+			t.Fatalf("reading dst: %v", err)
+		}
+		if !bytes.Equal(got, content) {
+			t.Errorf("dst content = %q, want %q", got, content)
+		}
+	})
+
+	t.Run("nil onProgress is safe", func(t *testing.T) {
+		dir := t.TempDir()
+		src := filepath.Join(dir, "src.txt")
+		dst := filepath.Join(dir, "dst.txt")
+		if err := os.WriteFile(src, []byte("data"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := SafeMoveWithProgress(src, dst, nil); err != nil {
+			t.Fatalf("SafeMoveWithProgress: %v", err)
+		}
+	})
 }

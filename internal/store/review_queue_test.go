@@ -109,6 +109,46 @@ func TestReviewQueueCRUD(t *testing.T) {
 	_ = os.RemoveAll(dir)
 }
 
+func TestHasPendingReviewEntry(t *testing.T) {
+	dir := t.TempDir()
+	st, err := NewSQLiteStore(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer st.Close()
+
+	path := "/incoming/movie.mkv"
+
+	if pending, err := st.HasPendingReviewEntry(path); err != nil || pending {
+		t.Fatalf("HasPendingReviewEntry before any entry exists = (%v, %v), want (false, nil)", pending, err)
+	}
+
+	e := ReviewEntry{
+		ID:           "test-id-1",
+		OriginalPath: path,
+		Filename:     "movie.mkv",
+		Reason:       "duplicate: file already exists at destination",
+		Category:     string(ReviewCategoryDuplicate),
+		Status:       "pending",
+		CreatedAt:    time.Now().UTC(),
+	}
+	if err := st.AddToReviewQueue(&e); err != nil {
+		t.Fatalf("AddToReviewQueue: %v", err)
+	}
+
+	if pending, err := st.HasPendingReviewEntry(path); err != nil || !pending {
+		t.Fatalf("HasPendingReviewEntry with a pending entry = (%v, %v), want (true, nil)", pending, err)
+	}
+
+	if err := st.UpdateReviewQueueStatus(e.ID, "resolved"); err != nil {
+		t.Fatalf("UpdateReviewQueueStatus: %v", err)
+	}
+
+	if pending, err := st.HasPendingReviewEntry(path); err != nil || pending {
+		t.Fatalf("HasPendingReviewEntry after resolution = (%v, %v), want (false, nil)", pending, err)
+	}
+}
+
 func TestReviewQueue_EmptyCategoryRoundTrips(t *testing.T) {
 	dir := t.TempDir()
 	st, err := NewSQLiteStore(filepath.Join(dir, "test.db"))

@@ -25,6 +25,7 @@ import (
 	"github.com/braydin72/mediaforge/internal/pushover"
 	"github.com/braydin72/mediaforge/internal/store"
 	"github.com/braydin72/mediaforge/internal/util"
+	"github.com/google/uuid"
 )
 
 // StatsStore defines the interface for stats-related store operations.
@@ -79,6 +80,17 @@ type Handler struct {
 	store       StatsStore       // For stats operations (may be nil)
 	reviewStore ReviewQueueStore // For Review Queue operations (may be nil)
 	watcher     *intake.Watcher  // For full_pipeline mode (may be nil)
+
+	// reviewMoveMu serializes Review Queue Replace file moves (startReplaceMove).
+	// Single Replace and BulkReplaceReviewEntries both spawn one goroutine per
+	// entry; without this, a bulk replace fires every move concurrently, and
+	// hammering the same network-share destination with simultaneous renames at
+	// the same instant has been observed to trip a Windows sharing-violation
+	// error on every single one (confirmed live against a real \\TOWER\Media
+	// SMB share — the prior synchronous one-at-a-time loop never hit this).
+	// The moves still run asynchronously from the HTTP response/progress-bar
+	// perspective; only the actual file I/O is serialized to one at a time.
+	reviewMoveMu sync.Mutex
 }
 
 // NewHandler creates a new API handler
@@ -1397,8 +1409,10 @@ func (h *Handler) BulkDiscardReviewEntries(w http.ResponseWriter, r *http.Reques
 }
 
 // ReplaceReviewEntry handles PUT /api/review/{id}/replace
-// Moves the incoming file to the destination path, overwriting the existing file,
-// then removes the review queue entry. Only valid for duplicate conflict entries.
+// Kicks off an async move of the incoming file over the destination path and
+// returns immediately with a move-job ID; progress and completion are
+// reported over the /api/jobs/stream SSE channel as Kind:"move" events. Only
+// valid for duplicate conflict entries.
 func (h *Handler) ReplaceReviewEntry(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -1420,42 +1434,84 @@ func (h *Handler) ReplaceReviewEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.replaceReviewEntryFile(entry); err != nil {
+	incoming, existing, err := parseDuplicatePaths(entry)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "replaced"})
+	jobID := h.startReplaceMove(id, incoming, existing)
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "replacing", "job_id": jobID})
 }
 
-// replaceReviewEntryFile moves a duplicate-conflict entry's incoming file
-// over the existing library file. Only valid for entries with DuplicateInfo
-// set. Shared by ReplaceReviewEntry and BulkReplaceReviewEntries.
-func (h *Handler) replaceReviewEntryFile(entry *store.ReviewEntry) error {
+// parseDuplicatePaths extracts the incoming/existing file paths from a
+// duplicate-conflict review entry's DuplicateInfo JSON. Shared by
+// ReplaceReviewEntry and BulkReplaceReviewEntries.
+func parseDuplicatePaths(entry *store.ReviewEntry) (incoming, existing string, err error) {
 	if entry.DuplicateInfo == "" {
-		return fmt.Errorf("entry is not a duplicate conflict")
+		return "", "", fmt.Errorf("entry is not a duplicate conflict")
 	}
 	var dupCtx intake.DuplicateContext
 	if err := json.Unmarshal([]byte(entry.DuplicateInfo), &dupCtx); err != nil {
-		return fmt.Errorf("failed to parse duplicate info")
+		return "", "", fmt.Errorf("failed to parse duplicate info")
 	}
 	if dupCtx.Incoming.Path == "" || dupCtx.Existing.Path == "" {
-		return fmt.Errorf("duplicate info is incomplete")
+		return "", "", fmt.Errorf("duplicate info is incomplete")
 	}
-	if err := util.SafeMove(dupCtx.Incoming.Path, dupCtx.Existing.Path); err != nil {
-		return fmt.Errorf("replace failed: %w", err)
-	}
-	logger.Info("Review: replaced existing file with incoming", "dest", dupCtx.Existing.Path)
-	return nil
+	return dupCtx.Incoming.Path, dupCtx.Existing.Path, nil
+}
+
+// startReplaceMove moves incoming over existing in a background goroutine,
+// broadcasting Kind:"move" progress events over the jobs SSE stream
+// (move_started/move_progress/move_complete/move_failed) and updating the
+// review entry's status to "resolved" once the move succeeds. Returns the
+// move job ID immediately; the caller does not wait for completion.
+func (h *Handler) startReplaceMove(entryID, incoming, existing string) string {
+	jobID := "move-" + uuid.NewString()
+	job := &jobs.Job{ID: jobID, Kind: "move", InputPath: incoming, OutputPath: existing, Status: jobs.StatusRunning, StartedAt: time.Now()}
+	h.queue.BroadcastMoveEvent("move_started", job.Copy())
+
+	go func() {
+		// Serialize the actual move against any other concurrent Review Queue
+		// replace move — see reviewMoveMu's doc comment on the Handler struct.
+		h.reviewMoveMu.Lock()
+		defer h.reviewMoveMu.Unlock()
+
+		err := util.SafeMoveWithProgress(incoming, existing, func(copied, total int64) {
+			p := job.Copy()
+			if total > 0 {
+				p.Progress = float64(copied) / float64(total) * 100
+			}
+			h.queue.BroadcastMoveEvent("move_progress", p)
+		})
+		if err != nil {
+			logger.Warn("Review: replace move failed", "entry_id", entryID, "dest", existing, "error", err)
+			f := job.Copy()
+			f.Status = jobs.StatusFailed
+			f.Error = err.Error()
+			h.queue.BroadcastMoveEvent("move_failed", f)
+			return
+		}
+
+		logger.Info("Review: replaced existing file with incoming", "dest", existing)
+		if err := h.reviewStore.UpdateReviewQueueStatus(entryID, "resolved"); err != nil {
+			logger.Error("Review: replace move succeeded but failed to update review status", "entry_id", entryID, "error", err)
+		}
+		c := job.Copy()
+		c.Status = jobs.StatusComplete
+		c.Progress = 100
+		c.CompletedAt = time.Now()
+		h.queue.BroadcastMoveEvent("move_complete", c)
+	}()
+
+	return jobID
 }
 
 // BulkReplaceReviewEntries handles PUT /api/review/bulk/replace
 // Body: {"ids": ["id1", "id2", ...]}
+// Each valid duplicate-conflict entry starts its own async move job
+// immediately; validation failures (not a duplicate entry, missing info) are
+// reported as failed without starting a move.
 func (h *Handler) BulkReplaceReviewEntries(w http.ResponseWriter, r *http.Request) {
 	if h.reviewStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "review store not configured")
@@ -1473,7 +1529,11 @@ func (h *Handler) BulkReplaceReviewEntries(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	var succeeded []string
+	type replacing struct {
+		ID    string `json:"id"`
+		JobID string `json:"job_id"`
+	}
+	var started []replacing
 	var failed []string
 	for _, id := range req.IDs {
 		entry, err := h.reviewStore.GetReviewEntry(id)
@@ -1481,19 +1541,17 @@ func (h *Handler) BulkReplaceReviewEntries(w http.ResponseWriter, r *http.Reques
 			failed = append(failed, id)
 			continue
 		}
-		if err := h.replaceReviewEntryFile(entry); err != nil {
+		incoming, existing, err := parseDuplicatePaths(entry)
+		if err != nil {
 			logger.Warn("Bulk replace: skipping entry", "entry_id", id, "error", err)
 			failed = append(failed, id)
 			continue
 		}
-		succeeded = append(succeeded, id)
+		jobID := h.startReplaceMove(id, incoming, existing)
+		started = append(started, replacing{ID: id, JobID: jobID})
 	}
 
-	if err := h.reviewStore.BulkUpdateReviewQueueStatus(succeeded, "resolved"); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"replaced": len(succeeded), "failed": failed})
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{"replacing": started, "failed": failed})
 }
 
 // ResubmitReviewEntry handles PUT /api/review/{id}/resubmit

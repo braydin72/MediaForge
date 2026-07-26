@@ -1,6 +1,197 @@
 CURRENT STATE NOTE
 
-=== Latest session: Review Queue category + bulk actions (closes roadmap item A) ===
+=== Latest session (cont. once more): the REAL bug — restart + auto-resolve silently overrides pending manual Review Queue decisions ===
+
+Direct continuation. The `reviewMoveMu` serialization fix (below) turned out
+NOT to be the actual root cause of anything observed live — a real 24-file
+concurrent intake batch succeeded with zero errors right after that fix,
+which undercuts "concurrent moves to this share fail" as an explanation.
+The `reviewMoveMu` fix is still kept (it's a reasonable safety net restoring
+old one-at-a-time behavior), but the REAL bug is different and more serious:
+
+`Watcher.known` (internal/intake/watcher.go) — the in-memory set tracking
+"already seen this file this process lifetime" — is never persisted. Every
+`update-mediaforge.ps1` redeploy force-restarts the process, wiping `known`
+back to empty. The next folder scan then treats every file still sitting in
+`Incoming` as brand new, INCLUDING files that already have a pending Review
+Queue duplicate entry a human hasn't acted on yet. Before this session's
+auto-resolution feature, reprocessing was harmless (worst case: re-detect
+the same duplicate, no-op due to AddToReviewQueue's existing pending-dedup).
+With auto-resolution now live, reprocessing can SILENTLY auto-replace or
+auto-keep the file on its own — racing ahead of, and orphaning, the original
+pending Review Queue entry (which now points at a source file that's already
+gone). Confirmed live: the redeploy after the `reviewMoveMu` fix caused
+exactly this — a 24-file intake batch auto-resolved every one of those files
+independently, and clicking Replace afterward on the original (now-stale)
+Review Queue entries failed with "The system cannot find the file
+specified" (the source path had already been consumed).
+
+Fix: new `SQLiteStore.HasPendingReviewEntry(originalPath) (bool, error)`
+(internal/store/sqlite.go) — same query `AddToReviewQueue` already used to
+dedup ("WHERE original_path = ? AND status = 'pending'"), exposed one level
+up. Wired into `runPipeline` (internal/intake/watcher.go), which both the
+watcher's own scan path (`process`) and the manual API path (`ProcessFile`)
+funnel through — if a pending entry already exists for this exact path, skip
+entirely (no ffprobe, no codec routing, no auto-resolve, nothing) and leave
+both the file and the existing pending entry untouched. This closes the gap
+for every intake code path, not just auto-resolution specifically.
+
+New test: `internal/store/review_queue_test.go`'s `TestHasPendingReviewEntry`
+(before/with-pending-entry/after-resolution cases). Did NOT add a
+`runPipeline`-level regression test — existing watcher tests deliberately
+avoid calling `runPipeline`/`process` directly since it shells out to a real
+`ffprobe` binary (existing tests call `moveHEVCToLibrary` directly instead,
+bypassing that call); adding one reliably would need a proper ffprobe
+mock/stub that doesn't exist in this codebase yet.
+
+Cleanup performed this session (via the live running app's own API, not a
+direct DB edit): confirmed all 24 of the orphaned Review Queue entries
+correctly had their file already present at the correct library destination
+(spot-checked 3, all correct), then bulk-discarded all 24 via
+`PUT /api/review/bulk/discard` — safe, since `discardReviewEntryFile`
+no-ops via `os.IsNotExist` when the incoming path is already gone. Review
+Queue confirmed empty (0 entries) afterward.
+
+Verified: `go build ./...`, `go vet ./...`, `go test ./...` (full suite)
+all pass. Redeployed via `update-mediaforge.ps1` after this fix (see git
+log / build number if reading this out of order). NOT yet re-verified live
+against an actual restart-during-pending-duplicate scenario (would need to:
+drop a duplicate, let it land in Review Queue, restart the app before
+touching it, confirm the entry is still pending and unresolved rather than
+silently auto-consumed) — recommend testing this specific scenario if it
+comes up again, since it's exactly what broke this session.
+
+=== Prior session (cont.): live bug found immediately after deploy — bulk Replace concurrency vs. network share ===
+
+Direct continuation of the session below. Deployed via `update-mediaforge.ps1`
+and watched the live log (Monitor tool). User ran a real bulk Replace against
+~11 duplicate Stargate SG-1 S07 entries whose destination is a network share
+(`\\TOWER\Media\...`). Every single one failed within the same millisecond
+with a Windows sharing-violation error ("The process cannot access the file
+because it is being used by another process") on the very first rename step
+(local incoming file -> `<dest>.mediaforge.tmp` on the network share).
+
+Confirmed no data loss before investigating further: all source files still
+present in `Incoming`, and no review entries were marked resolved (the code
+only calls `UpdateReviewQueueStatus(..., "resolved")` after a successful
+move) — this is a "nothing happened" failure, not a corruption/loss one.
+
+Root cause: `BulkReplaceReviewEntries`/`startReplaceMove` (added this
+session) spawns one goroutine PER entry with no coordination between them.
+The prior (pre-this-session) bulk replace was a synchronous for-loop, one
+move at a time. Firing 11 concurrent renames at the exact same instant
+against the same remote SMB share tripped a sharing violation on every one
+of them — something about simultaneous CreateFile/MoveFile calls to the same
+network destination directory that a sequential loop never exercised.
+
+Fix: new `Handler.reviewMoveMu sync.Mutex` (internal/api/handler.go),
+locked for the duration of the actual `SafeMoveWithProgress` call inside
+`startReplaceMove`'s goroutine. Moves are still asynchronous from the HTTP
+response/progress-bar's perspective (the request returns immediately, and
+progress events still stream over SSE), but the real file I/O across all
+Replace calls (single or bulk) is now serialized to one at a time again,
+matching the old safe behavior.
+
+Verified: `go build ./...`, `go vet ./...`, `go test ./...` (full suite)
+all pass. NOT yet re-verified live against the same real batch — recommend
+the user redeploy (`update-mediaforge.ps1`) and re-run the same bulk Replace
+against those Stargate SG-1 S07 entries (still sitting pending in the Review
+Queue, untouched) to confirm they now succeed one-at-a-time instead of all
+failing simultaneously.
+
+=== Prior session: intelligent duplicate auto-resolution + async Replace progress bar ===
+
+User asked for two Review Queue improvements: (1) obvious upgrades (higher
+resolution/bitrate) should auto-replace instead of always sitting in the
+Review Queue, and (2) a progress indicator while a file is being moved to
+the library. Both implemented; this deliberately changes the CLAUDE.md
+standing rule "never auto-overwrite duplicates" — updated that rule in
+CLAUDE.md to describe the new opt-out (`intake.duplicate_resolution:
+"manual"`) auto-resolution behavior rather than leave it contradicting the
+code.
+
+Auto-resolution:
+- New package `internal/upgrade` (`upgrade.Decide`) holds the shared
+  decision logic — resolution mismatch wins outright; else HEVC/AV1 beats
+  AVC/older at equal resolution; else ≥`duplicate_bitrate_upgrade_threshold`
+  (default 0.25 = 25%) higher bitrate at equal resolution/codec wins; else
+  ambiguous → Review Queue. It has no dependency on `internal/intake` or
+  `internal/jobs` specifically so both packages (which cannot import each
+  other — `intake` imports `jobs` to enqueue encodes) can share one
+  implementation instead of duplicating the rule.
+- New config: `intake.duplicate_resolution` (`"manual"`|`"auto"`, default
+  `"auto"`) and `intake.duplicate_bitrate_upgrade_threshold` (default
+  `0.25`), in `internal/config/config.go`.
+- `internal/intake/duplicate.go`'s `checkDuplicate` gained two params
+  (resolution mode, bitrate threshold) and now calls `upgrade.Decide`
+  before falling back to `dupSendReview`; new `dupAutoReplace`/`dupAutoKeep`
+  decisions. `internal/intake/watcher.go`'s `moveHEVCToLibrary` handles all
+  three outcomes (review/auto-keep removes incoming file/auto-replace moves
+  it, all logged).
+- Applied to the SECOND duplicate-check call site too (per CLAUDE.md's
+  warning that watcher.go/worker.go's two intake paths — HEVC direct and
+  AVC→encode-queue — must be kept consistent): `internal/jobs/worker.go`'s
+  post-encode library-move duplicate check now runs the same
+  `upgrade.Decide` before falling back to a Review Queue entry.
+- MEDIAFORGE_SPEC.md's "Intelligent Duplicate Resolution" future-enhancement
+  section marked implemented (VMAF tiebreaker still explicitly deferred —
+  ambiguous same-resolution/same-codec-tier/close-bitrate cases still go to
+  Review Queue, they just don't get a VMAF-based decision yet).
+- New tests: `internal/upgrade/upgrade_test.go` (pure decision-logic cases).
+
+Async Replace + progress bar:
+- `internal/util/file.go`: new `SafeMoveWithProgress(src, dst,
+  onProgress)` — same rename-then-copy-fallback semantics as `SafeMove`,
+  but the cross-device copy fallback reports byte progress via a counting
+  `io.Reader` wrapper (throttled to one callback per 250ms plus a final
+  call, so large files don't flood callbacks). The same-device
+  `os.Rename` fast path reports a single 100% callback since a rename has
+  no measurable copy phase.
+- `internal/jobs/job.go`/`queue.go`: `Job` gained a `Kind` field (empty =
+  normal transcode job, `"move"` = ephemeral file-move progress event);
+  new `Queue.BroadcastMoveEvent(eventType, job)` broadcasts over the
+  existing `/api/jobs/stream` SSE channel WITHOUT touching the transcode
+  jobs map/persistence/Stats() — move jobs never appear in the Encode
+  Queue tab or job counts, they're purely progress-bar carriers for the
+  Review Queue UI.
+- `internal/api/handler.go`: `ReplaceReviewEntry` and
+  `BulkReplaceReviewEntries` are now async — they validate the duplicate
+  entry synchronously (so bad requests still 400 immediately) then spawn
+  a goroutine (`startReplaceMove`) that calls `SafeMoveWithProgress` and
+  broadcasts `move_started`/`move_progress`/`move_complete`/`move_failed`
+  events, updating the review entry to `"resolved"` only once the move
+  actually completes. Both handlers now respond `202 Accepted` with
+  `job_id`(s) instead of blocking until the move finishes.
+- `web/templates/index.html`: review cards gained a hidden
+  `#rmove-<entryId>` placeholder; `reviewReplace`/`reviewReplaceSelected`
+  register the returned `job_id` → entry id in `_reviewMoveJobs`, and a
+  new SSE branch routes `move_*` events to `reviewUpdateMoveProgress`,
+  which renders the same `.progress-bar`/`.progress-fill` markup used by
+  the Encode Queue tab, hides the action buttons while moving, and removes
+  the card on `move_complete` (or shows the error and restores the
+  buttons on `move_failed`).
+- Existing `TestBulkReplaceReviewEntries` (internal/api/handler_test.go)
+  updated for the new 202/async response shape — added a `waitFor` polling
+  helper and a mutex on the test's mock review store (now touched from a
+  background goroutine).
+
+Verified: `go build ./...`, `go vet ./...`, `go test ./...` (full suite,
+including new `internal/upgrade` tests and updated/new `internal/util`,
+`internal/api` tests) all pass. Node `--check` run against the extracted
+inline `<script>` from `web/templates/index.html` to catch JS syntax
+errors (no real browser available in this environment) — did NOT
+click-test the actual progress bar rendering live in a browser; recommend
+the user redeploy and manually confirm: (1) dropping a higher-resolution
+duplicate auto-replaces without a Review Queue entry appearing at all
+(check the log for "auto-resolved: incoming resolution..."), (2) clicking
+Replace on a genuine duplicate entry shows a live progress bar and the
+card disappears when the move finishes, (3) a large cross-device move
+actually shows intermediate percentages rather than jumping straight to
+100%.
+
+Nothing else outstanding from this session.
+
+=== Prior session: Review Queue category + bulk actions (closes roadmap item A) ===
 
 Implemented the "Review Queue: context-aware actions + bulk actions beyond
 Discard" item from COMPREHENSIVE_STATUS_AND_ROADMAP.md (planned 2026-07-25,

@@ -40,6 +40,18 @@ type IntakeConfig struct {
 	// SMB shares the walk can exceed the previous fixed 30s cap; make it
 	// configurable. Default 60.
 	CacheTimeoutSeconds int `yaml:"cache_timeout_seconds"`
+
+	// DuplicateResolution controls how obvious upgrades among duplicate files
+	// are handled: "auto" resolves unambiguous upgrades (higher resolution,
+	// HEVC over AVC at equal resolution, or a meaningfully higher bitrate at
+	// equal resolution/codec) without a Review Queue entry; "manual" always
+	// routes duplicates to the Review Queue. Default "auto".
+	DuplicateResolution string `yaml:"duplicate_resolution"`
+
+	// DuplicateBitrateUpgradeThreshold is the fractional bitrate increase
+	// required (at equal resolution/codec) to treat the incoming file as an
+	// upgrade, e.g. 0.25 means incoming must be at least 25% higher bitrate.
+	DuplicateBitrateUpgradeThreshold float64 `yaml:"duplicate_bitrate_upgrade_threshold"`
 }
 
 type APIsConfig struct {
@@ -255,9 +267,11 @@ func DefaultConfig() *Config {
 				IntervalSeconds: 10,
 				PassesRequired:  6,
 			},
-			ConfidenceThreshold: 0.85,
-			ReviewThreshold:     0.60,
-			CacheTimeoutSeconds: 60,
+			ConfidenceThreshold:              0.85,
+			ReviewThreshold:                  0.60,
+			CacheTimeoutSeconds:              60,
+			DuplicateResolution:              "auto",
+			DuplicateBitrateUpgradeThreshold: 0.25,
 			Naming: IntakeNamingConfig{
 				MovieFolder: "{title} ({year})",
 				MovieFile:   "{title} ({year})",
@@ -410,6 +424,12 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Intake.CacheTimeoutSeconds < 1 {
 		cfg.Intake.CacheTimeoutSeconds = 60
+	}
+	if cfg.Intake.DuplicateResolution != "manual" {
+		cfg.Intake.DuplicateResolution = "auto"
+	}
+	if cfg.Intake.DuplicateBitrateUpgradeThreshold <= 0 {
+		cfg.Intake.DuplicateBitrateUpgradeThreshold = 0.25
 	}
 	if cfg.Intake.Naming.MovieFolder == "" {
 		cfg.Intake.Naming.MovieFolder = "{title} ({year})"

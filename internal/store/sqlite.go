@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -786,6 +787,30 @@ func (s *SQLiteStore) WriteDuplicateReviewEntry(id, originalPath, filename, reas
 		CreatedAt:     time.Now().UTC(),
 	}
 	return s.AddToReviewQueue(entry)
+}
+
+// HasPendingReviewEntry reports whether a pending review queue entry already
+// exists for originalPath. The intake watcher checks this before processing
+// any file so a restart-triggered rescan (w.known is in-memory only and
+// resets on process restart) can never reprocess — and, since auto-resolution,
+// potentially silently auto-replace/auto-keep — a file a human still has a
+// pending manual Review Queue decision to make on.
+func (s *SQLiteStore) HasPendingReviewEntry(originalPath string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var existing string
+	err := s.db.QueryRow(
+		`SELECT id FROM review_queue WHERE original_path = ? AND status = 'pending' LIMIT 1`,
+		originalPath,
+	).Scan(&existing)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return false, err
 }
 
 // AddToReviewQueue inserts a new review queue entry.

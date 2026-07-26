@@ -40,7 +40,8 @@ Use conventional commit style: `fix(scope): description`, `feat(scope): descript
 - Never remove or weaken the "no silent failures" principle from MEDIAFORGE_SPEC.md — every failure path must route to the Review Queue with a specific, human-readable reason.
 - Never hardcode Windows or Linux path separators — always use Go's `filepath` package.
 - Never pass year as a search filter to TMDB or TVDB lookups — year is used only for confidence scoring, not as a search query parameter (this caused real bugs earlier in development).
-- Never auto-overwrite or auto-append (1)/(2) suffixes on duplicate files at the library destination — all duplicates route to the Review Queue for manual decision.
+- Never auto-append (1)/(2) suffixes on duplicate files at the library destination.
+- Duplicates may be auto-resolved (replace or discard incoming) only when the upgrade is unambiguous per `internal/upgrade` (higher resolution, HEVC/AV1 over AVC at equal resolution, or a meaningfully higher bitrate at equal resolution/codec) and `intake.duplicate_resolution` is `"auto"` (the default). Anything ambiguous still routes to the Review Queue for manual decision — never silently guess on a close call.
 
 ## Project structure quick reference
 

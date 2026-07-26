@@ -17,6 +17,7 @@ import (
 	"github.com/braydin72/mediaforge/internal/ffmpeg"
 	"github.com/braydin72/mediaforge/internal/ffmpeg/vmaf"
 	"github.com/braydin72/mediaforge/internal/logger"
+	"github.com/braydin72/mediaforge/internal/upgrade"
 	"github.com/braydin72/mediaforge/internal/util"
 )
 
@@ -1053,18 +1054,53 @@ func (w *Worker) processJob(job *Job) {
 			}
 		} else if _, statErr := os.Stat(job.LibraryPath); statErr == nil {
 			// Check for a pre-existing file at the destination before moving.
-			reason := fmt.Sprintf("duplicate: file already exists at destination %s", job.LibraryPath)
-			logger.Warn("Post-encode library move: duplicate at destination, queuing for review",
-				"job_id", job.ID, "dst", job.LibraryPath)
-			dupInfoJSON := buildPostEncodeDuplicateJSON(jobCtx, w.prober, finalPath, job.LibraryPath)
-			_ = w.queue.FailJob(job.ID, reason)
-			// job.LibraryPath already carries the metadata-corrected name (set from
-			// resolved title/year/season/episode during intake); filepath.Base(finalPath)
-			// would still be the raw, possibly-uncorrected source name since transcoding
-			// doesn't rename. Use the corrected name so a later "Re-encode Custom" re-parses
-			// the correction instead of losing it.
-			w.queue.SendDuplicateToReviewQueue(job.ID, finalPath, filepath.Base(job.LibraryPath), reason, "", dupInfoJSON, "duplicate")
-			return
+			incomingInfo, existingInfo := probePostEncodeDuplicate(jobCtx, w.prober, finalPath, job.LibraryPath)
+
+			decision, decisionReason := upgrade.Review, ""
+			if w.cfg.Intake.DuplicateResolution != "manual" {
+				decision, decisionReason = upgrade.Decide(incomingInfo.toUpgradeInfo(), existingInfo.toUpgradeInfo(), w.cfg.Intake.DuplicateBitrateUpgradeThreshold)
+			}
+
+			switch decision {
+			case upgrade.Keep:
+				logger.Info("Post-encode library move: duplicate auto-resolved, keeping existing library file",
+					"job_id", job.ID, "dst", job.LibraryPath, "reason", decisionReason)
+				if err := os.Remove(finalPath); err != nil {
+					logger.Warn("Post-encode: failed to remove incoming file after auto-keep", "job_id", job.ID, "error", err)
+				}
+				_ = w.queue.FailJob(job.ID, "duplicate auto-resolved: kept existing library file ("+decisionReason+")")
+				return
+			case upgrade.Replace:
+				logger.Info("Post-encode library move: duplicate auto-resolved, replacing existing library file",
+					"job_id", job.ID, "dst", job.LibraryPath, "reason", decisionReason)
+				if moveErr := util.SafeMove(finalPath, job.LibraryPath); moveErr != nil {
+					reason := fmt.Sprintf("post-encode move failed: %v", moveErr)
+					logger.Error("Post-encode library move failed", "job_id", job.ID, "src", finalPath, "dst", job.LibraryPath, "error", moveErr)
+					_ = w.queue.FailJob(job.ID, reason)
+					w.queue.SendToReviewQueue(job.ID, finalPath, filepath.Base(job.LibraryPath), reason, "", "system_failure")
+					return
+				}
+				finalPath = job.LibraryPath
+				if w.pool.OnLibraryMoveComplete != nil {
+					completedJob := job.Copy()
+					completedJob.OutputPath = finalPath
+					completedJob.OutputSize = result.OutputSize
+					w.pool.OnLibraryMoveComplete(completedJob)
+				}
+			default:
+				reason := fmt.Sprintf("duplicate: file already exists at destination %s", job.LibraryPath)
+				logger.Warn("Post-encode library move: duplicate at destination, queuing for review",
+					"job_id", job.ID, "dst", job.LibraryPath)
+				dupInfoJSON := buildPostEncodeDuplicateJSON(incomingInfo, existingInfo)
+				_ = w.queue.FailJob(job.ID, reason)
+				// job.LibraryPath already carries the metadata-corrected name (set from
+				// resolved title/year/season/episode during intake); filepath.Base(finalPath)
+				// would still be the raw, possibly-uncorrected source name since transcoding
+				// doesn't rename. Use the corrected name so a later "Re-encode Custom" re-parses
+				// the correction instead of losing it.
+				w.queue.SendDuplicateToReviewQueue(job.ID, finalPath, filepath.Base(job.LibraryPath), reason, "", dupInfoJSON, "duplicate")
+				return
+			}
 		} else if moveErr := util.SafeMove(finalPath, job.LibraryPath); moveErr != nil {
 			reason := fmt.Sprintf("post-encode move failed: %v", moveErr)
 			logger.Error("Post-encode library move failed", "job_id", job.ID, "src", finalPath, "dst", job.LibraryPath, "error", moveErr)
@@ -1417,24 +1453,26 @@ func samePath(a, b string) bool {
 	return a == b
 }
 
-// buildPostEncodeDuplicateJSON builds a DuplicateContext JSON string for a post-encode
-// library move conflict. Both probes are best-effort; failures leave codec/resolution empty.
-func buildPostEncodeDuplicateJSON(ctx context.Context, prober *ffmpeg.Prober, incomingPath, existingPath string) string {
-	type fileInfo struct {
-		Path       string `json:"path"`
-		Codec      string `json:"codec"`
-		Width      int    `json:"width"`
-		Height     int    `json:"height"`
-		BitrateBps int64  `json:"bitrate_bps"`
-		FileSizeB  int64  `json:"filesize_bytes"`
-	}
-	type dupCtx struct {
-		Incoming fileInfo `json:"incoming"`
-		Existing fileInfo `json:"existing"`
-	}
+// postEncodeFileInfo holds probe/stat metadata for one side of a post-encode
+// duplicate comparison.
+type postEncodeFileInfo struct {
+	Path       string `json:"path"`
+	Codec      string `json:"codec"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+	BitrateBps int64  `json:"bitrate_bps"`
+	FileSizeB  int64  `json:"filesize_bytes"`
+}
 
-	fill := func(path string) fileInfo {
-		fi := fileInfo{Path: path}
+func (f postEncodeFileInfo) toUpgradeInfo() upgrade.FileInfo {
+	return upgrade.FileInfo{Codec: f.Codec, Width: f.Width, Height: f.Height, BitrateBps: f.BitrateBps}
+}
+
+// probePostEncodeDuplicate probes both sides of a post-encode library move conflict.
+// Both probes are best-effort; failures leave codec/resolution empty.
+func probePostEncodeDuplicate(ctx context.Context, prober *ffmpeg.Prober, incomingPath, existingPath string) (incoming, existing postEncodeFileInfo) {
+	fill := func(path string) postEncodeFileInfo {
+		fi := postEncodeFileInfo{Path: path}
 		if info, err := os.Stat(path); err == nil {
 			fi.FileSizeB = info.Size()
 		}
@@ -1448,7 +1486,16 @@ func buildPostEncodeDuplicateJSON(ctx context.Context, prober *ffmpeg.Prober, in
 		}
 		return fi
 	}
+	return fill(incomingPath), fill(existingPath)
+}
 
-	b, _ := json.Marshal(dupCtx{Incoming: fill(incomingPath), Existing: fill(existingPath)})
+// buildPostEncodeDuplicateJSON marshals a DuplicateContext JSON string for a
+// post-encode library move conflict review queue entry.
+func buildPostEncodeDuplicateJSON(incoming, existing postEncodeFileInfo) string {
+	type dupCtx struct {
+		Incoming postEncodeFileInfo `json:"incoming"`
+		Existing postEncodeFileInfo `json:"existing"`
+	}
+	b, _ := json.Marshal(dupCtx{Incoming: incoming, Existing: existing})
 	return string(b)
 }

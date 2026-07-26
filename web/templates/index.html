@@ -5134,6 +5134,10 @@
                 } else if (data.type === 'notify_sent') {
                     // Notification was sent, uncheck the checkbox
                     document.getElementById('notify-checkbox').checked = false;
+                } else if (data.type === 'move_started' || data.type === 'move_progress' ||
+                           data.type === 'move_complete' || data.type === 'move_failed') {
+                    // Review Queue file-move progress (see startReplaceMove server-side)
+                    reviewUpdateMoveProgress(data.type, data.job);
                 } else if (data.type === 'discovery_progress') {
                     // Update processing banner with progress
                     const banner = document.getElementById('processing-banner');
@@ -5824,6 +5828,7 @@
         let _reviewEntries = [];
         let _reviewSelected = {}; // entryId → candidateIndex
         let _reviewCandidates = {}; // entryId → candidate objects (from list or manual search)
+        let _reviewMoveJobs = {}; // move job id → entryId (see startReplaceMove server-side)
         let _reviewPage = 1;
         let _reviewPages = 1;
         let _reviewPerPage = 10;
@@ -6074,6 +6079,7 @@
                   <button class="btn btn-primary btn-sm" data-original-path="${escReview(e.original_path)}" onclick="reviewResubmitCustom('${e.id}', this.dataset.originalPath)">Re-encode</button>
                   <button class="btn btn-secondary btn-sm" onclick="reviewToggleCustom('${e.id}')">Cancel</button>
                 </div>` : ''}
+                <div class="review-move-progress" id="rmove-${e.id}" style="display:none"></div>
                 <div class="review-actions">${actionsHTML}
                 </div>
               </div>
@@ -6083,8 +6089,45 @@
         async function reviewReplace(id) {
             if (!confirm('Replace the existing file with the incoming version? This cannot be undone.')) return;
             const res = await fetch(`/api/review/${id}/replace`, {method:'PUT'});
-            if (res.ok) { reviewRemoveCard(id); reviewUpdateBadge(); }
-            else { const d = await res.json().catch(()=>{}); alert('Replace failed: ' + (d && d.error || res.status)); }
+            const d = await res.json().catch(() => ({}));
+            if (res.ok && d.job_id) {
+                _reviewMoveJobs[d.job_id] = id;
+                reviewUpdateMoveProgress('move_started', {id: d.job_id, progress: 0});
+            } else {
+                alert('Replace failed: ' + (d && d.error || res.status));
+            }
+        }
+
+        // reviewUpdateMoveProgress renders/updates the byte-progress bar on a Review
+        // Queue card while its file move (Replace action) runs in the background, and
+        // removes the card (or shows the error) once the move job finishes. jobId →
+        // entryId is tracked in _reviewMoveJobs since move-job SSE events carry the
+        // move job's own id, not the review entry id.
+        function reviewUpdateMoveProgress(type, job) {
+            const entryId = _reviewMoveJobs[job.id];
+            if (!entryId) return;
+            const box = document.getElementById('rmove-' + entryId);
+            if (!box) return;
+            const actions = document.querySelector(`#rcard-${entryId} .review-actions`);
+
+            if (type === 'move_started' || type === 'move_progress') {
+                const pct = Math.round(job.progress || 0);
+                box.style.display = '';
+                if (actions) actions.style.display = 'none';
+                box.innerHTML = `
+                    <div class="job-progress">
+                      <div class="progress-bar"><div class="progress-fill" style="width: ${pct}%"></div></div>
+                    </div>
+                    <div style="font-size:0.75rem;color:var(--text-tertiary);margin-top:2px">Moving to library... ${pct}%</div>`;
+            } else if (type === 'move_complete') {
+                delete _reviewMoveJobs[job.id];
+                reviewRemoveCard(entryId);
+                reviewUpdateBadge();
+            } else if (type === 'move_failed') {
+                delete _reviewMoveJobs[job.id];
+                box.innerHTML = `<div class="job-error">Move failed: ${escReview(job.error || 'unknown error')}</div>`;
+                if (actions) actions.style.display = '';
+            }
         }
 
         function reviewFmtBytes(n) {
@@ -6276,9 +6319,11 @@
             });
             const data = await res.json().catch(() => ({}));
             const failedIDs = new Set(data.failed || []);
-            sel.forEach(e => { if (!failedIDs.has(e.id)) reviewRemoveCard(e.id); });
+            (data.replacing || []).forEach(r => {
+                _reviewMoveJobs[r.job_id] = r.id;
+                reviewUpdateMoveProgress('move_started', {id: r.job_id, progress: 0});
+            });
             if (failedIDs.size) alert(`${failedIDs.size} item(s) could not be replaced`);
-            reviewUpdateBadge();
         }
 
         function reviewToggleBulkResubmit() {
