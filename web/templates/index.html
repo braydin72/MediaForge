@@ -2721,10 +2721,40 @@
         <div class="review-bulk-bar">
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
                 <input type="checkbox" id="review-select-all" onchange="reviewSelectAll(this)">
-                <span>Select all</span>
+                <span id="review-select-all-label">Select all</span>
             </label>
             <div style="flex:1"></div>
-            <button class="btn btn-secondary btn-sm" onclick="reviewDiscardSelected()">Discard Selected</button>
+            <button class="btn btn-secondary btn-sm" id="review-bulk-discard" style="display:none" onclick="reviewDiscardSelected()">Discard Selected</button>
+            <button class="btn btn-primary btn-sm" id="review-bulk-replace" style="display:none" onclick="reviewReplaceSelected()">Replace Selected</button>
+            <button class="btn btn-secondary btn-sm" id="review-bulk-resubmit" style="display:none" onclick="reviewToggleBulkResubmit()">Re-encode Selected...</button>
+        </div>
+        <div class="review-search-form" id="review-bulk-resubmit-panel" style="display:none">
+            <select class="review-search-type" id="bulk-rcpreset" onchange="reviewBulkCustomPresetChange()" title="Encode mode">
+                <option value="compress-hevc">Standard HEVC</option>
+                <option value="smartshrink-hevc">SmartShrink (VMAF)</option>
+            </select>
+            <select class="review-search-type" id="bulk-rcquality" style="display:none" title="SmartShrink quality">
+                <option value="acceptable">Acceptable</option>
+                <option value="good" selected>Good</option>
+                <option value="excellent">Excellent</option>
+            </select>
+            <input type="number" class="review-search-year" id="bulk-rccrf" min="16" max="30" placeholder="CRF: default" title="CRF override">
+            <select class="review-search-type" id="bulk-rcspeed" title="Encode speed">
+                <option value="">Speed: default</option>
+                <option value="slowest">Slowest</option>
+                <option value="slower">Slower</option>
+                <option value="slow">Slow</option>
+                <option value="medium">Medium</option>
+                <option value="fast">Fast</option>
+            </select>
+            <select class="review-search-type" id="bulk-rcformat" title="Output container">
+                <option value="">Format: default</option>
+                <option value="mkv">MKV</option>
+                <option value="mp4">MP4</option>
+                <option value="preserve">Preserve</option>
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="reviewBulkResubmitSelected()">Re-encode</button>
+            <button class="btn btn-secondary btn-sm" onclick="reviewToggleBulkResubmit()">Cancel</button>
         </div>
         <div class="review-list" id="review-list">
             <div class="review-empty">
@@ -5854,6 +5884,7 @@
                 }
                 renderReviewList();
                 renderReviewPager();
+                reviewUpdateBulk();
             } catch (e) { console.error('loadReviewQueue:', e); }
         }
 
@@ -6208,8 +6239,14 @@
                 if (_reviewPages > 1) { loadReviewQueue(); }
                 else { renderReviewList(); document.getElementById('review-pager').style.display = 'none'; }
             }
+            reviewUpdateBulk();
         }
 
+        // reviewGetSelected only ever considers the currently rendered page —
+        // there is no cross-page selection state. Fixing that is separate, larger
+        // scope (would need either a server-side "select all matching filter" id
+        // list or persisting selection across loadReviewQueue() page reloads);
+        // deliberately deferred, see the "(this page only)" label in reviewUpdateBulk.
         function reviewGetSelected() {
             return _reviewEntries.filter(e => { const cb = document.getElementById('rcheck-'+e.id); return cb && cb.checked; });
         }
@@ -6218,23 +6255,120 @@
             const sel = reviewGetSelected();
             if (!sel.length) return;
             if (!confirm(`Discard ${sel.length} selected item${sel.length===1?'':'s'}?`)) return;
-            for (const e of sel) {
-                await fetch(`/api/review/${e.id}/discard`, {method:'PUT'});
-                reviewRemoveCard(e.id);
-            }
+            const res = await fetch('/api/review/bulk/discard', {
+                method: 'PUT', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ids: sel.map(e => e.id)})
+            });
+            const data = await res.json().catch(() => ({}));
+            const failedIDs = new Set(data.failed || []);
+            sel.forEach(e => { if (!failedIDs.has(e.id)) reviewRemoveCard(e.id); });
+            if (failedIDs.size) alert(`${failedIDs.size} item(s) could not be discarded (already resolved elsewhere?)`);
             reviewUpdateBadge();
+        }
+
+        async function reviewReplaceSelected() {
+            const sel = reviewGetSelected();
+            if (!sel.length) return;
+            if (!confirm(`Replace the existing file for ${sel.length} selected item${sel.length===1?'':'s'}? This cannot be undone.`)) return;
+            const res = await fetch('/api/review/bulk/replace', {
+                method: 'PUT', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ids: sel.map(e => e.id)})
+            });
+            const data = await res.json().catch(() => ({}));
+            const failedIDs = new Set(data.failed || []);
+            sel.forEach(e => { if (!failedIDs.has(e.id)) reviewRemoveCard(e.id); });
+            if (failedIDs.size) alert(`${failedIDs.size} item(s) could not be replaced`);
+            reviewUpdateBadge();
+        }
+
+        function reviewToggleBulkResubmit() {
+            const panel = document.getElementById('review-bulk-resubmit-panel');
+            if (!panel) return;
+            panel.style.display = (panel.style.display === 'none') ? '' : 'none';
+        }
+
+        function reviewBulkCustomPresetChange() {
+            const preset = document.getElementById('bulk-rcpreset').value;
+            const q = document.getElementById('bulk-rcquality');
+            if (q) q.style.display = (preset === 'smartshrink-hevc') ? '' : 'none';
+            const crf = document.getElementById('bulk-rccrf');
+            if (crf) crf.style.display = (preset === 'compress-hevc') ? '' : 'none';
+        }
+
+        async function reviewBulkResubmitSelected() {
+            const sel = reviewGetSelected();
+            if (!sel.length) return;
+            const preset = document.getElementById('bulk-rcpreset').value;
+            const body = {
+                ids: sel.map(e => e.id),
+                preset_id: preset,
+                encode_speed: document.getElementById('bulk-rcspeed').value || '',
+                encode_output_format: document.getElementById('bulk-rcformat').value || '',
+            };
+            if (preset === 'smartshrink-hevc') {
+                body.smartshrink_quality = document.getElementById('bulk-rcquality').value || '';
+            }
+            if (preset === 'compress-hevc') {
+                const crfVal = document.getElementById('bulk-rccrf').value;
+                if (crfVal) body.encode_quality_crf = parseInt(crfVal, 10);
+            }
+            const res = await fetch('/api/review/bulk/resubmit', {
+                method: 'PUT', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(body)
+            });
+            const data = await res.json().catch(() => ({}));
+            const failedIDs = new Set(data.failed || []);
+            sel.forEach(e => { if (!failedIDs.has(e.id)) reviewRemoveCard(e.id); });
+            if (failedIDs.size) alert(`${failedIDs.size} item(s) could not be re-encoded (wrong category?)`);
+            reviewUpdateBadge();
+            reviewToggleBulkResubmit();
         }
 
         function reviewSelectAll(cb) {
             document.querySelectorAll('.review-card-check').forEach(c => c.checked = cb.checked);
+            reviewUpdateBulk();
         }
 
         function reviewUpdateBulk() {
             const allCb = document.getElementById('review-select-all');
-            if (!allCb) return;
+            const label = document.getElementById('review-select-all-label');
+            if (label) label.textContent = 'Select all' + (_reviewPages > 1 ? ' (this page only)' : '');
+            if (allCb) {
+                const sel = reviewGetSelected();
+                allCb.indeterminate = sel.length > 0 && sel.length < _reviewEntries.length;
+                allCb.checked = sel.length === _reviewEntries.length && _reviewEntries.length > 0;
+            }
+            reviewUpdateBulkActions();
+        }
+
+        // reviewUpdateBulkActions shows only bulk actions valid for EVERY
+        // currently-selected entry's category: Discard is valid for all
+        // categories, Replace only when the whole selection is duplicates, and
+        // Re-encode only when the whole selection is encode failures. A mixed
+        // selection hides the category-specific buttons rather than silently
+        // skipping entries a button doesn't apply to.
+        function reviewUpdateBulkActions() {
             const sel = reviewGetSelected();
-            allCb.indeterminate = sel.length > 0 && sel.length < _reviewEntries.length;
-            allCb.checked = sel.length === _reviewEntries.length && _reviewEntries.length > 0;
+            const discardBtn = document.getElementById('review-bulk-discard');
+            const replaceBtn = document.getElementById('review-bulk-replace');
+            const resubmitBtn = document.getElementById('review-bulk-resubmit');
+            if (!discardBtn || !replaceBtn || !resubmitBtn) return;
+
+            if (!sel.length) {
+                discardBtn.style.display = 'none';
+                replaceBtn.style.display = 'none';
+                resubmitBtn.style.display = 'none';
+                document.getElementById('review-bulk-resubmit-panel').style.display = 'none';
+                return;
+            }
+
+            const categories = new Set(sel.map(reviewCategoryOf));
+            discardBtn.style.display = '';
+            replaceBtn.style.display = (categories.size === 1 && categories.has('duplicate')) ? '' : 'none';
+            resubmitBtn.style.display = (categories.size === 1 && categories.has('encode_failure')) ? '' : 'none';
+            if (resubmitBtn.style.display === 'none') {
+                document.getElementById('review-bulk-resubmit-panel').style.display = 'none';
+            }
         }
 
         async function reviewUpdateBadge() {
