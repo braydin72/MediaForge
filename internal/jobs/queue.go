@@ -683,6 +683,16 @@ func (q *Queue) BroadcastProgress(probed, total int) {
 	})
 }
 
+// BroadcastMoveEvent broadcasts an ephemeral move-job event (Job.Kind == "move")
+// to subscribers. Unlike transcode job events, move jobs are never added to the
+// queue's jobs map, persisted, or reflected in GetAll()/Stats() — they exist
+// only to give the UI byte-progress on a Review Queue replace/resubmit-to-library
+// file move. eventType is one of "move_started", "move_progress", "move_complete",
+// "move_failed".
+func (q *Queue) BroadcastMoveEvent(eventType string, job *Job) {
+	q.broadcast(JobEvent{Type: eventType, Job: job})
+}
+
 // Stats returns queue statistics
 type Stats struct {
 	Pending       int   `json:"pending"`

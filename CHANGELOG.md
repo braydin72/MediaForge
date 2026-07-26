@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-07-26
+
+### Fixed
+- Intake's in-memory "already seen" tracking (`Watcher.known`) resets on every
+  process restart, so a restart could make the next folder scan treat a file
+  still sitting in `Incoming` as brand new — even if it already had a pending
+  Review Queue duplicate entry a human hadn't acted on yet. Combined with the
+  new auto-resolution feature above, this let a routine restart (e.g. a
+  redeploy) silently auto-replace/auto-keep a file whose fate was already
+  queued for manual review, leaving the original entry orphaned (pointing at
+  a source file that no longer existed). Confirmed live: a redeploy caused
+  24 pending duplicate entries to be silently auto-resolved by the intake
+  pipeline before their matching Review Queue entries could be acted on.
+  Fixed with a new `SQLiteStore.HasPendingReviewEntry(originalPath)` check at
+  the top of the intake pipeline (`runPipeline`, shared by both the watcher's
+  scan path and the manual `ProcessFile` API path) — any file that already
+  has a pending review entry is now skipped entirely, full stop, regardless
+  of restart timing. Files modified: `internal/store/sqlite.go`,
+  `internal/intake/watcher.go`. New test:
+  `internal/store/review_queue_test.go`'s `TestHasPendingReviewEntry`.
+- Bulk Review Queue "Replace" fired every entry's file move as a concurrent
+  goroutine, hammering the same network-share destination with simultaneous
+  renames at the same instant — confirmed live against a real `\\TOWER\Media`
+  SMB share, every single move in an 11-item batch failed with a Windows
+  sharing-violation error ("The process cannot access the file because it is
+  being used by another process"). No data was lost (source files are only
+  removed after a successful move, and the review entry is only marked
+  resolved on success), but nothing replaced. Fixed by serializing the actual
+  move I/O behind a new `Handler.reviewMoveMu` mutex — moves still run
+  asynchronously from the HTTP response/progress-bar's perspective, but only
+  one file move happens at a time, matching the old synchronous loop's
+  behavior. Files modified: `internal/api/handler.go`.
+
+### Added
+- Intelligent duplicate auto-resolution: unambiguous upgrades (higher
+  resolution; HEVC/AV1 over AVC at equal resolution; ≥25% higher bitrate at
+  equal resolution/codec) now replace or discard automatically instead of
+  always going to the Review Queue. Ambiguous cases still route to the
+  Review Queue as before. New config: `intake.duplicate_resolution`
+  (`"manual"`|`"auto"`, default `"auto"`) and
+  `intake.duplicate_bitrate_upgrade_threshold` (default `0.25`). Applied
+  consistently to both the HEVC direct-to-library duplicate check and the
+  post-encode (AVC→HEVC) duplicate check.
+- Review Queue "Replace" (single and bulk) now runs the file move
+  asynchronously with a live byte-progress bar on the card instead of
+  blocking the request and silently swapping the file in place.
+- Files modified: `internal/upgrade/upgrade.go` (new — shared auto-resolution
+  decision logic), `internal/config/config.go` (new config fields),
+  `internal/intake/duplicate.go`, `internal/intake/watcher.go`,
+  `internal/jobs/worker.go` (post-encode duplicate path wired to the same
+  decision logic), `internal/util/file.go` (`SafeMoveWithProgress`),
+  `internal/jobs/job.go`/`queue.go` (`Job.Kind`, `BroadcastMoveEvent`),
+  `internal/api/handler.go` (async `ReplaceReviewEntry`/
+  `BulkReplaceReviewEntries`), `web/templates/index.html` (move-progress bar
+  on Review Queue cards, SSE handling for move events).
+
 ## [1.6.0] - 2026-07-26
 
 ### Added

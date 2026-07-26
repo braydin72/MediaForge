@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -401,7 +402,10 @@ func (n *handlerTestNotifier) Send(_ context.Context, _, _ string) error {
 }
 
 // mockReviewStore is a minimal in-memory ReviewQueueStore for handler tests.
+// mu guards entries since async move jobs (see startReplaceMove) update status
+// from a background goroutine.
 type mockReviewStore struct {
+	mu      sync.Mutex
 	entries map[string]*store.ReviewEntry
 }
 
@@ -414,6 +418,8 @@ func newMockReviewStore(entries ...*store.ReviewEntry) *mockReviewStore {
 }
 
 func (m *mockReviewStore) GetReviewQueue() ([]store.ReviewEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	out := make([]store.ReviewEntry, 0, len(m.entries))
 	for _, e := range m.entries {
 		out = append(out, *e)
@@ -421,28 +427,54 @@ func (m *mockReviewStore) GetReviewQueue() ([]store.ReviewEntry, error) {
 	return out, nil
 }
 func (m *mockReviewStore) GetReviewEntry(id string) (*store.ReviewEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.entries[id], nil
 }
-func (m *mockReviewStore) GetReviewQueueCount() (int, error) { return len(m.entries), nil }
+func (m *mockReviewStore) GetReviewQueueCount() (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.entries), nil
+}
 func (m *mockReviewStore) UpdateReviewQueueStatus(id, status string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if e := m.entries[id]; e != nil {
 		e.Status = status
 	}
 	return nil
 }
 func (m *mockReviewStore) UpdateReviewEntryReason(id, reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if e := m.entries[id]; e != nil {
 		e.Reason = reason
 	}
 	return nil
 }
 func (m *mockReviewStore) BulkUpdateReviewQueueStatus(ids []string, status string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for _, id := range ids {
 		if e := m.entries[id]; e != nil {
 			e.Status = status
 		}
 	}
 	return nil
+}
+
+// waitFor polls cond every 10ms for up to 2s, failing the test if it never becomes true.
+// Used to observe the outcome of the async review-replace move goroutine.
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("condition not met within timeout")
 }
 
 // resolveTestSetup wires a handler with a library dir and a single pending review
@@ -828,25 +860,33 @@ func TestBulkReplaceReviewEntries(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.BulkReplaceReviewEntries(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d body=%s", w.Code, w.Body.String())
 	}
 	var resp struct {
-		Replaced int      `json:"replaced"`
-		Failed   []string `json:"failed"`
+		Replacing []struct {
+			ID    string `json:"id"`
+			JobID string `json:"job_id"`
+		} `json:"replacing"`
+		Failed []string `json:"failed"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Replaced != 1 {
-		t.Errorf("replaced = %d, want 1", resp.Replaced)
+	if len(resp.Replacing) != 1 || resp.Replacing[0].ID != "e1" || resp.Replacing[0].JobID == "" {
+		t.Errorf("replacing = %+v, want one entry for e1 with a job_id", resp.Replacing)
 	}
 	if len(resp.Failed) != 1 || resp.Failed[0] != "e2" {
 		t.Errorf("failed = %v, want [e2]", resp.Failed)
 	}
-	if ms.entries["e1"].Status != "resolved" {
-		t.Errorf("expected e1 resolved, got %s", ms.entries["e1"].Status)
-	}
+
+	// The move happens in a background goroutine — wait for it to land.
+	waitFor(t, func() bool {
+		ms.mu.Lock()
+		defer ms.mu.Unlock()
+		return ms.entries["e1"].Status == "resolved"
+	})
+
 	if ms.entries["e2"].Status != "pending" {
 		t.Errorf("expected e2 left pending (not a duplicate), got %s", ms.entries["e2"].Status)
 	}

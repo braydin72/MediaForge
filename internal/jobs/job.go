@@ -27,6 +27,12 @@ const (
 
 // Job represents a transcoding job
 type Job struct {
+	// Kind distinguishes ephemeral non-transcode job events broadcast over the
+	// same SSE stream from real transcode jobs. Empty (the zero value) means a
+	// normal transcode job; "move" is a Review Queue file-move progress event
+	// (see Queue.BroadcastMoveEvent) — these are never added to the queue's
+	// persisted jobs map, GetAll(), or Stats().
+	Kind        string    `json:"kind,omitempty"`
 	ID          string    `json:"id"`
 	InputPath   string    `json:"input_path"`
 	OutputPath  string    `json:"output_path,omitempty"` // Set after completion

@@ -486,39 +486,37 @@ Work that has started or is queued for the next development sessions:
 
 ## Future Enhancements (Post v1.0)
 
-### Intelligent Duplicate Resolution
+### Intelligent Duplicate Resolution (implemented, minus VMAF)
 
-Currently all duplicates are routed to the Review Queue for manual decision. A future release should add automatic resolution logic before falling back to manual review:
+Implemented in `internal/upgrade` (shared by `internal/intake`'s pre-move duplicate
+check and `internal/jobs`'s post-encode duplicate check, since those two packages
+can't import each other). Config: `intake.duplicate_resolution` (`"manual"` | `"auto"`,
+default `"auto"`) and `intake.duplicate_bitrate_upgrade_threshold` (default `0.25`).
 
-**Auto-resolution rules (in order):**
+**Auto-resolution rules (in order), `upgrade.Decide`:**
 
 1. **Resolution mismatch — keep higher**
    - Incoming higher resolution than existing → auto-replace (log action, no queue entry)
    - Existing higher resolution than incoming → auto-keep (discard incoming, log action, no queue entry)
 
-2. **Same resolution, same codec — VMAF comparison**
-   - Run VMAF on both files against a common reference (or compare encode bitrate as proxy)
-   - Higher VMAF score wins → auto-replace or auto-keep accordingly
-   - If VMAF scores within threshold (e.g. < 1.0 point difference) → send to Review Queue (too close to call automatically)
+2. **Same resolution, different codec tier**
+   - HEVC/AV1 beats AVC/older at equal resolution (lossless upgrade) → auto-replace/auto-keep
+   - Otherwise fall through to rule 3
 
-3. **Same resolution, different codec**
-   - Prefer HEVC over AVC at same resolution (lossless upgrade)
-   - Otherwise → Review Queue
+3. **Same resolution, same codec tier — bitrate comparison**
+   - Incoming bitrate ≥ existing × (1 + threshold) → auto-replace
+   - Existing bitrate ≥ incoming × (1 + threshold) → auto-keep
+   - Within threshold → Review Queue (too close to call automatically)
 
 4. **Ambiguous / inconclusive** → Review Queue with full context
 
-**Review Queue entry for unresolved duplicates** (already implemented):
-- Side-by-side panel: codec, resolution, bitrate, file size for incoming vs existing
-- VMAF scores if comparison was run (future)
-- **Replace** button — overwrites existing with incoming
-- **Keep Existing** button — discards incoming, removes entry
+**Not yet implemented:** VMAF-based comparison as a tiebreaker when resolution/codec/bitrate
+are all inconclusive — still deferred; those cases fall through to the Review Queue today.
 
-**Config additions (future):**
-```yaml
-intake:
-  duplicate_resolution: "manual"   # "manual" | "auto" | "prefer_higher_res"
-  duplicate_vmaf_threshold: 1.0    # auto-keep if VMAF difference below this
-```
+**Review Queue entry for unresolved duplicates:**
+- Side-by-side panel: codec, resolution, bitrate, file size for incoming vs existing
+- **Replace** button — overwrites existing with incoming (async move job with a progress bar; see `internal/api`'s `startReplaceMove`)
+- **Keep Existing** button — discards incoming, removes entry
 
 ### Other Post-v1.0 Candidates
 

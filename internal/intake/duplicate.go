@@ -8,6 +8,7 @@ import (
 
 	"github.com/braydin72/mediaforge/internal/ffmpeg"
 	"github.com/braydin72/mediaforge/internal/logger"
+	"github.com/braydin72/mediaforge/internal/upgrade"
 )
 
 // DuplicateFileInfo holds display metadata for one side of a duplicate comparison.
@@ -32,22 +33,46 @@ type DuplicateContext struct {
 type duplicateDecision int
 
 const (
-	dupNone       duplicateDecision = iota // destination does not exist
-	dupSendReview                          // send to Review Queue for user decision
+	dupNone         duplicateDecision = iota // destination does not exist
+	dupSendReview                            // send to Review Queue for user decision
+	dupAutoReplace                           // incoming is an unambiguous upgrade — replace existing
+	dupAutoKeep                              // existing is an unambiguous upgrade — discard incoming
 )
 
 // dupResult is the output of checkDuplicate.
 type dupResult struct {
 	decision duplicateDecision
-	reason   string           // human-readable; only set for dupSendReview
+	reason   string            // human-readable; set for dupSendReview, dupAutoReplace, dupAutoKeep
 	ctx      *DuplicateContext // nil for dupNone
 }
 
+// decideDuplicateAction compares an incoming file against the existing file at
+// the destination and decides whether the upgrade is unambiguous enough to
+// resolve automatically, per the shared internal/upgrade rules.
+func decideDuplicateAction(incoming, existing DuplicateFileInfo, bitrateThreshold float64) (duplicateDecision, string) {
+	decision, reason := upgrade.Decide(
+		upgrade.FileInfo{Codec: incoming.Codec, Width: incoming.Width, Height: incoming.Height, BitrateBps: incoming.BitrateBps},
+		upgrade.FileInfo{Codec: existing.Codec, Width: existing.Width, Height: existing.Height, BitrateBps: existing.BitrateBps},
+		bitrateThreshold,
+	)
+	switch decision {
+	case upgrade.Replace:
+		return dupAutoReplace, reason
+	case upgrade.Keep:
+		return dupAutoKeep, reason
+	default:
+		return dupSendReview, reason
+	}
+}
+
 // checkDuplicate returns dupNone if destPath does not exist.
-// If it does exist, always returns dupSendReview — the user must decide whether
-// to replace or keep the existing file. No automatic overwrite ever occurs.
+// If it does exist and duplicateResolution is "manual", it always returns
+// dupSendReview — the user must decide whether to replace or keep the
+// existing file. If duplicateResolution is "auto" (the default), unambiguous
+// upgrades are resolved automatically (dupAutoReplace/dupAutoKeep) per
+// decideDuplicateAction; only ambiguous cases fall back to dupSendReview.
 // incomingProbe must be non-nil (already-completed probe of the incoming file).
-func checkDuplicate(ctx context.Context, prober *ffmpeg.Prober, incomingPath, destPath string, incomingProbe *ffmpeg.ProbeResult) dupResult {
+func checkDuplicate(ctx context.Context, prober *ffmpeg.Prober, incomingPath, destPath string, incomingProbe *ffmpeg.ProbeResult, duplicateResolution string, bitrateThreshold float64) dupResult {
 	existingInfo, statErr := os.Stat(destPath)
 	if os.IsNotExist(statErr) {
 		return dupResult{decision: dupNone}
@@ -71,13 +96,21 @@ func checkDuplicate(ctx context.Context, prober *ffmpeg.Prober, incomingPath, de
 		logger.Warn("Intake: duplicate — ffprobe failed on existing file", "path", destPath, "error", err)
 	}
 
+	dupCtx := &DuplicateContext{
+		Incoming: incoming,
+		Existing: existing,
+	}
+
+	if duplicateResolution != "manual" {
+		if decision, reason := decideDuplicateAction(incoming, existing, bitrateThreshold); decision != dupSendReview {
+			return dupResult{decision: decision, reason: reason, ctx: dupCtx}
+		}
+	}
+
 	return dupResult{
 		decision: dupSendReview,
 		reason:   fmt.Sprintf("duplicate: file already exists at destination %s", destPath),
-		ctx: &DuplicateContext{
-			Incoming: incoming,
-			Existing: existing,
-		},
+		ctx:      dupCtx,
 	}
 }
 

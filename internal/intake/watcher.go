@@ -225,6 +225,21 @@ func (w *Watcher) ProcessFile(ctx context.Context, path string) {
 // staging/encode queue, anything else to the Review Queue.
 func (w *Watcher) runPipeline(ctx context.Context, path string) {
 	filename := filepath.Base(path)
+
+	// w.known is in-memory only and resets on every process restart, so a
+	// restart can make the next scan treat a file still sitting in the watch
+	// folder as brand new — even though it already has a pending Review Queue
+	// entry a human hasn't acted on yet. Reprocessing it here would, at best,
+	// duplicate work and, at worst (auto-resolution enabled), silently
+	// auto-replace/auto-keep a file whose fate a human is already deciding.
+	// Skip entirely and leave both the file and the existing entry untouched.
+	if pending, err := w.st.HasPendingReviewEntry(path); err != nil {
+		logger.Warn("Intake: failed to check for an existing pending review entry", "file", filename, "error", err)
+	} else if pending {
+		logger.Info("Intake: skipping — file already has a pending Review Queue entry awaiting manual decision", "file", filename)
+		return
+	}
+
 	logger.Info("Intake: file is stable, running codec detection", "file", filename)
 
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
@@ -493,15 +508,23 @@ func (w *Watcher) moveHEVCToLibrary(ctx context.Context, path string, probe *ffm
 	}
 
 	// Check for a pre-existing file at the destination before moving.
-	dupRes := checkDuplicate(ctx, w.prober, path, libraryPath, probe)
-	if dupRes.decision == dupSendReview {
+	dupRes := checkDuplicate(ctx, w.prober, path, libraryPath, probe, w.cfg.DuplicateResolution, w.cfg.DuplicateBitrateUpgradeThreshold)
+	switch dupRes.decision {
+	case dupSendReview:
 		logger.Warn("Intake: HEVC duplicate at destination, queuing for review",
 			"file", filename, "destination", libraryPath)
 		w.sendDuplicateToReviewQueue(path, dupRes.reason, probe, dupRes.ctx, correctedName)
 		return
+	case dupAutoKeep:
+		logger.Info("Intake: HEVC duplicate auto-resolved, keeping existing library file",
+			"file", filename, "destination", libraryPath, "reason", dupRes.reason)
+		if err := os.Remove(path); err != nil {
+			logger.Warn("Intake: failed to remove incoming file after auto-keep", "file", filename, "error", err)
+		}
+		return
 	}
 
-	logger.Info("Intake: HEVC moving to library", "file", filename, "destination", libraryPath)
+	logger.Info("Intake: HEVC moving to library", "file", filename, "destination", libraryPath, "reason", dupRes.reason)
 	if err := util.SafeMove(path, libraryPath); err != nil {
 		reason := fmt.Sprintf("library move failed: %v", err)
 		logger.Warn("Intake: HEVC move error", "file", filename, "error", err)
