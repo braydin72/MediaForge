@@ -54,6 +54,9 @@ func registerAPIRoutes(mux *http.ServeMux, h *Handler) {
 	mux.HandleFunc("PUT /api/review/{id}/discard", h.DiscardReviewEntry)
 	mux.HandleFunc("PUT /api/review/{id}/replace", h.ReplaceReviewEntry)
 	mux.HandleFunc("PUT /api/review/{id}/resubmit", h.ResubmitReviewEntry)
+	mux.HandleFunc("PUT /api/review/bulk/discard", h.BulkDiscardReviewEntries)
+	mux.HandleFunc("PUT /api/review/bulk/replace", h.BulkReplaceReviewEntries)
+	mux.HandleFunc("PUT /api/review/bulk/resubmit", h.BulkResubmitReviewEntries)
 }
 
 // NewRouter creates a new HTTP router with all API endpoints

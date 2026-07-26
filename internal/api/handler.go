@@ -1328,24 +1328,72 @@ func (h *Handler) DiscardReviewEntry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if entry != nil && entry.DuplicateInfo != "" {
-		var dupCtx intake.DuplicateContext
-		if err := json.Unmarshal([]byte(entry.DuplicateInfo), &dupCtx); err == nil && dupCtx.Incoming.Path != "" {
-			if err := os.Remove(dupCtx.Incoming.Path); err != nil && !os.IsNotExist(err) {
-				logger.Warn("Review discard: failed to delete incoming duplicate file",
-					"path", dupCtx.Incoming.Path, "error", err)
-			} else {
-				logger.Info("Review discard: deleted incoming file",
-					"path", dupCtx.Incoming.Path, "reason", "duplicate: user selected keep existing")
-			}
-		}
-	}
+	h.discardReviewEntryFile(entry)
 
 	if err := h.reviewStore.UpdateReviewQueueStatus(id, "discarded"); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "discarded"})
+}
+
+// discardReviewEntryFile deletes the incoming file for a duplicate-conflict
+// entry (the "Keep Existing" side effect), so it does not linger in the
+// intake/staging directory or reappear on restart. No-op for every other
+// category. Shared by DiscardReviewEntry and BulkDiscardReviewEntries.
+func (h *Handler) discardReviewEntryFile(entry *store.ReviewEntry) {
+	if entry == nil || entry.DuplicateInfo == "" {
+		return
+	}
+	var dupCtx intake.DuplicateContext
+	if err := json.Unmarshal([]byte(entry.DuplicateInfo), &dupCtx); err != nil || dupCtx.Incoming.Path == "" {
+		return
+	}
+	if err := os.Remove(dupCtx.Incoming.Path); err != nil && !os.IsNotExist(err) {
+		logger.Warn("Review discard: failed to delete incoming duplicate file",
+			"path", dupCtx.Incoming.Path, "error", err)
+	} else {
+		logger.Info("Review discard: deleted incoming file",
+			"path", dupCtx.Incoming.Path, "reason", "duplicate: user selected keep existing")
+	}
+}
+
+// BulkDiscardReviewEntries handles PUT /api/review/bulk/discard
+// Body: {"ids": ["id1", "id2", ...]}
+func (h *Handler) BulkDiscardReviewEntries(w http.ResponseWriter, r *http.Request) {
+	if h.reviewStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "review store not configured")
+		return
+	}
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "ids required")
+		return
+	}
+
+	var succeeded []string
+	var failed []string
+	for _, id := range req.IDs {
+		entry, err := h.reviewStore.GetReviewEntry(id)
+		if err != nil || entry == nil {
+			failed = append(failed, id)
+			continue
+		}
+		h.discardReviewEntryFile(entry)
+		succeeded = append(succeeded, id)
+	}
+
+	if err := h.reviewStore.BulkUpdateReviewQueueStatus(succeeded, "discarded"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"discarded": len(succeeded), "failed": failed})
 }
 
 // ReplaceReviewEntry handles PUT /api/review/{id}/replace
@@ -1371,23 +1419,9 @@ func (h *Handler) ReplaceReviewEntry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "review entry not found")
 		return
 	}
-	if entry.DuplicateInfo == "" {
-		writeError(w, http.StatusBadRequest, "entry is not a duplicate conflict")
-		return
-	}
 
-	var dupCtx intake.DuplicateContext
-	if err := json.Unmarshal([]byte(entry.DuplicateInfo), &dupCtx); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to parse duplicate info")
-		return
-	}
-	if dupCtx.Incoming.Path == "" || dupCtx.Existing.Path == "" {
-		writeError(w, http.StatusBadRequest, "duplicate info is incomplete")
-		return
-	}
-
-	if err := util.SafeMove(dupCtx.Incoming.Path, dupCtx.Existing.Path); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("replace failed: %v", err))
+	if err := h.replaceReviewEntryFile(entry); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -1396,8 +1430,70 @@ func (h *Handler) ReplaceReviewEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Info("Review: replaced existing file with incoming", "dest", dupCtx.Existing.Path)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "replaced"})
+}
+
+// replaceReviewEntryFile moves a duplicate-conflict entry's incoming file
+// over the existing library file. Only valid for entries with DuplicateInfo
+// set. Shared by ReplaceReviewEntry and BulkReplaceReviewEntries.
+func (h *Handler) replaceReviewEntryFile(entry *store.ReviewEntry) error {
+	if entry.DuplicateInfo == "" {
+		return fmt.Errorf("entry is not a duplicate conflict")
+	}
+	var dupCtx intake.DuplicateContext
+	if err := json.Unmarshal([]byte(entry.DuplicateInfo), &dupCtx); err != nil {
+		return fmt.Errorf("failed to parse duplicate info")
+	}
+	if dupCtx.Incoming.Path == "" || dupCtx.Existing.Path == "" {
+		return fmt.Errorf("duplicate info is incomplete")
+	}
+	if err := util.SafeMove(dupCtx.Incoming.Path, dupCtx.Existing.Path); err != nil {
+		return fmt.Errorf("replace failed: %w", err)
+	}
+	logger.Info("Review: replaced existing file with incoming", "dest", dupCtx.Existing.Path)
+	return nil
+}
+
+// BulkReplaceReviewEntries handles PUT /api/review/bulk/replace
+// Body: {"ids": ["id1", "id2", ...]}
+func (h *Handler) BulkReplaceReviewEntries(w http.ResponseWriter, r *http.Request) {
+	if h.reviewStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "review store not configured")
+		return
+	}
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "ids required")
+		return
+	}
+
+	var succeeded []string
+	var failed []string
+	for _, id := range req.IDs {
+		entry, err := h.reviewStore.GetReviewEntry(id)
+		if err != nil || entry == nil {
+			failed = append(failed, id)
+			continue
+		}
+		if err := h.replaceReviewEntryFile(entry); err != nil {
+			logger.Warn("Bulk replace: skipping entry", "entry_id", id, "error", err)
+			failed = append(failed, id)
+			continue
+		}
+		succeeded = append(succeeded, id)
+	}
+
+	if err := h.reviewStore.BulkUpdateReviewQueueStatus(succeeded, "resolved"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"replaced": len(succeeded), "failed": failed})
 }
 
 // ResubmitReviewEntry handles PUT /api/review/{id}/resubmit
@@ -1429,38 +1525,15 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "original_path required")
 		return
 	}
-	if req.PresetID == "" {
-		req.PresetID = "compress-hevc"
-	}
 
-	preset := ffmpeg.GetPreset(req.PresetID)
-	if preset == nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown preset: %s", req.PresetID))
+	preset, presetID, errMsg := resolveResubmitPreset(req.PresetID)
+	if errMsg != "" {
+		writeError(w, http.StatusBadRequest, errMsg)
 		return
 	}
-
-	// Validate optional custom-encode overrides (Issue #4: re-encode with custom settings).
-	if req.EncodeOutputFormat != "" {
-		switch req.EncodeOutputFormat {
-		case "mkv", "mp4", "preserve":
-		default:
-			writeError(w, http.StatusBadRequest, "encode_output_format must be 'mkv', 'mp4', or 'preserve'")
-			return
-		}
-	}
-	if req.SmartShrinkQuality != "" && !jobs.IsValidSmartShrinkQuality(req.SmartShrinkQuality) {
-		writeError(w, http.StatusBadRequest, "smartshrink_quality must be 'acceptable', 'good', or 'excellent'")
+	if errMsg := validateResubmitOverrides(preset, req.EncodeOutputFormat, req.SmartShrinkQuality, req.EncodeQualityCRF); errMsg != "" {
+		writeError(w, http.StatusBadRequest, errMsg)
 		return
-	}
-	if req.EncodeQualityCRF != 0 {
-		if preset.IsSmartShrink {
-			writeError(w, http.StatusBadRequest, "encode_quality_crf is not applicable to SmartShrink presets")
-			return
-		}
-		if msg := validateQuality(req.EncodeQualityCRF, string(preset.Codec)); msg != "" {
-			writeError(w, http.StatusBadRequest, msg)
-			return
-		}
 	}
 
 	// Fetch the entry so we can rebuild its intended library destination below —
@@ -1487,6 +1560,56 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.enqueueResubmit(id, entry, req.OriginalPath, presetID, req.EncodeSpeed, req.EncodeOutputFormat, req.SmartShrinkQuality, req.EncodeQualityCRF)
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "resubmitted"})
+}
+
+// resolveResubmitPreset resolves a preset ID, defaulting to compress-hevc
+// when empty. Returns a non-empty errMsg if the preset is unknown.
+func resolveResubmitPreset(presetID string) (preset *ffmpeg.Preset, resolvedID, errMsg string) {
+	if presetID == "" {
+		presetID = "compress-hevc"
+	}
+	preset = ffmpeg.GetPreset(presetID)
+	if preset == nil {
+		return nil, presetID, fmt.Sprintf("unknown preset: %s", presetID)
+	}
+	return preset, presetID, ""
+}
+
+// validateResubmitOverrides validates the optional custom-encode override
+// fields (Issue #4: re-encode with custom settings). Returns a non-empty
+// errMsg on the first invalid field.
+func validateResubmitOverrides(preset *ffmpeg.Preset, encodeOutputFormat, smartShrinkQuality string, encodeQualityCRF int) string {
+	if encodeOutputFormat != "" {
+		switch encodeOutputFormat {
+		case "mkv", "mp4", "preserve":
+		default:
+			return "encode_output_format must be 'mkv', 'mp4', or 'preserve'"
+		}
+	}
+	if smartShrinkQuality != "" && !jobs.IsValidSmartShrinkQuality(smartShrinkQuality) {
+		return "smartshrink_quality must be 'acceptable', 'good', or 'excellent'"
+	}
+	if encodeQualityCRF != 0 {
+		if preset.IsSmartShrink {
+			return "encode_quality_crf is not applicable to SmartShrink presets"
+		}
+		if msg := validateQuality(encodeQualityCRF, string(preset.Codec)); msg != "" {
+			return msg
+		}
+	}
+	return ""
+}
+
+// enqueueResubmit probes originalPath and enqueues a re-encode job for a
+// resolved review entry, applying custom-encode overrides and rebuilding the
+// entry's library destination so the worker's post-encode move step fires on
+// completion. Runs asynchronously; on probe failure the entry is put back to
+// pending with an explanatory reason rather than left silently resolved with
+// nothing enqueued. Shared by ResubmitReviewEntry and BulkResubmitReviewEntries.
+func (h *Handler) enqueueResubmit(id string, entry *store.ReviewEntry, originalPath, presetID, encodeSpeed, encodeOutputFormat, smartShrinkQuality string, encodeQualityCRF int) {
 	h.workerPool.Unpause()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -1495,22 +1618,22 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 		// OriginalPath for encode-failure entries points at the staging/transcode
 		// working directory, which normally sits outside the configured media
 		// browse root and would be silently filtered out by GetVideoFilesWithProgress.
-		probe, err := h.browser.ProbeFile(ctx, req.OriginalPath)
+		probe, err := h.browser.ProbeFile(ctx, originalPath)
 		if err != nil {
-			reason := fmt.Sprintf("resubmit failed: %v (%s)", err, req.OriginalPath)
-			logger.Warn("Review resubmit: probe failed", "path", req.OriginalPath, "error", err)
+			reason := fmt.Sprintf("resubmit failed: %v (%s)", err, originalPath)
+			logger.Warn("Review resubmit: probe failed", "path", originalPath, "error", err)
 			// Don't leave the entry silently resolved with nothing enqueued —
 			// put it back in the queue with a reason the user can act on.
 			_ = h.reviewStore.UpdateReviewEntryReason(id, reason)
 			_ = h.reviewStore.UpdateReviewQueueStatus(id, "pending")
 			return
 		}
-		addedJobs, _ := h.queue.AddMultiple([]*ffmpeg.ProbeResult{probe}, req.PresetID, req.SmartShrinkQuality)
+		addedJobs, _ := h.queue.AddMultiple([]*ffmpeg.ProbeResult{probe}, presetID, smartShrinkQuality)
 
 		// Apply per-job custom-encode overrides (Issue #4).
-		if req.EncodeSpeed != "" || req.EncodeOutputFormat != "" || req.EncodeQualityCRF != 0 {
+		if encodeSpeed != "" || encodeOutputFormat != "" || encodeQualityCRF != 0 {
 			for _, job := range addedJobs {
-				h.queue.SetJobOverrides(job.ID, req.EncodeSpeed, req.EncodeOutputFormat, req.EncodeQualityCRF)
+				h.queue.SetJobOverrides(job.ID, encodeSpeed, encodeOutputFormat, encodeQualityCRF)
 			}
 		}
 
@@ -1526,10 +1649,10 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 			parsed.EpisodeTitle = parsed.ParsedEpisodeTitle
 		}
 		cfgFmt := h.cfg.OutputFormat
-		if req.EncodeOutputFormat != "" {
-			cfgFmt = req.EncodeOutputFormat
+		if encodeOutputFormat != "" {
+			cfgFmt = encodeOutputFormat
 		}
-		ext := ffmpeg.ResolveOutputFormat(req.OriginalPath, cfgFmt)
+		ext := ffmpeg.ResolveOutputFormat(originalPath, cfgFmt)
 		libraryPath := intake.ResolveLibraryPath(&h.cfg.Intake, &parsed, "."+ext)
 		if libraryPath == "" {
 			logger.Warn("Review resubmit: could not rebuild library path, file will not auto-move on completion",
@@ -1540,8 +1663,68 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 			h.queue.SetLibraryPath(job.ID, libraryPath)
 		}
 	}()
+}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "resubmitted"})
+// BulkResubmitReviewEntries handles PUT /api/review/bulk/resubmit
+// Body: {"ids": [...], "preset_id", "encode_speed", "encode_output_format", "smartshrink_quality", "encode_quality_crf"}
+// The encode settings are shared across every selected entry; each entry's own
+// OriginalPath (not a client-supplied path) is used for the probe.
+func (h *Handler) BulkResubmitReviewEntries(w http.ResponseWriter, r *http.Request) {
+	if h.reviewStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "review store not configured")
+		return
+	}
+	var req struct {
+		IDs                []string `json:"ids"`
+		PresetID           string   `json:"preset_id"`
+		EncodeSpeed        string   `json:"encode_speed"`
+		EncodeOutputFormat string   `json:"encode_output_format"`
+		SmartShrinkQuality string   `json:"smartshrink_quality"`
+		EncodeQualityCRF   int      `json:"encode_quality_crf"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "ids required")
+		return
+	}
+
+	preset, presetID, errMsg := resolveResubmitPreset(req.PresetID)
+	if errMsg != "" {
+		writeError(w, http.StatusBadRequest, errMsg)
+		return
+	}
+	if errMsg := validateResubmitOverrides(preset, req.EncodeOutputFormat, req.SmartShrinkQuality, req.EncodeQualityCRF); errMsg != "" {
+		writeError(w, http.StatusBadRequest, errMsg)
+		return
+	}
+
+	var succeededEntries []*store.ReviewEntry
+	var failed []string
+	for _, id := range req.IDs {
+		entry, err := h.reviewStore.GetReviewEntry(id)
+		if err != nil || entry == nil || !isEncodeFailureCategory(entry.Category) {
+			failed = append(failed, id)
+			continue
+		}
+		succeededEntries = append(succeededEntries, entry)
+	}
+
+	succeededIDs := make([]string, len(succeededEntries))
+	for i, e := range succeededEntries {
+		succeededIDs[i] = e.ID
+	}
+	if err := h.reviewStore.BulkUpdateReviewQueueStatus(succeededIDs, "resolved"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, entry := range succeededEntries {
+		h.enqueueResubmit(entry.ID, entry, entry.OriginalPath, presetID, req.EncodeSpeed, req.EncodeOutputFormat, req.SmartShrinkQuality, req.EncodeQualityCRF)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"resubmitted": len(succeededEntries), "failed": failed})
 }
 
 // SearchReviewEntry handles GET /api/review/{id}/search
