@@ -1,6 +1,72 @@
 CURRENT STATE NOTE
 
-=== Latest session (cont.): two more reconciliation bugs found live, after v1.5.0 shipped ===
+=== Latest session: Review Queue category + bulk actions (closes roadmap item A) ===
+
+Implemented the "Review Queue: context-aware actions + bulk actions beyond
+Discard" item from COMPREHENSIVE_STATUS_AND_ROADMAP.md (planned 2026-07-25,
+this session implemented it). Full plan, decisions, and rationale are in
+the session's plan file; summary:
+
+- New `ReviewEntryCategory` (duplicate, metadata_failure, encode_failure,
+  unresolved_multipart, system_failure) added to `ReviewEntry`
+  (internal/store/sqlite.go), schema bumped to v11 with a migration for
+  existing installs (pre-upgrade rows get category="", treated as the
+  metadata_failure-equivalent fallback everywhere it's read). Set
+  explicitly at all ~20 send-to-review call sites across
+  internal/intake/watcher.go and internal/jobs/worker.go (via
+  internal/jobs/queue.go's SendToReviewQueue/SendDuplicateToReviewQueue,
+  which gained a trailing category string param).
+- internal/api/handler.go: ResolveReviewEntry/ResubmitReviewEntry now
+  reject entries whose category doesn't support the action — this is what
+  fixes the real dead-button bug (Pick Selected rendered, and did nothing,
+  on encode-failure entries like "SmartShrink: no viable encode").
+- New bulk endpoints PUT /api/review/bulk/{discard,replace,resubmit},
+  each taking {"ids":[...]} (resubmit also takes the shared encode
+  overrides). Per-item error collection — one bad/stale id never aborts
+  the whole batch. Refactored shared per-entry logic out of the existing
+  single-item handlers (discardReviewEntryFile, replaceReviewEntryFile,
+  enqueueResubmit, resolveResubmitPreset, validateResubmitOverrides) so
+  single and bulk share one implementation. New
+  BulkUpdateReviewQueueStatus store method replaces N sequential updates.
+- web/templates/index.html: reviewCardHTML's actionsHTML now switches on
+  category instead of the old duplicate/non-duplicate binary check; added
+  a category badge per card. Bulk action bar shows Discard always,
+  Replace only when the whole selection is duplicates, Re-encode only
+  when the whole selection is encode failures (mixed selections hide the
+  category-specific buttons). reviewDiscardSelected() now calls the bulk
+  endpoint instead of looping single-item fetches; new
+  reviewReplaceSelected() and a bulk re-encode settings panel
+  (reviewBulkResubmitSelected) round out the three actions.
+
+Verified: go build/vet/test all pass (full suite, including new store/
+jobs/intake/api tests for category assignment, bulk endpoints, and
+category-gating rejections). Also verified LIVE: built the binary,
+seeded a real SQLite review_queue with one entry per category (via a
+temporary cmd/seedtest/main.go, deleted after use — not committed),
+launched the server, and confirmed via the API + a Node harness running
+the actual page JS that every category renders its correct button set
+and badge. Exercised all three bulk endpoints against the running
+server: bulk resubmit correctly reverted entries to pending with an
+explanatory reason when ffprobe failed on placeholder test files
+(confirms the no-silent-failures fallback works), bulk replace moved a
+real file over an existing one and removed the incoming duplicate, bulk
+discard removed two more. A mixed-category bulk replace call correctly
+reported both ids as failed rather than silently no-op'ing.
+
+Known, deliberate limitation (documented in code, not fixed this
+session): reviewGetSelected()/reviewSelectAll() only consider the
+currently rendered page — no cross-page bulk selection. UI shows
+"(this page only)" on the select-all label when there's more than one
+page. Fixing this is separate, larger scope (would need either a
+server-side "select all matching filter" id list, or persisting
+selection across loadReviewQueue() page reloads).
+
+Nothing else outstanding from this session — all 5 planned phases
+(schema/store, write-path threading, single-item gating fix, bulk
+backend, bulk frontend) completed and committed separately, each with
+passing tests before moving to the next phase.
+
+=== Prior session (cont.): two more reconciliation bugs found live, after v1.5.0 shipped ===
 
 Direct continuation of the same session. User built/deployed/tested v1.5.0
 live (combined multi-part episode detection) and ran a real Stargate SG-1

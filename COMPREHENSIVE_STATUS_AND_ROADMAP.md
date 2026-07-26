@@ -71,7 +71,9 @@ final):
   encode-failure entry selected together) — likely: only show actions valid
   for every selected entry's category, hide/disable the rest.
 
-**Status:** Not started — plan only.
+**Status:** Done — implemented 2026-07-26. See CURRENT_STATE.md /
+CHANGELOG.md `[Unreleased]` for details (Category field, context-aware
+actions, bulk Replace/Re-encode Custom endpoints).
 
 ### B. Pipeline/queue control buttons — Pause/Resume, Stop Pipeline/Start, Stop Everything/Restart
 
