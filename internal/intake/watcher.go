@@ -234,7 +234,7 @@ func (w *Watcher) runPipeline(ctx context.Context, path string) {
 	if err != nil {
 		reason := fmt.Sprintf("codec detection failed: %s", err.Error())
 		logger.Warn("Intake: ffprobe error", "file", filename, "error", err)
-		w.sendToReviewQueue(path, reason, nil, "")
+		w.sendToReviewQueue(path, reason, nil, "", store.ReviewCategorySystemFailure)
 		return
 	}
 
@@ -259,7 +259,7 @@ func (w *Watcher) runPipeline(ctx context.Context, path string) {
 			reason = fmt.Sprintf("unrecognized codec: %s", probe.VideoCodec)
 		}
 		logger.Warn("Intake: unrecognized codec, queuing for review", "file", filename, "codec", probe.VideoCodec)
-		w.sendToReviewQueue(path, reason, probe, "")
+		w.sendToReviewQueue(path, reason, probe, "", store.ReviewCategorySystemFailure)
 	}
 }
 
@@ -275,7 +275,7 @@ func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpe
 	}
 
 	if w.cfg.StagingFolder == "" {
-		w.sendToReviewQueue(path, "staging folder not configured", probe, "")
+		w.sendToReviewQueue(path, "staging folder not configured", probe, "", store.ReviewCategorySystemFailure)
 		return
 	}
 
@@ -310,7 +310,7 @@ func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpe
 	if err := util.SafeMove(path, stagingPath); err != nil {
 		reason := fmt.Sprintf("staging move failed: %v", err)
 		logger.Warn("Intake: failed to move AVC file to staging", "file", filename, "error", err)
-		w.sendToReviewQueue(path, reason, probe, correctedName)
+		w.sendToReviewQueue(path, reason, probe, correctedName, store.ReviewCategorySystemFailure)
 		return
 	}
 
@@ -327,7 +327,7 @@ func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpe
 	if err != nil {
 		reason := fmt.Sprintf("failed to queue encode job: %v", err)
 		logger.Warn("Intake: failed to enqueue AVC file", "file", filename, "error", err)
-		w.sendToReviewQueue(stagingPath, reason, probe, correctedName)
+		w.sendToReviewQueue(stagingPath, reason, probe, correctedName, store.ReviewCategorySystemFailure)
 		return
 	}
 
@@ -387,14 +387,14 @@ func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *Parse
 	if err != nil {
 		reason := "no metadata match found: " + err.Error()
 		logger.Warn("Intake: metadata lookup failed", "file", filename, "error", err)
-		w.sendToReviewQueue(path, reason, probe, "")
+		w.sendToReviewQueue(path, reason, probe, "", store.ReviewCategoryMetadataFailure)
 		return nil, false
 	}
 
 	if result.MultiPartUnconfirmed {
 		reason := fmt.Sprintf("possible combined multi-part episode (%q) — could not confirm via duration, needs manual review", parsed.ParsedEpisodeTitle)
 		logger.Warn("Intake: combined multi-part episode unconfirmed", "file", filename, "reason", reason)
-		w.sendToReviewQueue(path, reason, probe, "")
+		w.sendToReviewQueue(path, reason, probe, "", store.ReviewCategoryUnresolvedMultipart)
 		return nil, false
 	}
 
@@ -402,14 +402,14 @@ func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *Parse
 		reason := fmt.Sprintf("episode title in filename (%q) does not match TVDB's episode at S%02dE%02d (%q), and no confident alternate episode was found — needs manual review",
 			parsed.ParsedEpisodeTitle, result.Season, result.Episode, result.EpisodeTitle)
 		logger.Warn("Intake: unresolved episode title mismatch", "file", filename, "reason", reason)
-		w.sendToReviewQueue(path, reason, probe, "")
+		w.sendToReviewQueue(path, reason, probe, "", store.ReviewCategoryUnresolvedMultipart)
 		return nil, false
 	}
 
 	if result.Confidence < reviewThreshold {
 		reason := fmt.Sprintf("low confidence match (%.0f%%) for %q", result.Confidence*100, result.Title)
 		logger.Warn("Intake: confidence below review threshold", "file", filename, "confidence", result.Confidence)
-		w.sendToReviewQueue(path, reason, probe, "")
+		w.sendToReviewQueue(path, reason, probe, "", store.ReviewCategoryMetadataFailure)
 		return nil, false
 	}
 
@@ -417,7 +417,7 @@ func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *Parse
 		// Confidence is between review_threshold and confidence_threshold — try LLM.
 		if w.LLMClient == nil {
 			reason := fmt.Sprintf("confidence %.0f%% requires LLM verification — LLM not configured", result.Confidence*100)
-			w.sendToReviewQueue(path, reason, probe, "")
+			w.sendToReviewQueue(path, reason, probe, "", store.ReviewCategoryMetadataFailure)
 			return nil, false
 		}
 		logger.Info("Intake: querying LLM for verification",
@@ -426,13 +426,13 @@ func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *Parse
 		if llmErr != nil {
 			reason := fmt.Sprintf("LLM verification failed: %v", llmErr)
 			logger.Warn("Intake: LLM verification error", "file", filename, "error", llmErr)
-			w.sendToReviewQueue(path, reason, probe, "")
+			w.sendToReviewQueue(path, reason, probe, "", store.ReviewCategoryMetadataFailure)
 			return nil, false
 		}
 		if llmResult.Disabled {
 			reason := fmt.Sprintf("confidence %.0f%% requires LLM verification — LLM not configured", result.Confidence*100)
 			logger.Warn("Intake: LLM not configured, cannot verify", "file", filename)
-			w.sendToReviewQueue(path, reason, probe, "")
+			w.sendToReviewQueue(path, reason, probe, "", store.ReviewCategoryMetadataFailure)
 			return nil, false
 		}
 		logger.Info("Intake: LLM verification result",
@@ -441,7 +441,7 @@ func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *Parse
 		if llmResult.CandidateID == "none" || llmResult.Confidence < reviewThreshold {
 			reason := fmt.Sprintf("LLM verification rejected match: %s", llmResult.Reasoning)
 			logger.Warn("Intake: LLM rejected match", "file", filename)
-			w.sendToReviewQueue(path, reason, probe, "")
+			w.sendToReviewQueue(path, reason, probe, "", store.ReviewCategoryMetadataFailure)
 			return nil, false
 		}
 		result.Confidence = llmResult.Confidence
@@ -488,7 +488,7 @@ func (w *Watcher) moveHEVCToLibrary(ctx context.Context, path string, probe *ffm
 	if libraryPath == "" {
 		reason := "could not resolve library destination path from metadata"
 		logger.Warn("Intake: HEVC library path resolution failed", "file", filename)
-		w.sendToReviewQueue(path, reason, probe, correctedName)
+		w.sendToReviewQueue(path, reason, probe, correctedName, store.ReviewCategorySystemFailure)
 		return
 	}
 
@@ -505,7 +505,7 @@ func (w *Watcher) moveHEVCToLibrary(ctx context.Context, path string, probe *ffm
 	if err := util.SafeMove(path, libraryPath); err != nil {
 		reason := fmt.Sprintf("library move failed: %v", err)
 		logger.Warn("Intake: HEVC move error", "file", filename, "error", err)
-		w.sendToReviewQueue(path, reason, probe, correctedName)
+		w.sendToReviewQueue(path, reason, probe, correctedName, store.ReviewCategorySystemFailure)
 		return
 	}
 	logger.Info("Intake: HEVC successfully moved to library", "file", filename, "destination", libraryPath)
@@ -574,7 +574,7 @@ func (w *Watcher) waitForStability(ctx context.Context, path string) error {
 // ResolveReviewEntry/ResubmitReviewEntry later re-parse via ParseFilename, so a
 // caller that already identified corrected title/year/season/episode metadata
 // before routing to review must pass it here or that correction is lost.
-func (w *Watcher) sendToReviewQueue(path, reason string, probe *ffmpeg.ProbeResult, correctedFilename string) {
+func (w *Watcher) sendToReviewQueue(path, reason string, probe *ffmpeg.ProbeResult, correctedFilename string, category store.ReviewEntryCategory) {
 	var ffprobeJSON string
 	if probe != nil {
 		if b, err := json.Marshal(probe); err == nil {
@@ -593,6 +593,7 @@ func (w *Watcher) sendToReviewQueue(path, reason string, probe *ffmpeg.ProbeResu
 		Filename:     filename,
 		Reason:       reason,
 		FFProbeInfo:  ffprobeJSON,
+		Category:     string(category),
 		Status:       "pending",
 		CreatedAt:    time.Now().UTC(),
 	}
@@ -630,6 +631,7 @@ func (w *Watcher) sendDuplicateToReviewQueue(path, reason string, probe *ffmpeg.
 		Reason:        reason,
 		FFProbeInfo:   ffprobeJSON,
 		DuplicateInfo: marshalDuplicateContext(dupCtx),
+		Category:      string(store.ReviewCategoryDuplicate),
 		Status:        "pending",
 		CreatedAt:     time.Now().UTC(),
 	}

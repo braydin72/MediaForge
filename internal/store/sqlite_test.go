@@ -937,6 +937,96 @@ func TestMigrationV4ToV5(t *testing.T) {
 	}
 }
 
+func TestMigrationV10ToV11_ReviewQueueCategoryColumn(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// Create a v10 database manually: review_queue has duplicate_info but no category.
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create test DB: %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE jobs (
+			id TEXT PRIMARY KEY,
+			input_path TEXT NOT NULL,
+			preset_id TEXT NOT NULL,
+			encoder TEXT NOT NULL,
+			status TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		);
+		CREATE TABLE job_order (
+			position INTEGER PRIMARY KEY AUTOINCREMENT,
+			job_id TEXT NOT NULL UNIQUE
+		);
+		CREATE TABLE schema_version (
+			version INTEGER NOT NULL,
+			applied_at TEXT DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE stats_metadata (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE review_queue (
+			id TEXT PRIMARY KEY,
+			original_path TEXT NOT NULL,
+			filename TEXT NOT NULL,
+			reason TEXT NOT NULL,
+			ffprobe_info TEXT,
+			duplicate_info TEXT,
+			status TEXT NOT NULL DEFAULT 'pending',
+			created_at TEXT NOT NULL
+		);
+		INSERT INTO schema_version (version) VALUES (10);
+		INSERT INTO review_queue (id, original_path, filename, reason, status, created_at)
+			VALUES ('legacy-entry', '/incoming/legacy.mkv', 'legacy.mkv', 'no metadata match found', 'pending', datetime('now'));
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create v10 schema: %v", err)
+	}
+	db.Close()
+
+	// Open with store (should auto-migrate to v11, adding the category column).
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	entry, err := store.GetReviewEntry("legacy-entry")
+	if err != nil {
+		t.Fatalf("GetReviewEntry: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("expected legacy entry to survive migration")
+	}
+	if entry.Category != "" {
+		t.Errorf("Category = %q, want empty string for pre-migration row", entry.Category)
+	}
+
+	// A newly written entry post-migration should carry its category through.
+	newEntry := &ReviewEntry{
+		ID:           "post-migration",
+		OriginalPath: "/incoming/new.mkv",
+		Filename:     "new.mkv",
+		Reason:       "no viable encode found",
+		Category:     string(ReviewCategoryEncodeFailure),
+		Status:       ReviewStatusPending,
+		CreatedAt:    time.Now().UTC(),
+	}
+	if err := store.AddToReviewQueue(newEntry); err != nil {
+		t.Fatalf("AddToReviewQueue: %v", err)
+	}
+	got, err := store.GetReviewEntry("post-migration")
+	if err != nil {
+		t.Fatalf("GetReviewEntry: %v", err)
+	}
+	if got == nil || got.Category != string(ReviewCategoryEncodeFailure) {
+		t.Errorf("Category = %v, want %q", got, ReviewCategoryEncodeFailure)
+	}
+}
+
 func TestSaveJobColorTransferAndSmartShrinkQuality(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")

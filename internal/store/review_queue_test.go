@@ -21,6 +21,7 @@ func TestReviewQueueCRUD(t *testing.T) {
 		Filename:     "movie.mkv",
 		Reason:       "codec detection failed: unrecognized codec \"vp9\"",
 		FFProbeInfo:  `{"video_codec":"vp9"}`,
+		Category:     string(ReviewCategorySystemFailure),
 		Status:       "pending",
 		CreatedAt:    time.Now().UTC(),
 	}
@@ -63,6 +64,18 @@ func TestReviewQueueCRUD(t *testing.T) {
 	if got.FFProbeInfo != e.FFProbeInfo {
 		t.Errorf("FFProbeInfo = %q, want %q", got.FFProbeInfo, e.FFProbeInfo)
 	}
+	if got.Category != e.Category {
+		t.Errorf("Category = %q, want %q", got.Category, e.Category)
+	}
+
+	// GetReviewEntry round-trips Category too
+	single, err := st.GetReviewEntry(e.ID)
+	if err != nil {
+		t.Fatalf("GetReviewEntry: %v", err)
+	}
+	if single == nil || single.Category != e.Category {
+		t.Errorf("GetReviewEntry Category = %v, want %q", single, e.Category)
+	}
 
 	// UpdateReviewQueueStatus
 	if err := st.UpdateReviewQueueStatus(e.ID, "discarded"); err != nil {
@@ -94,4 +107,84 @@ func TestReviewQueueCRUD(t *testing.T) {
 	}
 
 	_ = os.RemoveAll(dir)
+}
+
+func TestReviewQueue_EmptyCategoryRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	st, err := NewSQLiteStore(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer st.Close()
+
+	// Simulates a row written before categories existed: Category left unset.
+	e := ReviewEntry{
+		ID:           "legacy-1",
+		OriginalPath: "/incoming/legacy.mkv",
+		Filename:     "legacy.mkv",
+		Reason:       "no metadata match found",
+		Status:       "pending",
+		CreatedAt:    time.Now().UTC(),
+	}
+	if err := st.AddToReviewQueue(&e); err != nil {
+		t.Fatalf("AddToReviewQueue: %v", err)
+	}
+
+	got, err := st.GetReviewEntry(e.ID)
+	if err != nil {
+		t.Fatalf("GetReviewEntry: %v", err)
+	}
+	if got == nil || got.Category != "" {
+		t.Errorf("Category = %v, want empty string for legacy row", got)
+	}
+}
+
+func TestBulkUpdateReviewQueueStatus(t *testing.T) {
+	dir := t.TempDir()
+	st, err := NewSQLiteStore(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer st.Close()
+
+	ids := []string{"bulk-1", "bulk-2", "bulk-3"}
+	for _, id := range ids {
+		e := ReviewEntry{
+			ID:           id,
+			OriginalPath: "/incoming/" + id + ".mkv",
+			Filename:     id + ".mkv",
+			Reason:       "no viable encode found",
+			Category:     string(ReviewCategoryEncodeFailure),
+			Status:       "pending",
+			CreatedAt:    time.Now().UTC(),
+		}
+		if err := st.AddToReviewQueue(&e); err != nil {
+			t.Fatalf("AddToReviewQueue(%s): %v", id, err)
+		}
+	}
+
+	// Empty slice is a no-op, not an error.
+	if err := st.BulkUpdateReviewQueueStatus(nil, "discarded"); err != nil {
+		t.Fatalf("BulkUpdateReviewQueueStatus(nil): %v", err)
+	}
+
+	// Update two of the three, plus one nonexistent id (should be silently ignored).
+	if err := st.BulkUpdateReviewQueueStatus([]string{"bulk-1", "bulk-2", "does-not-exist"}, "discarded"); err != nil {
+		t.Fatalf("BulkUpdateReviewQueueStatus: %v", err)
+	}
+
+	entries, err := st.GetReviewQueue()
+	if err != nil {
+		t.Fatalf("GetReviewQueue: %v", err)
+	}
+	statusByID := make(map[string]string, len(entries))
+	for _, e := range entries {
+		statusByID[e.ID] = e.Status
+	}
+	if statusByID["bulk-1"] != "discarded" || statusByID["bulk-2"] != "discarded" {
+		t.Errorf("bulk-1/bulk-2 not updated: %+v", statusByID)
+	}
+	if statusByID["bulk-3"] != "pending" {
+		t.Errorf("bulk-3 should be untouched, got %q", statusByID["bulk-3"])
+	}
 }
