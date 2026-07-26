@@ -723,7 +723,7 @@ func (w *Worker) processJob(job *Job) {
 		if shouldSkip {
 			logger.Info("Fixed reduction: target unreachable", "job_id", job.ID, "reason", skipReason)
 			_ = w.queue.FailJob(job.ID, skipReason)
-			w.queue.SendToReviewQueue(job.ID, job.InputPath, filepath.Base(job.InputPath), skipReason, "")
+			w.queue.SendToReviewQueue(job.ID, job.InputPath, filepath.Base(job.InputPath), skipReason, "", "encode_failure")
 			return
 		}
 		if foundCRF > 0 {
@@ -1003,7 +1003,7 @@ func (w *Worker) processJob(job *Job) {
 				if job.LibraryPath != "" {
 					correctedName = filepath.Base(job.LibraryPath)
 				}
-				w.queue.SendToReviewQueue(job.ID, job.InputPath, correctedName, reason, "")
+				w.queue.SendToReviewQueue(job.ID, job.InputPath, correctedName, reason, "", "encode_failure")
 				return
 			}
 		}
@@ -1063,13 +1063,13 @@ func (w *Worker) processJob(job *Job) {
 			// would still be the raw, possibly-uncorrected source name since transcoding
 			// doesn't rename. Use the corrected name so a later "Re-encode Custom" re-parses
 			// the correction instead of losing it.
-			w.queue.SendDuplicateToReviewQueue(job.ID, finalPath, filepath.Base(job.LibraryPath), reason, "", dupInfoJSON)
+			w.queue.SendDuplicateToReviewQueue(job.ID, finalPath, filepath.Base(job.LibraryPath), reason, "", dupInfoJSON, "duplicate")
 			return
 		} else if moveErr := util.SafeMove(finalPath, job.LibraryPath); moveErr != nil {
 			reason := fmt.Sprintf("post-encode move failed: %v", moveErr)
 			logger.Error("Post-encode library move failed", "job_id", job.ID, "src", finalPath, "dst", job.LibraryPath, "error", moveErr)
 			_ = w.queue.FailJob(job.ID, reason)
-			w.queue.SendToReviewQueue(job.ID, finalPath, filepath.Base(job.LibraryPath), reason, "")
+			w.queue.SendToReviewQueue(job.ID, finalPath, filepath.Base(job.LibraryPath), reason, "", "system_failure")
 			return
 		} else {
 			logger.Info("Post-encode library move complete", "job_id", job.ID, "dst", job.LibraryPath)

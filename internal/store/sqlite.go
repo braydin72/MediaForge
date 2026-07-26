@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 10
+const schemaVersion = 11
 
 const schema = `
 CREATE TABLE IF NOT EXISTS jobs (
@@ -82,6 +83,7 @@ CREATE TABLE IF NOT EXISTS review_queue (
 	reason TEXT NOT NULL,
 	ffprobe_info TEXT,
 	duplicate_info TEXT,
+	category TEXT NOT NULL DEFAULT '',
 	status TEXT NOT NULL DEFAULT 'pending',
 	created_at TEXT NOT NULL
 );
@@ -126,6 +128,21 @@ const (
 	ReviewStatusDiscarded = "discarded"
 )
 
+// ReviewEntryCategory classifies why an entry landed in the Review Queue,
+// driving which actions the UI offers and which bulk operations apply.
+// An empty string means the entry was written before categories existed
+// (pre-upgrade row) and is treated as the metadata_failure-equivalent
+// fallback by both API validation and the frontend.
+type ReviewEntryCategory string
+
+const (
+	ReviewCategoryDuplicate           ReviewEntryCategory = "duplicate"
+	ReviewCategoryMetadataFailure     ReviewEntryCategory = "metadata_failure"
+	ReviewCategoryEncodeFailure       ReviewEntryCategory = "encode_failure"
+	ReviewCategoryUnresolvedMultipart ReviewEntryCategory = "unresolved_multipart"
+	ReviewCategorySystemFailure       ReviewEntryCategory = "system_failure"
+)
+
 // ReviewEntry is a single item in the Review Queue.
 type ReviewEntry struct {
 	ID            string    `json:"id"`
@@ -134,7 +151,8 @@ type ReviewEntry struct {
 	Reason        string    `json:"reason"`
 	FFProbeInfo   string    `json:"ffprobe_info"`   // JSON blob from ffprobe
 	DuplicateInfo string    `json:"duplicate_info"` // JSON blob for duplicate conflicts
-	Status        string    `json:"status"`         // "pending" | "resolved" | "discarded"
+	Category      string    `json:"category"`       // ReviewEntryCategory value, or "" for legacy rows
+	Status        string    `json:"status"`          // "pending" | "resolved" | "discarded"
 	CreatedAt     time.Time `json:"created_at"`
 }
 
@@ -401,6 +419,32 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 				if _, err := db.Exec(`ALTER TABLE review_queue ADD COLUMN duplicate_info TEXT`); err != nil {
 					db.Close()
 					return nil, fmt.Errorf("migration v9->v10 failed: %w", err)
+				}
+			}
+		}
+		if version < 11 {
+			// Migrate v10 -> v11: Add category to review_queue for context-aware
+			// Review Queue actions. Existing rows default to '' (treated as the
+			// legacy fallback category by both API validation and the frontend).
+			// Guard against the column already existing when a fresh DB was
+			// initialized from the current schema constant before reaching this
+			// migration path.
+			var categoryExists bool
+			if pragmaRows, pragmaErr := db.Query(`PRAGMA table_info(review_queue)`); pragmaErr == nil {
+				for pragmaRows.Next() {
+					var cid int
+					var colName, colType string
+					var notNull, dfltValue, pk interface{}
+					if scanErr := pragmaRows.Scan(&cid, &colName, &colType, &notNull, &dfltValue, &pk); scanErr == nil && colName == "category" {
+						categoryExists = true
+					}
+				}
+				pragmaRows.Close()
+			}
+			if !categoryExists {
+				if _, err := db.Exec(`ALTER TABLE review_queue ADD COLUMN category TEXT NOT NULL DEFAULT ''`); err != nil {
+					db.Close()
+					return nil, fmt.Errorf("migration v10->v11 failed: %w", err)
 				}
 			}
 		}
@@ -713,13 +757,14 @@ func (s *SQLiteStore) SessionLifetimeStats() (sessionSaved, lifetimeSaved int64,
 
 // WriteReviewEntry implements jobs.ReviewQueueWriter. It persists a review queue
 // entry using raw string fields so the jobs package can call it without importing store types.
-func (s *SQLiteStore) WriteReviewEntry(id, originalPath, filename, reason, ffprobeJSON string) error {
+func (s *SQLiteStore) WriteReviewEntry(id, originalPath, filename, reason, ffprobeJSON, category string) error {
 	entry := &ReviewEntry{
 		ID:           id,
 		OriginalPath: originalPath,
 		Filename:     filename,
 		Reason:       reason,
 		FFProbeInfo:  ffprobeJSON,
+		Category:     category,
 		Status:       ReviewStatusPending,
 		CreatedAt:    time.Now().UTC(),
 	}
@@ -728,7 +773,7 @@ func (s *SQLiteStore) WriteReviewEntry(id, originalPath, filename, reason, ffpro
 
 // WriteDuplicateReviewEntry implements jobs.DuplicateReviewWriter. It persists a duplicate
 // review queue entry with DuplicateInfo context so the UI can offer Replace/Keep actions.
-func (s *SQLiteStore) WriteDuplicateReviewEntry(id, originalPath, filename, reason, ffprobeJSON, duplicateInfoJSON string) error {
+func (s *SQLiteStore) WriteDuplicateReviewEntry(id, originalPath, filename, reason, ffprobeJSON, duplicateInfoJSON, category string) error {
 	entry := &ReviewEntry{
 		ID:            id,
 		OriginalPath:  originalPath,
@@ -736,6 +781,7 @@ func (s *SQLiteStore) WriteDuplicateReviewEntry(id, originalPath, filename, reas
 		Reason:        reason,
 		FFProbeInfo:   ffprobeJSON,
 		DuplicateInfo: duplicateInfoJSON,
+		Category:      category,
 		Status:        ReviewStatusPending,
 		CreatedAt:     time.Now().UTC(),
 	}
@@ -758,10 +804,10 @@ func (s *SQLiteStore) AddToReviewQueue(e *ReviewEntry) error {
 	}
 
 	_, err = s.db.Exec(
-		`INSERT INTO review_queue (id, original_path, filename, reason, ffprobe_info, duplicate_info, status, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO review_queue (id, original_path, filename, reason, ffprobe_info, duplicate_info, category, status, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID, e.OriginalPath, e.Filename, e.Reason,
-		nullString(e.FFProbeInfo), nullString(e.DuplicateInfo), e.Status, formatTime(e.CreatedAt),
+		nullString(e.FFProbeInfo), nullString(e.DuplicateInfo), e.Category, e.Status, formatTime(e.CreatedAt),
 	)
 	return err
 }
@@ -774,9 +820,9 @@ func (s *SQLiteStore) GetReviewEntry(id string) (*ReviewEntry, error) {
 	var e ReviewEntry
 	var createdAt string
 	err := s.db.QueryRow(
-		`SELECT id, original_path, filename, reason, COALESCE(ffprobe_info,''), COALESCE(duplicate_info,''), status, created_at
+		`SELECT id, original_path, filename, reason, COALESCE(ffprobe_info,''), COALESCE(duplicate_info,''), COALESCE(category,''), status, created_at
 		 FROM review_queue WHERE id = ?`, id,
-	).Scan(&e.ID, &e.OriginalPath, &e.Filename, &e.Reason, &e.FFProbeInfo, &e.DuplicateInfo, &e.Status, &createdAt)
+	).Scan(&e.ID, &e.OriginalPath, &e.Filename, &e.Reason, &e.FFProbeInfo, &e.DuplicateInfo, &e.Category, &e.Status, &createdAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -793,7 +839,7 @@ func (s *SQLiteStore) GetReviewQueue() ([]ReviewEntry, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(
-		`SELECT id, original_path, filename, reason, COALESCE(ffprobe_info,''), COALESCE(duplicate_info,''), status, created_at
+		`SELECT id, original_path, filename, reason, COALESCE(ffprobe_info,''), COALESCE(duplicate_info,''), COALESCE(category,''), status, created_at
 		 FROM review_queue ORDER BY created_at DESC`,
 	)
 	if err != nil {
@@ -805,7 +851,7 @@ func (s *SQLiteStore) GetReviewQueue() ([]ReviewEntry, error) {
 	for rows.Next() {
 		var e ReviewEntry
 		var createdAt string
-		if err := rows.Scan(&e.ID, &e.OriginalPath, &e.Filename, &e.Reason, &e.FFProbeInfo, &e.DuplicateInfo, &e.Status, &createdAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.OriginalPath, &e.Filename, &e.Reason, &e.FFProbeInfo, &e.DuplicateInfo, &e.Category, &e.Status, &createdAt); err != nil {
 			return nil, err
 		}
 		e.CreatedAt = parseTime(createdAt)
@@ -830,6 +876,26 @@ func (s *SQLiteStore) UpdateReviewQueueStatus(id, status string) error {
 	defer s.mu.Unlock()
 
 	_, err := s.db.Exec(`UPDATE review_queue SET status = ? WHERE id = ?`, status, id)
+	return err
+}
+
+// BulkUpdateReviewQueueStatus changes the status of multiple review queue
+// entries in a single statement. IDs that don't exist are silently ignored.
+func (s *SQLiteStore) BulkUpdateReviewQueueStatus(ids []string, status string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]interface{}, 0, len(ids)+1)
+	args = append(args, status)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	_, err := s.db.Exec(fmt.Sprintf(`UPDATE review_queue SET status = ? WHERE id IN (%s)`, placeholders), args...)
 	return err
 }
 

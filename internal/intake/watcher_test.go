@@ -157,6 +157,9 @@ func TestWatcherStabilityCheck(t *testing.T) {
 	if e.Reason == "" {
 		t.Error("Reason is empty, want a codec detection failure message")
 	}
+	if e.Category != string(store.ReviewCategorySystemFailure) {
+		t.Errorf("Category = %q, want %q", e.Category, store.ReviewCategorySystemFailure)
+	}
 }
 
 // TestResolveAndGateLowConfidenceToReview verifies the AVC/HEVC shared gate routes a
@@ -199,6 +202,14 @@ func TestResolveAndGateLowConfidenceToReview(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("review queue count: want 1, got %d", count)
+	}
+
+	entries, err := st.GetReviewQueue()
+	if err != nil {
+		t.Fatalf("GetReviewQueue: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Category != string(store.ReviewCategoryMetadataFailure) {
+		t.Errorf("review entry category: want %q, got %+v", store.ReviewCategoryMetadataFailure, entries)
 	}
 }
 
@@ -271,6 +282,9 @@ func TestResolveAndGate_MultiPartUnconfirmedRoutesToReview(t *testing.T) {
 	}
 	if !strings.Contains(entries[0].Reason, "multi-part") {
 		t.Errorf("review queue reason = %q, want it to mention the multi-part episode", entries[0].Reason)
+	}
+	if entries[0].Category != string(store.ReviewCategoryUnresolvedMultipart) {
+		t.Errorf("review entry category = %q, want %q", entries[0].Category, store.ReviewCategoryUnresolvedMultipart)
 	}
 }
 
@@ -559,6 +573,9 @@ func TestMoveHEVCToLibrary_DuplicateReviewEntryUsesCorrectedFilename(t *testing.
 	}
 	if e.DuplicateInfo == "" {
 		t.Error("expected DuplicateInfo to be set for a duplicate-conflict entry")
+	}
+	if e.Category != string(store.ReviewCategoryDuplicate) {
+		t.Errorf("Category = %q, want %q", e.Category, store.ReviewCategoryDuplicate)
 	}
 
 	// Reproduce what ResolveReviewEntry/ResubmitReviewEntry do with the stored

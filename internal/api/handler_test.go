@@ -436,6 +436,14 @@ func (m *mockReviewStore) UpdateReviewEntryReason(id, reason string) error {
 	}
 	return nil
 }
+func (m *mockReviewStore) BulkUpdateReviewQueueStatus(ids []string, status string) error {
+	for _, id := range ids {
+		if e := m.entries[id]; e != nil {
+			e.Status = status
+		}
+	}
+	return nil
+}
 
 // resolveTestSetup wires a handler with a library dir and a single pending review
 // entry whose source file exists on disk. Returns the handler, the mock store, the
@@ -506,6 +514,57 @@ func TestResolveReviewEntry_MissingTitle(t *testing.T) {
 	handler.ResolveReviewEntry(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for missing title, got %d", w.Code)
+	}
+}
+
+func TestResubmitReviewEntry_RejectsWrongCategory(t *testing.T) {
+	handler, tmpDir := setupTestHandler(t)
+
+	src := filepath.Join(tmpDir, "incoming", "Big Movie 2020.mkv")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatalf("mkdir incoming: %v", err)
+	}
+	if err := os.WriteFile(src, []byte("hevc bytes"), 0644); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	entry := &store.ReviewEntry{
+		ID:           "entry-1",
+		OriginalPath: src,
+		Filename:     "Big Movie 2020.mkv",
+		Reason:       "low confidence match",
+		Category:     string(store.ReviewCategoryMetadataFailure),
+		Status:       "pending",
+	}
+	ms := newMockReviewStore(entry)
+	handler.SetReviewStore(ms)
+
+	body, _ := json.Marshal(map[string]interface{}{"original_path": src})
+	req := httptest.NewRequest("PUT", "/api/review/"+entry.ID+"/resubmit", bytes.NewReader(body))
+	req.SetPathValue("id", entry.ID)
+	w := httptest.NewRecorder()
+	handler.ResubmitReviewEntry(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for metadata_failure category, got %d body=%s", w.Code, w.Body.String())
+	}
+	if ms.entries[entry.ID].Status != "pending" {
+		t.Errorf("expected entry to remain pending after rejection, got %s", ms.entries[entry.ID].Status)
+	}
+}
+
+func TestResolveReviewEntry_RejectsWrongCategory(t *testing.T) {
+	handler, _, entry, _ := resolveTestSetup(t)
+	entry.Category = string(store.ReviewCategoryEncodeFailure)
+
+	req := resolveRequest(entry.ID, map[string]interface{}{
+		"title": "Big Movie", "year": 2020, "media_type": "movie",
+	})
+	w := httptest.NewRecorder()
+	handler.ResolveReviewEntry(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for encode_failure category, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -666,5 +725,184 @@ func TestDiscardReviewEntry_IncomingAlreadyGone(t *testing.T) {
 	}
 	if ms.entries[entry.ID].Status != "discarded" {
 		t.Errorf("expected entry discarded, got %s", ms.entries[entry.ID].Status)
+	}
+}
+
+func bulkRequest(path string, body map[string]interface{}) *http.Request {
+	b, _ := json.Marshal(body)
+	return httptest.NewRequest("PUT", path, bytes.NewReader(b))
+}
+
+func TestBulkDiscardReviewEntries(t *testing.T) {
+	handler, tmpDir := setupTestHandler(t)
+
+	incoming1 := filepath.Join(tmpDir, "incoming", "Movie A.mkv")
+	incoming2 := filepath.Join(tmpDir, "incoming", "Movie B.mkv")
+	for _, p := range []string{incoming1, incoming2} {
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("bytes"), 0644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	dupCtx1 := intake.DuplicateContext{Incoming: intake.DuplicateFileInfo{Path: incoming1}, Existing: intake.DuplicateFileInfo{Path: incoming1 + ".existing"}}
+	b1, _ := json.Marshal(dupCtx1)
+	entry1 := &store.ReviewEntry{ID: "e1", OriginalPath: incoming1, Filename: "Movie A.mkv", DuplicateInfo: string(b1), Category: string(store.ReviewCategoryDuplicate), Status: "pending"}
+	entry2 := &store.ReviewEntry{ID: "e2", OriginalPath: incoming2, Filename: "Movie B.mkv", Category: string(store.ReviewCategorySystemFailure), Status: "pending"}
+
+	ms := newMockReviewStore(entry1, entry2)
+	handler.SetReviewStore(ms)
+
+	req := bulkRequest("/api/review/bulk/discard", map[string]interface{}{"ids": []string{"e1", "e2", "does-not-exist"}})
+	w := httptest.NewRecorder()
+	handler.BulkDiscardReviewEntries(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Discarded int      `json:"discarded"`
+		Failed    []string `json:"failed"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Discarded != 2 {
+		t.Errorf("discarded = %d, want 2", resp.Discarded)
+	}
+	if len(resp.Failed) != 1 || resp.Failed[0] != "does-not-exist" {
+		t.Errorf("failed = %v, want [does-not-exist]", resp.Failed)
+	}
+	if ms.entries["e1"].Status != "discarded" || ms.entries["e2"].Status != "discarded" {
+		t.Errorf("expected both entries discarded, got e1=%s e2=%s", ms.entries["e1"].Status, ms.entries["e2"].Status)
+	}
+	if _, err := os.Stat(incoming1); !os.IsNotExist(err) {
+		t.Errorf("expected duplicate's incoming file deleted, stat err: %v", err)
+	}
+	if _, err := os.Stat(incoming2); err != nil {
+		t.Errorf("expected non-duplicate's file untouched, stat err: %v", err)
+	}
+}
+
+func TestBulkDiscardReviewEntries_EmptyIDs(t *testing.T) {
+	handler, _ := setupTestHandler(t)
+	handler.SetReviewStore(newMockReviewStore())
+
+	req := bulkRequest("/api/review/bulk/discard", map[string]interface{}{"ids": []string{}})
+	w := httptest.NewRecorder()
+	handler.BulkDiscardReviewEntries(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty ids, got %d", w.Code)
+	}
+}
+
+func TestBulkReplaceReviewEntries(t *testing.T) {
+	handler, tmpDir := setupTestHandler(t)
+
+	incoming1 := filepath.Join(tmpDir, "incoming", "Movie A.mkv")
+	existing1 := filepath.Join(tmpDir, "Library", "Movie A.mkv")
+	if err := os.MkdirAll(filepath.Dir(incoming1), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(existing1), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(incoming1, []byte("new bytes"), 0644); err != nil {
+		t.Fatalf("write incoming: %v", err)
+	}
+	if err := os.WriteFile(existing1, []byte("old bytes"), 0644); err != nil {
+		t.Fatalf("write existing: %v", err)
+	}
+	dupCtx1 := intake.DuplicateContext{Incoming: intake.DuplicateFileInfo{Path: incoming1}, Existing: intake.DuplicateFileInfo{Path: existing1}}
+	b1, _ := json.Marshal(dupCtx1)
+	entry1 := &store.ReviewEntry{ID: "e1", OriginalPath: incoming1, Filename: "Movie A.mkv", DuplicateInfo: string(b1), Category: string(store.ReviewCategoryDuplicate), Status: "pending"}
+	// Not a duplicate — bulk replace must reject this one, not abort the whole batch.
+	entry2 := &store.ReviewEntry{ID: "e2", OriginalPath: filepath.Join(tmpDir, "incoming", "Movie B.mkv"), Filename: "Movie B.mkv", Category: string(store.ReviewCategoryMetadataFailure), Status: "pending"}
+
+	ms := newMockReviewStore(entry1, entry2)
+	handler.SetReviewStore(ms)
+
+	req := bulkRequest("/api/review/bulk/replace", map[string]interface{}{"ids": []string{"e1", "e2"}})
+	w := httptest.NewRecorder()
+	handler.BulkReplaceReviewEntries(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Replaced int      `json:"replaced"`
+		Failed   []string `json:"failed"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Replaced != 1 {
+		t.Errorf("replaced = %d, want 1", resp.Replaced)
+	}
+	if len(resp.Failed) != 1 || resp.Failed[0] != "e2" {
+		t.Errorf("failed = %v, want [e2]", resp.Failed)
+	}
+	if ms.entries["e1"].Status != "resolved" {
+		t.Errorf("expected e1 resolved, got %s", ms.entries["e1"].Status)
+	}
+	if ms.entries["e2"].Status != "pending" {
+		t.Errorf("expected e2 left pending (not a duplicate), got %s", ms.entries["e2"].Status)
+	}
+	content, err := os.ReadFile(existing1)
+	if err != nil || string(content) != "new bytes" {
+		t.Errorf("expected existing file replaced with incoming content, got %q err=%v", content, err)
+	}
+}
+
+func TestBulkResubmitReviewEntries(t *testing.T) {
+	handler, tmpDir := setupTestHandler(t)
+
+	entry1 := &store.ReviewEntry{ID: "e1", OriginalPath: filepath.Join(tmpDir, "staging", "a.mkv"), Filename: "Movie A.mkv", Category: string(store.ReviewCategoryEncodeFailure), Status: "pending"}
+	// Wrong category — bulk resubmit must reject this one, not abort the whole batch.
+	entry2 := &store.ReviewEntry{ID: "e2", OriginalPath: filepath.Join(tmpDir, "staging", "b.mkv"), Filename: "Movie B.mkv", Category: string(store.ReviewCategoryMetadataFailure), Status: "pending"}
+
+	ms := newMockReviewStore(entry1, entry2)
+	handler.SetReviewStore(ms)
+
+	req := bulkRequest("/api/review/bulk/resubmit", map[string]interface{}{"ids": []string{"e1", "e2"}})
+	w := httptest.NewRecorder()
+	handler.BulkResubmitReviewEntries(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Resubmitted int      `json:"resubmitted"`
+		Failed      []string `json:"failed"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Resubmitted != 1 {
+		t.Errorf("resubmitted = %d, want 1", resp.Resubmitted)
+	}
+	if len(resp.Failed) != 1 || resp.Failed[0] != "e2" {
+		t.Errorf("failed = %v, want [e2]", resp.Failed)
+	}
+	if ms.entries["e1"].Status != "resolved" {
+		t.Errorf("expected e1 resolved, got %s", ms.entries["e1"].Status)
+	}
+	if ms.entries["e2"].Status != "pending" {
+		t.Errorf("expected e2 left pending (wrong category), got %s", ms.entries["e2"].Status)
+	}
+}
+
+func TestBulkResubmitReviewEntries_EmptyIDs(t *testing.T) {
+	handler, _ := setupTestHandler(t)
+	handler.SetReviewStore(newMockReviewStore())
+
+	req := bulkRequest("/api/review/bulk/resubmit", map[string]interface{}{"ids": []string{}})
+	w := httptest.NewRecorder()
+	handler.BulkResubmitReviewEntries(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty ids, got %d", w.Code)
 	}
 }

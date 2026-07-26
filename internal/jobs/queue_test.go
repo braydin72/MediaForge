@@ -865,3 +865,43 @@ func TestQueueAllowSameCodec(t *testing.T) {
 		}
 	})
 }
+
+// TestQueueSendToReviewQueue_ThreadsCategory is a regression test for the
+// Review Queue category feature: Queue.SendToReviewQueue/SendDuplicateToReviewQueue
+// must pass the category argument through to the store's WriteReviewEntry/
+// WriteDuplicateReviewEntry, not silently drop it.
+func TestQueueSendToReviewQueue_ThreadsCategory(t *testing.T) {
+	tmpDir := t.TempDir()
+	st, err := store.NewSQLiteStore(filepath.Join(tmpDir, "test.db"))
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer st.Close()
+
+	queue, err := jobs.NewQueueWithStore(st)
+	if err != nil {
+		t.Fatalf("failed to create queue: %v", err)
+	}
+
+	queue.SendToReviewQueue("job-1", "/incoming/movie.mkv", "movie.mkv", "no viable encode found", "", "encode_failure")
+	queue.SendDuplicateToReviewQueue("job-2", "/incoming/dup.mkv", "dup.mkv", "duplicate: file already exists", "", "", "duplicate")
+
+	entries, err := st.GetReviewQueue()
+	if err != nil {
+		t.Fatalf("GetReviewQueue: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 review queue entries, got %d", len(entries))
+	}
+
+	byID := make(map[string]store.ReviewEntry, len(entries))
+	for _, e := range entries {
+		byID[e.ID] = e
+	}
+	if got := byID["job-1"].Category; got != "encode_failure" {
+		t.Errorf("job-1 category = %q, want %q", got, "encode_failure")
+	}
+	if got := byID["job-2"].Category; got != "duplicate" {
+		t.Errorf("job-2 category = %q, want %q", got, "duplicate")
+	}
+}

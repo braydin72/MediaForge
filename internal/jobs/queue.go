@@ -37,13 +37,13 @@ type StoreWithStats interface {
 // ReviewQueueWriter is optionally implemented by stores that support a review queue.
 // Workers use this to route failed encodes for human review.
 type ReviewQueueWriter interface {
-	WriteReviewEntry(id, originalPath, filename, reason, ffprobeJSON string) error
+	WriteReviewEntry(id, originalPath, filename, reason, ffprobeJSON, category string) error
 }
 
 // DuplicateReviewWriter is optionally implemented by stores that support duplicate
 // review queue entries with DuplicateInfo context.
 type DuplicateReviewWriter interface {
-	WriteDuplicateReviewEntry(id, originalPath, filename, reason, ffprobeJSON, duplicateInfoJSON string) error
+	WriteDuplicateReviewEntry(id, originalPath, filename, reason, ffprobeJSON, duplicateInfoJSON, category string) error
 }
 
 // Queue manages the job queue with persistence
@@ -809,7 +809,7 @@ func (q *Queue) SetLibraryPath(id, libraryPath string) {
 }
 
 // SendToReviewQueue persists a review queue entry if the backing store supports it.
-func (q *Queue) SendToReviewQueue(jobID, originalPath, filename, reason, ffprobeJSON string) {
+func (q *Queue) SendToReviewQueue(jobID, originalPath, filename, reason, ffprobeJSON, category string) {
 	q.mu.RLock()
 	s := q.store
 	q.mu.RUnlock()
@@ -817,7 +817,7 @@ func (q *Queue) SendToReviewQueue(jobID, originalPath, filename, reason, ffprobe
 		return
 	}
 	if rqw, ok := s.(ReviewQueueWriter); ok {
-		if err := rqw.WriteReviewEntry(jobID, originalPath, filename, reason, ffprobeJSON); err != nil {
+		if err := rqw.WriteReviewEntry(jobID, originalPath, filename, reason, ffprobeJSON, category); err != nil {
 			logger.Warn("Failed to write review queue entry", "job_id", jobID, "error", err)
 		}
 	}
@@ -825,7 +825,7 @@ func (q *Queue) SendToReviewQueue(jobID, originalPath, filename, reason, ffprobe
 
 // SendDuplicateToReviewQueue persists a duplicate review queue entry with DuplicateInfo
 // context. Falls back to a plain review entry if the store does not implement DuplicateReviewWriter.
-func (q *Queue) SendDuplicateToReviewQueue(jobID, originalPath, filename, reason, ffprobeJSON, duplicateInfoJSON string) {
+func (q *Queue) SendDuplicateToReviewQueue(jobID, originalPath, filename, reason, ffprobeJSON, duplicateInfoJSON, category string) {
 	q.mu.RLock()
 	s := q.store
 	q.mu.RUnlock()
@@ -833,14 +833,14 @@ func (q *Queue) SendDuplicateToReviewQueue(jobID, originalPath, filename, reason
 		return
 	}
 	if drw, ok := s.(DuplicateReviewWriter); ok {
-		if err := drw.WriteDuplicateReviewEntry(jobID, originalPath, filename, reason, ffprobeJSON, duplicateInfoJSON); err != nil {
+		if err := drw.WriteDuplicateReviewEntry(jobID, originalPath, filename, reason, ffprobeJSON, duplicateInfoJSON, category); err != nil {
 			logger.Warn("Failed to write duplicate review queue entry", "job_id", jobID, "error", err)
 		}
 		return
 	}
 	// Fall back to basic review entry if DuplicateReviewWriter is not supported.
 	if rqw, ok := s.(ReviewQueueWriter); ok {
-		if err := rqw.WriteReviewEntry(jobID, originalPath, filename, reason, ffprobeJSON); err != nil {
+		if err := rqw.WriteReviewEntry(jobID, originalPath, filename, reason, ffprobeJSON, category); err != nil {
 			logger.Warn("Failed to write review queue entry (duplicate fallback)", "job_id", jobID, "error", err)
 		}
 	}

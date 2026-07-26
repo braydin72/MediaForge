@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-07-26
+
+### Added
+- Review Queue entries now carry a structured `Category` (duplicate,
+  metadata_failure, encode_failure, unresolved_multipart, system_failure),
+  set explicitly at every point a file is routed to review. Action buttons
+  are now context-aware per category instead of a single generic set —
+  this fixes a real dead button where "Pick Selected" rendered (and did
+  nothing) on encode-failure entries like "SmartShrink: no viable encode".
+  A category badge is shown on each card. Pre-upgrade rows without a
+  category keep working via a metadata_failure-equivalent fallback.
+- New bulk Review Queue actions: Replace (duplicates) and Re-encode Custom
+  (encode failures, via a shared settings panel applied to every selected
+  entry) alongside the existing bulk Discard — all three now go through
+  real bulk API endpoints (`PUT /api/review/bulk/{discard,replace,resubmit}`)
+  instead of a client-side loop over single-item endpoints. A mixed-category
+  selection only shows actions valid for every selected entry.
+- Files modified: `internal/store/sqlite.go` (schema v11, `Category` field,
+  `BulkUpdateReviewQueueStatus`), `internal/jobs/queue.go`,
+  `internal/intake/watcher.go`, `internal/jobs/worker.go` (category set at
+  every review-queue write site), `internal/api/handler.go` (category
+  validation on Resolve/Resubmit, new bulk handlers),
+  `internal/api/router.go` (bulk routes), `web/templates/index.html`
+  (category-aware `actionsHTML`, category badges, bulk action bar).
+
 ## [1.5.1] - 2026-07-25
 
 ### Fixed
