@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-07-26
+
 ### Fixed
 - `ResolveReviewEntry` (the "Pick Selected" manual-search resolve flow, used
   for metadata_failure/unresolved_multipart entries) had its own separate,
