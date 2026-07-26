@@ -39,6 +39,31 @@ type ReviewQueueStore interface {
 	GetReviewQueueCount() (int, error)
 	UpdateReviewQueueStatus(id, status string) error
 	UpdateReviewEntryReason(id, reason string) error
+	BulkUpdateReviewQueueStatus(ids []string, status string) error
+}
+
+// isMetadataPickCategory reports whether a review entry's category supports
+// Pick Selected / Search Manually (candidate-driven metadata resolution).
+// An empty category means the entry predates the Category field and is
+// treated as the legacy fallback, which historically supported these actions.
+func isMetadataPickCategory(category string) bool {
+	switch store.ReviewEntryCategory(category) {
+	case store.ReviewCategoryMetadataFailure, store.ReviewCategoryUnresolvedMultipart, "":
+		return true
+	default:
+		return false
+	}
+}
+
+// isEncodeFailureCategory reports whether a review entry's category supports
+// Re-encode Custom. An empty category is the legacy fallback (see above).
+func isEncodeFailureCategory(category string) bool {
+	switch store.ReviewEntryCategory(category) {
+	case store.ReviewCategoryEncodeFailure, "":
+		return true
+	default:
+		return false
+	}
 }
 
 // Handler provides HTTP API handlers
@@ -1209,6 +1234,10 @@ func (h *Handler) ResolveReviewEntry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "duplicate entries use Replace or Keep Existing, not Pick Selected")
 		return
 	}
+	if !isMetadataPickCategory(entry.Category) {
+		writeError(w, http.StatusBadRequest, "this entry's category does not support Pick Selected")
+		return
+	}
 
 	// The source file must still be where it was queued.
 	if _, statErr := os.Stat(entry.OriginalPath); statErr != nil {
@@ -1445,6 +1474,10 @@ func (h *Handler) ResubmitReviewEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	if entry == nil {
 		writeError(w, http.StatusNotFound, "review entry not found")
+		return
+	}
+	if !isEncodeFailureCategory(entry.Category) {
+		writeError(w, http.StatusBadRequest, "this entry's category does not support Re-encode Custom")
 		return
 	}
 

@@ -1772,6 +1772,23 @@
         }
         .review-dup-label--incoming { color: var(--accent); }
         .review-dup-label--existing { color: var(--warning); }
+
+        .review-category-badge {
+            display: inline-block;
+            font-size: 0.6875rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            padding: 2px 7px;
+            border-radius: var(--radius-sm);
+            flex-shrink: 0;
+            white-space: nowrap;
+        }
+        .review-category-badge--duplicate { color: var(--warning); background: color-mix(in srgb, var(--warning) 15%, transparent); }
+        .review-category-badge--metadata_failure { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+        .review-category-badge--unresolved_multipart { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+        .review-category-badge--encode_failure { color: var(--error); background: color-mix(in srgb, var(--error) 15%, transparent); }
+        .review-category-badge--system_failure { color: var(--text-tertiary); background: var(--bg-tertiary); }
         .review-dup-filename {
             font-family: var(--font-mono);
             font-size: 0.75rem;
@@ -5883,17 +5900,36 @@
             list.innerHTML = _reviewEntries.map(e => reviewCardHTML(e)).join('');
         }
 
+        // reviewCategoryOf mirrors the backend's isMetadataPickCategory/isEncodeFailureCategory
+        // fallback rules (internal/api/handler.go): duplicate_info presence is the authoritative
+        // signal for duplicate UI, category drives everything else, and a legacy empty category
+        // (rows written before this field existed) falls back to metadata_failure's action set.
+        function reviewCategoryOf(e) {
+            if (e.duplicate_info) return 'duplicate';
+            return e.category || 'metadata_failure';
+        }
+
+        const REVIEW_CATEGORY_LABELS = {
+            duplicate: 'Duplicate',
+            metadata_failure: 'Metadata match failed',
+            unresolved_multipart: 'Multi-part episode',
+            encode_failure: 'Encode failed',
+            system_failure: 'System error',
+        };
+
         function reviewCardHTML(e) {
             const probe = reviewParseProbe(e.ffprobe_info);
             const probeStr = reviewProbeString(probe);
             const timeAgo = reviewTimeAgo(e.created_at);
-            const isDuplicate = (e.reason || '').startsWith('duplicate:');
+            const category = reviewCategoryOf(e);
+            const isDuplicate = category === 'duplicate';
+            const showCandidates = category === 'metadata_failure' || category === 'unresolved_multipart';
             const cands = (e.candidates || []);
             const llm = e.llm_guess || null;
-            const candHTML = (!isDuplicate && cands.length)
+            const candHTML = (showCandidates && cands.length)
                 ? cands.map((c, i) => reviewCandHTML(e.id, c, i)).join('')
                 : '';
-            const llmHTML = (!isDuplicate && llm) ? `
+            const llmHTML = (showCandidates && llm) ? `
                 <div class="review-llm">
                     <span class="review-llm-label">AI guess:</span>
                     <span class="review-llm-text">${escReview(llm.title||'')}${llm.year?' ('+llm.year+')':''} — ${escReview(llm.reasoning||'')}</span>
@@ -5927,19 +5963,34 @@
                 }
             }
 
-            const actionsHTML = isDuplicate ? `
+            let actionsHTML;
+            if (isDuplicate) {
+                actionsHTML = `
                   <button class="btn btn-primary btn-sm" onclick="reviewReplace('${e.id}')">Replace</button>
-                  <button class="btn btn-secondary btn-sm" onclick="reviewDiscard('${e.id}')">Keep Existing</button>` : `
-                  <button class="btn btn-primary btn-sm" onclick="reviewPick('${e.id}')">Pick Selected</button>
-                  <button class="btn btn-secondary btn-sm" onclick="reviewToggleSearch('${e.id}')">Search Manually</button>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewDiscard('${e.id}')">Keep Existing</button>`;
+            } else if (category === 'encode_failure') {
+                actionsHTML = `
                   <button class="btn btn-secondary btn-sm" onclick="reviewDiscard('${e.id}')">Discard</button>
                   <button class="btn btn-secondary btn-sm" onclick="reviewToggleCustom('${e.id}')">Re-encode Custom</button>`;
+            } else if (category === 'system_failure') {
+                actionsHTML = `
+                  <button class="btn btn-secondary btn-sm" onclick="reviewDiscard('${e.id}')">Discard</button>`;
+            } else {
+                // metadata_failure / unresolved_multipart / legacy empty category
+                actionsHTML = `
+                  <button class="btn btn-primary btn-sm" onclick="reviewPick('${e.id}')">Pick Selected</button>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewToggleSearch('${e.id}')">Search Manually</button>
+                  <button class="btn btn-secondary btn-sm" onclick="reviewDiscard('${e.id}')">Discard</button>`;
+            }
+
+            const categoryLabel = REVIEW_CATEGORY_LABELS[category] || REVIEW_CATEGORY_LABELS.metadata_failure;
 
             return `
             <div class="review-card" id="rcard-${e.id}">
               <div class="review-card-header">
                 <input type="checkbox" class="review-card-check" id="rcheck-${e.id}" onchange="reviewUpdateBulk()">
                 <div class="review-card-filename">${escReview(e.filename)}</div>
+                <span class="review-category-badge review-category-badge--${category}">${escReview(categoryLabel)}</span>
                 <div class="review-card-time">${timeAgo}</div>
               </div>
               <div class="review-card-body">
@@ -5951,7 +6002,7 @@
                 ${dupCompareHTML}
                 <div class="review-candidates" id="rcands-${e.id}">${candHTML}</div>
                 ${llmHTML}
-                ${!isDuplicate ? `<div id="rsearch-${e.id}" style="display:none" class="review-search-form">
+                ${showCandidates ? `<div id="rsearch-${e.id}" style="display:none" class="review-search-form">
                   <input class="review-search-input" placeholder="Title..." id="rsq-${e.id}"
                          onkeydown="if(event.key==='Enter')reviewDoSearch('${e.id}')">
                   <input class="review-search-year" type="number" placeholder="Year" id="rsyear-${e.id}"
@@ -5964,7 +6015,7 @@
                   <button class="btn btn-secondary btn-sm" onclick="reviewDoSearch('${e.id}')">Search</button>
                   <button class="btn btn-secondary btn-sm" onclick="reviewCloseSearch('${e.id}')">Cancel</button>
                 </div>` : ''}
-                ${!isDuplicate ? `<div id="rcustom-${e.id}" style="display:none" class="review-search-form">
+                ${category === 'encode_failure' ? `<div id="rcustom-${e.id}" style="display:none" class="review-search-form">
                   <select class="review-search-type" id="rcpreset-${e.id}" onchange="reviewCustomPresetChange('${e.id}')" title="Encode mode">
                     <option value="compress-hevc">Standard HEVC</option>
                     <option value="smartshrink-hevc">SmartShrink (VMAF)</option>

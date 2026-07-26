@@ -436,6 +436,14 @@ func (m *mockReviewStore) UpdateReviewEntryReason(id, reason string) error {
 	}
 	return nil
 }
+func (m *mockReviewStore) BulkUpdateReviewQueueStatus(ids []string, status string) error {
+	for _, id := range ids {
+		if e := m.entries[id]; e != nil {
+			e.Status = status
+		}
+	}
+	return nil
+}
 
 // resolveTestSetup wires a handler with a library dir and a single pending review
 // entry whose source file exists on disk. Returns the handler, the mock store, the
@@ -506,6 +514,57 @@ func TestResolveReviewEntry_MissingTitle(t *testing.T) {
 	handler.ResolveReviewEntry(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for missing title, got %d", w.Code)
+	}
+}
+
+func TestResubmitReviewEntry_RejectsWrongCategory(t *testing.T) {
+	handler, tmpDir := setupTestHandler(t)
+
+	src := filepath.Join(tmpDir, "incoming", "Big Movie 2020.mkv")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatalf("mkdir incoming: %v", err)
+	}
+	if err := os.WriteFile(src, []byte("hevc bytes"), 0644); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	entry := &store.ReviewEntry{
+		ID:           "entry-1",
+		OriginalPath: src,
+		Filename:     "Big Movie 2020.mkv",
+		Reason:       "low confidence match",
+		Category:     string(store.ReviewCategoryMetadataFailure),
+		Status:       "pending",
+	}
+	ms := newMockReviewStore(entry)
+	handler.SetReviewStore(ms)
+
+	body, _ := json.Marshal(map[string]interface{}{"original_path": src})
+	req := httptest.NewRequest("PUT", "/api/review/"+entry.ID+"/resubmit", bytes.NewReader(body))
+	req.SetPathValue("id", entry.ID)
+	w := httptest.NewRecorder()
+	handler.ResubmitReviewEntry(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for metadata_failure category, got %d body=%s", w.Code, w.Body.String())
+	}
+	if ms.entries[entry.ID].Status != "pending" {
+		t.Errorf("expected entry to remain pending after rejection, got %s", ms.entries[entry.ID].Status)
+	}
+}
+
+func TestResolveReviewEntry_RejectsWrongCategory(t *testing.T) {
+	handler, _, entry, _ := resolveTestSetup(t)
+	entry.Category = string(store.ReviewCategoryEncodeFailure)
+
+	req := resolveRequest(entry.ID, map[string]interface{}{
+		"title": "Big Movie", "year": 2020, "media_type": "movie",
+	})
+	w := httptest.NewRecorder()
+	handler.ResolveReviewEntry(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for encode_failure category, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
