@@ -55,3 +55,4 @@ ghcr.sh
 HANDOFF.md
 **/plans/
 update-mediaforge.ps1
+vmaf-compare.ps1
