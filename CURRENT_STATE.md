@@ -1,6 +1,33 @@
 CURRENT STATE NOTE
 
-=== Latest session (cont. yet again): third live bug — ResolveReviewEntry ("Pick Selected") had its own dead-end duplicate check ===
+=== Latest session: lower-bitrate re-encodes no longer auto-discarded on duplicate ===
+
+User was about to re-transcode some previously-encoded files with better
+settings; expected some to come out at a lower bitrate than what's already in
+the library (better shrink ratio) despite similar/better perceptual quality
+(scored separately with a personal, gitignored vmaf-compare.ps1 script — not
+part of the app). Under the old `internal/upgrade.Decide` logic, a lower
+incoming bitrate at equal resolution/codec tier past `bitrateThreshold`
+auto-returned `Keep`, silently discarding the incoming (better) file with no
+review.
+
+Fix (internal/upgrade/upgrade.go): the bitrate-comparison branch no longer
+auto-`Keep`s when existing bitrate is meaningfully higher than incoming at
+equal resolution/codec — it now returns `Review` instead, routing the
+duplicate to the Review Queue for a manual look. The auto-`Replace` path
+(incoming bitrate meaningfully higher) is unchanged. `TestDecide_Bitrate`
+(internal/upgrade/upgrade_test.go) updated with a case asserting this.
+
+All three call sites (internal/intake/duplicate.go, internal/jobs/worker.go,
+internal/api/handler.go) already handle `Review` generically via the
+existing Review Queue duplicate-comparison UI, so no other code changes were
+needed.
+
+`go build ./...` and `go test ./...` both pass.
+
+Nothing incomplete/follow-up from this session.
+
+=== Previous session: third live bug — ResolveReviewEntry ("Pick Selected") had its own dead-end duplicate check ===
 
 Direct continuation, found while live-testing v1.7.0 right after release. User
 manually identified a multi-part episode (S10E06) via Search Manually + Pick

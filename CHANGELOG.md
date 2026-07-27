@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `internal/upgrade.Decide` auto-discarded (`Keep`) an incoming file whenever
+  its bitrate was meaningfully lower than the existing library file's, at
+  equal resolution/codec tier — even though a smaller re-encode from better
+  encoder settings can score the same or higher on quality despite the size
+  drop. A lower incoming bitrate at equal resolution/codec now always routes
+  to the Review Queue (`Review`) for a manual quality comparison instead of
+  auto-discarding; the higher-bitrate auto-`Replace` path is unchanged.
+  Files modified: `internal/upgrade/upgrade.go`,
+  `internal/upgrade/upgrade_test.go`.
+
 ## [1.7.1] - 2026-07-26
 
 ### Fixed
