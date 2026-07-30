@@ -198,9 +198,7 @@ func (p *WorkerPool) watchPriorityBatch() {
 			}
 
 			p.priorityMu.Lock()
-			if _, tracked := p.priorityRemaining[event.Job.ID]; tracked {
-				delete(p.priorityRemaining, event.Job.ID)
-			}
+			delete(p.priorityRemaining, event.Job.ID)
 			done := len(p.priorityRemaining) == 0 && p.priorityRepause
 			if done {
 				p.priorityRepause = false
