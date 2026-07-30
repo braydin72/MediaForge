@@ -78,6 +78,39 @@ func buildCorrectedFilename(cfg *config.IntakeConfig, parsed *ParsedFilename, ex
 	}
 }
 
+// resolveLibraryPathPassthrough builds the library destination the same way
+// resolveLibraryPath does (movie/TV folder classification from parsed
+// filename metadata) but keeps originalFilename verbatim instead of
+// rendering a naming-template file name. Used when cfg.EnableNamingLookup is
+// false — files still need a folder to land in (movie vs. show/season,
+// determined from local filename parsing only, no external lookup), but the
+// file itself is never renamed.
+func resolveLibraryPathPassthrough(cfg *config.IntakeConfig, parsed *ParsedFilename, originalFilename string) string {
+	if parsed.Title == "" {
+		return ""
+	}
+	switch parsed.MediaType {
+	case "tv":
+		if parsed.Season == 0 {
+			return ""
+		}
+		folderTmpl := cfg.Naming.ShowFolder
+		if folderTmpl == "" {
+			folderTmpl = "{show} ({year})"
+		}
+		showFolder := applyNamingTemplate(folderTmpl, parsed)
+		seasonDir := fmt.Sprintf("Season %02d", parsed.Season)
+		return filepath.Join(cfg.Library.TVShows, showFolder, seasonDir, originalFilename)
+	default: // "movie"
+		folderTmpl := cfg.Naming.MovieFolder
+		if folderTmpl == "" {
+			folderTmpl = "{title} ({year})"
+		}
+		movieFolder := applyNamingTemplate(folderTmpl, parsed)
+		return filepath.Join(cfg.Library.Movies, movieFolder, originalFilename)
+	}
+}
+
 // ResolveLibraryPath is an exported wrapper around resolveLibraryPath for callers
 // outside the package (e.g. the API resolving a manually-picked match to a
 // destination path). Returns "" when there is not enough metadata to build a path.

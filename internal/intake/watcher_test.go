@@ -76,9 +76,10 @@ func TestWatcherStabilityCheck(t *testing.T) {
 	defer st.Close()
 
 	cfg := config.IntakeConfig{
-		Enabled:       true,
-		WatchFolder:   watchDir,
-		StagingFolder: filepath.Join(dir, "staging"),
+		Enabled:            true,
+		WatchFolder:        watchDir,
+		StagingFolder:      filepath.Join(dir, "staging"),
+		EnableNamingLookup: true,
 		StabilityCheck: config.IntakeStabilityConfig{
 			IntervalSeconds: 0, // 0 → treated as <1, clamped to 1 by Load, but we set directly
 			PassesRequired:  2,
@@ -186,7 +187,7 @@ func TestResolveAndGateLowConfidenceToReview(t *testing.T) {
 		},
 	}))
 
-	cfg := config.IntakeConfig{}
+	cfg := config.IntakeConfig{EnableNamingLookup: true}
 	w := NewWatcher(&cfg, "ffprobe", st)
 	w.Orchestrator = &Orchestrator{TVDB: tvdb}
 
@@ -263,7 +264,7 @@ func TestResolveAndGate_MultiPartUnconfirmedRoutesToReview(t *testing.T) {
 	}
 	defer st.Close()
 
-	cfg := config.IntakeConfig{}
+	cfg := config.IntakeConfig{EnableNamingLookup: true}
 	w := NewWatcher(&cfg, "ffprobe", st)
 	w.Orchestrator = &Orchestrator{TVDB: combinedEpisodeMockTVDB()}
 
@@ -302,7 +303,7 @@ func TestResolveAndGate_MultiPartConfirmedKeepsSourceTitle(t *testing.T) {
 	}
 	defer st.Close()
 
-	cfg := config.IntakeConfig{}
+	cfg := config.IntakeConfig{EnableNamingLookup: true}
 	w := NewWatcher(&cfg, "ffprobe", st)
 	w.Orchestrator = &Orchestrator{TVDB: combinedEpisodeMockTVDB()}
 
@@ -371,7 +372,7 @@ func TestResolveAndGate_ReconcilesTitleWithPartSuffix(t *testing.T) {
 		},
 	}))
 
-	cfg := config.IntakeConfig{}
+	cfg := config.IntakeConfig{EnableNamingLookup: true}
 	w := NewWatcher(&cfg, "ffprobe", st)
 	w.Orchestrator = &Orchestrator{TVDB: tvdb}
 
@@ -528,7 +529,7 @@ func TestMoveHEVCToLibrary_DuplicateReviewEntryUsesCorrectedFilename(t *testing.
 		},
 	}))
 
-	cfg := config.IntakeConfig{}
+	cfg := config.IntakeConfig{EnableNamingLookup: true}
 	cfg.Library.TVShows = filepath.Join(dir, "TV Shows")
 
 	w := NewWatcher(&cfg, "ffprobe", st)

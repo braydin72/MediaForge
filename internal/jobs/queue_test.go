@@ -905,3 +905,138 @@ func TestQueueSendToReviewQueue_ThreadsCategory(t *testing.T) {
 		t.Errorf("job-2 category = %q, want %q", got, "duplicate")
 	}
 }
+
+func TestQueueMarkSkippedByUser(t *testing.T) {
+	queue := jobs.NewQueue()
+
+	probe := &ffmpeg.ProbeResult{Path: "/media/video.mkv", Size: 1000000, Duration: 10 * time.Second}
+	job, _ := queue.Add(probe.Path, "compress-hevc", probe, "")
+
+	// Not running yet - should fail.
+	if err := queue.MarkSkippedByUser(job.ID); err == nil {
+		t.Error("expected error skipping a pending (not running) job")
+	}
+
+	if err := queue.StartJob(job.ID, "/tmp/temp.mkv"); err != nil {
+		t.Fatalf("StartJob: %v", err)
+	}
+	queue.UpdateProgress(job.ID, 42, 1.2, "1m")
+
+	if err := queue.MarkSkippedByUser(job.ID); err != nil {
+		t.Fatalf("MarkSkippedByUser: %v", err)
+	}
+
+	got := queue.Get(job.ID)
+	if got.Status != jobs.StatusSkipped {
+		t.Errorf("status = %s, want skipped", got.Status)
+	}
+	if got.Progress != 0 || got.TempPath != "" {
+		t.Errorf("expected running state cleared, got progress=%v temp_path=%q", got.Progress, got.TempPath)
+	}
+	if got.SkipReason == "" {
+		t.Error("expected a skip reason to be set")
+	}
+
+	// Already terminal - should fail.
+	if err := queue.MarkSkippedByUser(job.ID); err == nil {
+		t.Error("expected error skipping an already-terminal job")
+	}
+}
+
+func TestQueueRequeueTerminal(t *testing.T) {
+	queue := jobs.NewQueue()
+
+	probe := &ffmpeg.ProbeResult{Path: "/media/video.mkv", Size: 1000000, Duration: 10 * time.Second}
+	skippedJob, _ := queue.Add(probe.Path, "compress-hevc", probe, "")
+	cancelledJob, _ := queue.Add("/media/v2.mkv", "compress-hevc", probe, "")
+	pendingJob, _ := queue.Add("/media/v3.mkv", "compress-hevc", probe, "")
+
+	if err := queue.StartJob(skippedJob.ID, "/tmp/a.mkv"); err != nil {
+		t.Fatalf("StartJob: %v", err)
+	}
+	if err := queue.MarkSkippedByUser(skippedJob.ID); err != nil {
+		t.Fatalf("MarkSkippedByUser: %v", err)
+	}
+	if err := queue.CancelJob(cancelledJob.ID); err != nil {
+		t.Fatalf("CancelJob: %v", err)
+	}
+
+	// Pending job can't be requeued via RequeueTerminal (only skipped/cancelled).
+	if _, err := queue.RequeueTerminal(pendingJob.ID, false); err == nil {
+		t.Error("expected error requeuing a pending job via RequeueTerminal")
+	}
+
+	// ReQueue the Skipped job with forceEncode=true.
+	got, err := queue.RequeueTerminal(skippedJob.ID, true)
+	if err != nil {
+		t.Fatalf("RequeueTerminal(skipped): %v", err)
+	}
+	if got.Status != jobs.StatusPending {
+		t.Errorf("status = %s, want pending", got.Status)
+	}
+	if got.OverrideAllowSameCodec == nil || !*got.OverrideAllowSameCodec {
+		t.Error("expected OverrideAllowSameCodec to be set true")
+	}
+	if next := queue.GetNext(); next == nil || next.ID != skippedJob.ID {
+		t.Error("expected requeued skipped job at front of queue")
+	}
+
+	// ReQueue the Cancelled job with forceEncode=false.
+	got, err = queue.RequeueTerminal(cancelledJob.ID, false)
+	if err != nil {
+		t.Fatalf("RequeueTerminal(cancelled): %v", err)
+	}
+	if got.Status != jobs.StatusPending {
+		t.Errorf("status = %s, want pending", got.Status)
+	}
+	if got.OverrideAllowSameCodec != nil {
+		t.Error("expected OverrideAllowSameCodec to remain unset for a plain ReQueue")
+	}
+}
+
+func TestQueueAddMultiplePriority(t *testing.T) {
+	queue := jobs.NewQueue()
+
+	probe := &ffmpeg.ProbeResult{Path: "/media/existing.mkv", Size: 1000000, Duration: 10 * time.Second}
+	existing, _ := queue.Add(probe.Path, "compress-hevc", probe, "")
+
+	priorityProbes := []*ffmpeg.ProbeResult{
+		{Path: "/media/p1.mkv", Size: 1, Duration: time.Second},
+		{Path: "/media/p2.mkv", Size: 1, Duration: time.Second},
+	}
+	added, err := queue.AddMultiplePriority(priorityProbes, "compress-hevc", "")
+	if err != nil {
+		t.Fatalf("AddMultiplePriority: %v", err)
+	}
+	if len(added) != 2 {
+		t.Fatalf("expected 2 jobs added, got %d", len(added))
+	}
+
+	all := queue.GetAll()
+	if len(all) != 3 {
+		t.Fatalf("expected 3 jobs total, got %d", len(all))
+	}
+	if all[0].ID != added[0].ID || all[1].ID != added[1].ID {
+		t.Errorf("expected priority jobs first in order, got order %v", []string{all[0].ID, all[1].ID, all[2].ID})
+	}
+	if all[2].ID != existing.ID {
+		t.Errorf("expected pre-existing job pushed to back, got %s", all[2].ID)
+	}
+}
+
+func TestQueueSetJobNetworkCopy(t *testing.T) {
+	queue := jobs.NewQueue()
+
+	probe := &ffmpeg.ProbeResult{Path: "/staging/video.mkv", Size: 1000000, Duration: 10 * time.Second}
+	job, _ := queue.Add(probe.Path, "compress-hevc", probe, "")
+
+	queue.SetJobNetworkCopy(job.ID, "M:\\Movies\\video.mkv")
+
+	got := queue.Get(job.ID)
+	if !got.IsNetworkCopy {
+		t.Error("expected IsNetworkCopy to be true")
+	}
+	if got.OriginalNetworkPath != "M:\\Movies\\video.mkv" {
+		t.Errorf("OriginalNetworkPath = %q, want M:\\Movies\\video.mkv", got.OriginalNetworkPath)
+	}
+}

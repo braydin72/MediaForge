@@ -1,7 +1,7 @@
 # MediaForge — Automated Media Ingest System
 **Tagline:** Ingest, Transcode, Organize  
 **Version:** Design Spec v2.0  
-**Status:** v1.0 In Development  
+**Status:** Released, in active maintenance (see CHANGELOG.md for current version — v1.7.1 as of 2026-07-26)  
 **Author:** krichardson  
 
 ---
@@ -471,22 +471,22 @@ Confirmed working end-to-end during v1.0 development and testing:
 
 ## In Progress / Next Sessions
 
-Work that has started or is queued for the next development sessions:
+The items below have all since landed — kept here as a historical record of what was in flight at the time. See `CHANGELOG.md` and `CURRENT_STATE.md` for what's actually still open.
 
-- **Browse path fix** — Windows drive letters (`C:\`) and UNC paths (`\\server\share`) not resolving correctly in the file picker; breadcrumb generation needs special-casing for both forms
-- **Nil pointer panic on network share walk** — directory walker dereferences a nil pointer when a network share becomes unavailable mid-walk; needs a nil guard and Review Queue entry
-- **TMDB movie confidence scoring** — year removed as a search-API filter; scoring now uses title (60%), year ±0/±1 (30%/15%), runtime ±5 min (10%); override rules: exact title + exact year → 0.95, title match + year off >1 → 0.70 *(landed in build 8cf6a69)*
-- **SmartShrink quality cascade** — when Excellent quality preset produces no result within size bounds, automatically fall back to Good, then Acceptable, before sending to Review Queue
-- **CRF search range expansion** — lower CRF floor from 28 to 16 to give SmartShrink more headroom on high-motion content
-- **VMAF sample count configurable** — expose VMAF sample count as a config field (default 5); higher values increase accuracy at the cost of analysis time
-- **Windows tray app** — system-tray icon using `systray`; actions: pause/resume queue, open browser, show notification count badge
-- **Inno Setup installer** — Windows `.exe` installer that registers the service, creates start-menu shortcuts, and sets default config paths
+- **Browse path fix** — **DONE.** Windows drive letters and UNC paths resolve correctly in the file picker.
+- **Nil pointer panic on network share walk** — **DONE.** `internal/browse/browse.go` nil-checks `DirEntry`/`FileInfo` on SMB share walks (see CLAUDE.md's sensitive-areas note).
+- **TMDB movie confidence scoring** — **DONE**, landed in build 8cf6a69. Year removed as a search-API filter; scoring uses title (60%), year ±0/±1 (30%/15%), runtime ±5 min (10%); override rules: exact title + exact year → 0.95, title match + year off >1 → 0.70.
+- **SmartShrink quality cascade** — **SUPERSEDED.** The planned Excellent→Good→Acceptable preset fallback was never built; instead `transcode.smartshrink_adaptive_target` (`internal/config/config.go`, default on) has SmartShrink probe the source's real VMAF ceiling and target that directly, rather than cascading through fixed tiers.
+- **CRF search range expansion** — **SUPERSEDED.** No explicit CRF-floor constant was added; the adaptive-target approach above (plus `vmaf_sample_count` tuning) replaced the need for a wider fixed CRF search range.
+- **VMAF sample count configurable** — **DONE.** `transcode.vmaf_sample_count` is a live config field (`internal/config/config.go`), default 4 (not 5 as originally planned).
+- **Windows tray app** — **DONE.** `cmd/tray/` implements pause/resume, open-browser, and log viewing.
+- **Inno Setup installer** — **DONE.** `installer/mediaforge.iss`, including AppData removal on uninstall.
 
 ---
 
 ## Future Enhancements (Post v1.0)
 
-### Intelligent Duplicate Resolution (implemented, minus VMAF)
+### Intelligent Duplicate Resolution (implemented)
 
 Implemented in `internal/upgrade` (shared by `internal/intake`'s pre-move duplicate
 check and `internal/jobs`'s post-encode duplicate check, since those two packages
@@ -505,13 +505,17 @@ default `"auto"`) and `intake.duplicate_bitrate_upgrade_threshold` (default `0.2
 
 3. **Same resolution, same codec tier — bitrate comparison**
    - Incoming bitrate ≥ existing × (1 + threshold) → auto-replace
-   - Existing bitrate ≥ incoming × (1 + threshold) → auto-keep
+   - Existing bitrate ≥ incoming × (1 + threshold) → **Review Queue** (never auto-discarded — a
+     lower-bitrate re-encode from better encoder settings can score the same or higher on quality
+     despite the size drop, so this always needs a manual comparison rather than a silent auto-keep)
    - Within threshold → Review Queue (too close to call automatically)
 
 4. **Ambiguous / inconclusive** → Review Queue with full context
 
-**Not yet implemented:** VMAF-based comparison as a tiebreaker when resolution/codec/bitrate
-are all inconclusive — still deferred; those cases fall through to the Review Queue today.
+**VMAF-based auto-resolution:** not implemented — VMAF scoring exists in the codebase
+(`internal/ffmpeg/vmaf`) for SmartShrink's own CRF-selection loop, but `upgrade.Decide` does not
+call it. Any case where resolution/codec/bitrate are inconclusive (or where incoming bitrate is
+lower) falls through to the Review Queue rather than being scored automatically.
 
 **Review Queue entry for unresolved duplicates:**
 - Side-by-side panel: codec, resolution, bitrate, file size for incoming vs existing
@@ -605,7 +609,7 @@ Per-entry actions:
 - **Replace** (duplicate entries) — overwrites existing with incoming file
 - **Keep Existing** (duplicate entries) — discards incoming, removes entry
 
-Bulk actions: retry all, discard all selected.
+Bulk actions (selection-based): Discard Selected, Replace Selected (duplicates), Re-encode Selected (with optional custom-settings override).
 
 ### Configuration
 

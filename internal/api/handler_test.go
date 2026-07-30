@@ -417,6 +417,12 @@ func newMockReviewStore(entries ...*store.ReviewEntry) *mockReviewStore {
 	return m
 }
 
+func (m *mockReviewStore) AddToReviewQueue(e *store.ReviewEntry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.entries[e.ID] = e
+	return nil
+}
 func (m *mockReviewStore) GetReviewQueue() ([]store.ReviewEntry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

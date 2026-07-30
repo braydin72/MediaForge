@@ -14,7 +14,6 @@ stateDiagram-v2
     running --> complete: Transcode success
     running --> failed: Transcode error
     running --> cancelled: User cancels
-    running --> pending: Requeued (pause)
 
     complete --> [*]
     failed --> [*]
@@ -171,16 +170,17 @@ Cancelling a running job:
 4. Job status set to `cancelled`
 5. SSE broadcasts cancellation
 
-## Requeue (pause)
+## Pause
 
-When the queue is paused:
+When the queue is paused (`WorkerPool.Pause()`, `internal/jobs/worker.go`):
 
-1. Running jobs are interrupted
-2. Jobs reset to `pending` status
-3. Jobs moved to front of queue
-4. Workers stop picking up new jobs
+1. Workers stop picking up new `pending` jobs
+2. Jobs already `running` are **not** interrupted — they continue to completion normally
+3. Resume (`Unpause()`) allows workers to pick up `pending` jobs again
 
-Resume allows workers to continue.
+Pause does not cancel or requeue in-progress encodes. An earlier implementation
+did stop and requeue running jobs on pause, which lost encoding progress on
+resume — this was changed so pausing never throws away in-flight work.
 
 ## Retry
 

@@ -21,6 +21,9 @@ func registerAPIRoutes(mux *http.ServeMux, h *Handler) {
 	mux.HandleFunc("GET /api/jobs/{id}", h.GetJob)
 	mux.HandleFunc("DELETE /api/jobs/{id}", h.CancelJob)
 	mux.HandleFunc("POST /api/jobs/{id}/retry", h.RetryJob)
+	mux.HandleFunc("POST /api/jobs/{id}/skip", h.SkipCurrentJob)
+	mux.HandleFunc("POST /api/jobs/{id}/requeue", h.RequeueJob)
+	mux.HandleFunc("POST /api/jobs/{id}/dispose", h.DisposeJobSource)
 
 	// Queue control (start/pause/stop) — called by the web UI and the tray app menu.
 	mux.HandleFunc("POST /api/queue/start", h.StartPipeline)
@@ -31,6 +34,10 @@ func registerAPIRoutes(mux *http.ServeMux, h *Handler) {
 	mux.HandleFunc("POST /api/intake/pause", h.PauseIntake)
 	mux.HandleFunc("POST /api/intake/resume", h.ResumeIntake)
 	mux.HandleFunc("GET /api/intake/status", h.IntakeStatus)
+
+	// Combined system stop/start — called by the tray "Stop MediaForge" menu item.
+	mux.HandleFunc("POST /api/system/stop", h.SystemStop)
+	mux.HandleFunc("POST /api/system/start", h.SystemStart)
 
 	// Configuration
 	mux.HandleFunc("GET /api/config", h.GetConfig)

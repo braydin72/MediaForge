@@ -47,6 +47,36 @@ flowchart TB
 
 **Key interface:** `Store` defines persistence operations. Implemented by `store.SQLiteStore`.
 
+## internal/intake
+
+Ingest pipeline: watches the incoming folder and turns a raw file into an
+identified, correctly-named file routed to the library (HEVC) or the encode
+queue (AVC/other).
+
+| File | Responsibility |
+|------|----------------|
+| `watcher.go` | Orchestration: stability check, codec detect, routing to staging/library/Review Queue |
+| `parse.go` | Filename parsing — title/year/SxxExx/multi-episode extraction |
+| `naming.go` | Output filename/folder generation from naming templates |
+| `confidence.go` | Unified confidence scoring shared by all lookup sources |
+| `orchestrator.go` | Coordinates lookup sources into one `LookupResult` |
+| `tmdb.go` / `tvdb.go` / `omdb.go` | Metadata lookup clients (movie/TV search, episode detail) |
+| `llm.go` | Pluggable LLM verification backend (Anthropic/OpenAI/Ollama) for ambiguous matches |
+| `duplicate.go` | Pre-move duplicate-at-destination check, backed by `internal/upgrade` |
+
+**Key rule:** `watcher.go` drives both the HEVC direct-to-library path and the
+AVC encode-queue path — see CLAUDE.md's "known sensitive areas" note before
+changing it.
+
+## internal/upgrade
+
+Shared duplicate-resolution decision logic (`upgrade.Decide`), used by both
+`internal/intake`'s pre-move check and `internal/jobs`'s post-encode check —
+these two packages can't import each other, so the comparison logic lives
+here instead. Compares resolution, codec tier, and bitrate to decide
+`Replace` / `Keep` / `Review`; see `MEDIAFORGE_SPEC.md`'s "Intelligent
+Duplicate Resolution" section for the exact rule order.
+
 ## internal/ffmpeg
 
 FFmpeg integration with four files:
@@ -141,6 +171,49 @@ Push notification integration:
 - Pushover API client
 - Notification formatting
 - Credential validation
+
+## internal/notify
+
+Notification dispatch, independent of channel:
+
+| File | Responsibility |
+|------|----------------|
+| `notify.go` | Event dispatch, per-event toggles |
+| `smtp.go` | SMTP email delivery (Gmail + self-hosted) |
+| `batch.go` | Batched digest mode (collects events, sends on a schedule) |
+
+Pushover (`internal/pushover`) is a separate channel implementation dispatched
+through the same event system.
+
+## internal/setup
+
+First-run setup wizard: detects a missing/incomplete config on first launch
+and serves a guided local web form (`wizard.go`) to collect folder paths and
+API keys before the main app starts.
+
+## internal/winsvc
+
+Windows service wrapper (`//go:build windows`). Implements `--install`,
+`--uninstall`, and `--service` flags; runs under the invoking user account so
+mapped/UNC network share credentials are inherited.
+
+## internal/version
+
+Build metadata. `Version`/`Build` are string vars overridden at compile time
+via `-ldflags` (from the git tag and CI build number respectively); `String()`
+formats them as `v{version}+build.{build}` for the startup banner and log.
+
+## internal/logger
+
+Structured logging (`log/slog`-based) with session log file rotation
+(`config/logs/mediaforge.log`, 2 backups kept across restarts) and a startup
+`Banner()` helper.
+
+## internal/util
+
+Small cross-cutting helpers shared across packages: `file.go` (cross-device
+`SafeMove` with `EXDEV` fallback to copy+rename, used by every move
+operation in the pipeline) and `format.go` (byte-size/duration formatting).
 
 ## web
 

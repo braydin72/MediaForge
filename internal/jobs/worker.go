@@ -71,6 +71,14 @@ type WorkerPool struct {
 	// successfully moved to its library path. May be nil.
 	// The job copy has OutputPath set to the final library location.
 	OnLibraryMoveComplete func(job *Job)
+
+	// Priority-batch tracking for Manual Add "Start Encode": job IDs
+	// currently outstanding from a priority batch, and whether the pool
+	// should automatically re-pause once they've all finished (set when the
+	// batch was started while the queue was paused). See BeginPriorityBatch.
+	priorityMu        sync.Mutex
+	priorityRemaining map[string]struct{}
+	priorityRepause   bool
 }
 
 // SmartShrink quality thresholds (hardcoded for simplicity)
@@ -117,14 +125,15 @@ func NewWorkerPool(queue *Queue, cfg *config.Config, invalidateCache CacheInvali
 	analysisLimit := ClampAnalysisCount(cfg.MaxConcurrentAnalyses)
 
 	pool := &WorkerPool{
-		workers:         make([]*Worker, 0, cfg.Workers),
-		queue:           queue,
-		cfg:             cfg,
-		invalidateCache: invalidateCache,
-		nextWorkerID:    0,
-		ctx:             ctx,
-		cancel:          cancel,
-		analysisLimit:   analysisLimit, // Allow concurrent analysis matching worker count
+		workers:           make([]*Worker, 0, cfg.Workers),
+		queue:             queue,
+		cfg:               cfg,
+		invalidateCache:   invalidateCache,
+		nextWorkerID:      0,
+		ctx:               ctx,
+		cancel:            cancel,
+		analysisLimit:     analysisLimit, // Allow concurrent analysis matching worker count
+		priorityRemaining: make(map[string]struct{}),
 	}
 
 	// Create workers
@@ -132,7 +141,77 @@ func NewWorkerPool(queue *Queue, cfg *config.Config, invalidateCache CacheInvali
 		pool.workers = append(pool.workers, pool.createWorker())
 	}
 
+	go pool.watchPriorityBatch()
+
 	return pool
+}
+
+// BeginPriorityBatch registers jobIDs as an outstanding priority batch
+// (Manual Add "Start Encode"). If the queue is currently paused, it is
+// unpaused so the batch runs immediately, and automatically re-paused once
+// every job in the batch reaches a terminal state — matching the spec: "if
+// queue was paused: starts encoding, stops after last selected file
+// completes, returns to paused state." If the queue was already running,
+// jobs are simply left to run in priority order with no pause-state change.
+func (p *WorkerPool) BeginPriorityBatch(jobIDs []string) {
+	if len(jobIDs) == 0 {
+		return
+	}
+	wasPaused := p.IsPaused()
+
+	p.priorityMu.Lock()
+	for _, id := range jobIDs {
+		p.priorityRemaining[id] = struct{}{}
+	}
+	if wasPaused {
+		p.priorityRepause = true
+	}
+	p.priorityMu.Unlock()
+
+	if wasPaused {
+		p.Unpause()
+	}
+}
+
+// watchPriorityBatch subscribes to queue events for the lifetime of the pool
+// and re-pauses the queue once an outstanding priority batch has fully
+// drained, if that batch was started while the queue was paused.
+func (p *WorkerPool) watchPriorityBatch() {
+	ch := p.queue.Subscribe()
+	defer p.queue.Unsubscribe(ch)
+
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case event, ok := <-ch:
+			if !ok {
+				return
+			}
+			if event.Job == nil {
+				continue
+			}
+			switch event.Type {
+			case "complete", "failed", "cancelled", "skipped":
+			default:
+				continue
+			}
+
+			p.priorityMu.Lock()
+			if _, tracked := p.priorityRemaining[event.Job.ID]; tracked {
+				delete(p.priorityRemaining, event.Job.ID)
+			}
+			done := len(p.priorityRemaining) == 0 && p.priorityRepause
+			if done {
+				p.priorityRepause = false
+			}
+			p.priorityMu.Unlock()
+
+			if done {
+				p.Pause()
+			}
+		}
+	}
 }
 
 // createWorker creates a new worker with the next available ID
@@ -340,15 +419,36 @@ func (p *WorkerPool) Unpause() {
 	p.pausedMu.Unlock()
 }
 
-// StopAll cancels all in-progress jobs. The paused flag is left in its current
-// state so the operator can decide whether to resume via /api/queue/start.
-//
-// TODO: define final semantics. Options being considered:
-//   - Cancel running jobs, requeue them (mirror Pause())
-//   - Cancel running jobs, mark them failed, leave queue otherwise intact
-//   - Cancel running jobs, clear pending jobs entirely
-func (p *WorkerPool) StopAll() {
-	// Stub: no-op until semantics are decided.
+// StopAll cancels all in-progress jobs and pauses the queue so nothing new
+// starts automatically afterward. Pending jobs are left untouched — only
+// running jobs are interrupted. Returns the jobs that were cancelled so
+// callers can drive a file-disposal prompt per stopped file.
+func (p *WorkerPool) StopAll() []*Job {
+	p.mu.Lock()
+	workers := make([]*Worker, len(p.workers))
+	copy(workers, p.workers)
+	p.mu.Unlock()
+
+	var stopped []*Job
+	for _, w := range workers {
+		w.currentJobMu.Lock()
+		job := w.currentJob
+		w.currentJobMu.Unlock()
+		if job == nil {
+			continue
+		}
+
+		w.CancelCurrentJob(job.ID)
+		if err := p.queue.CancelJob(job.ID); err != nil {
+			logger.Warn("Failed to mark job cancelled during StopAll", "job_id", job.ID, "error", err)
+		}
+		if j := p.queue.Get(job.ID); j != nil {
+			stopped = append(stopped, j.Copy())
+		}
+	}
+
+	p.Pause()
+	return stopped
 }
 
 // Start starts the worker's processing loop
