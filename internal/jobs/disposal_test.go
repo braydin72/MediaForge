@@ -3,29 +3,48 @@ package jobs_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/braydin72/mediaforge/internal/config"
 	"github.com/braydin72/mediaforge/internal/jobs"
 )
 
+// TestIsManagedLocal builds paths relative to a real staging dir via
+// filepath.Join so the test is valid on both Windows and Linux (CI runs on
+// Linux, where a Windows-style "C:\..." string is just an opaque filename,
+// not a path with meaningful separators).
 func TestIsManagedLocal(t *testing.T) {
-	cfg := &config.Config{Intake: config.IntakeConfig{StagingFolder: `C:\staging`}}
+	staging := filepath.Join(t.TempDir(), "staging")
+	cfg := &config.Config{Intake: config.IntakeConfig{StagingFolder: staging}}
 
 	cases := []struct {
 		path string
 		want bool
 	}{
-		{`C:\staging\video.mkv`, true},
-		{`C:\staging\sub\video.mkv`, true},
-		{`C:\STAGING\video.mkv`, true}, // case-insensitive on windows
-		{`M:\Movies\video.mkv`, false},
-		{`C:\staging-other\video.mkv`, false}, // prefix collision, not a real subpath
+		{filepath.Join(staging, "video.mkv"), true},
+		{filepath.Join(staging, "sub", "video.mkv"), true},
+		{filepath.Join(filepath.Dir(staging), "elsewhere", "video.mkv"), false},
+		{staging + "-other" + string(filepath.Separator) + "video.mkv", false}, // prefix collision, not a real subpath
 	}
 	for _, c := range cases {
 		if got := jobs.IsManagedLocal(c.path, cfg); got != c.want {
 			t.Errorf("IsManagedLocal(%q) = %v, want %v", c.path, got, c.want)
 		}
+	}
+}
+
+func TestIsManagedLocal_WindowsCaseInsensitive(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("case-insensitive path comparison only applies on Windows")
+	}
+	cfg := &config.Config{Intake: config.IntakeConfig{StagingFolder: `C:\staging`}}
+
+	if !jobs.IsManagedLocal(`C:\STAGING\video.mkv`, cfg) {
+		t.Error("expected case-insensitive match on Windows")
+	}
+	if jobs.IsManagedLocal(`M:\Movies\video.mkv`, cfg) {
+		t.Error("expected a different drive to not be managed-local")
 	}
 }
 
