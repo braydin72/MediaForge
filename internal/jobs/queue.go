@@ -211,8 +211,20 @@ func (q *Queue) Add(inputPath string, presetID string, probe *ffmpeg.ProbeResult
 	return job, nil
 }
 
-// AddMultiple adds multiple jobs at once with batched persistence and SSE
+// AddMultiple adds multiple jobs at once with batched persistence and SSE,
+// appending them to the back of the queue.
 func (q *Queue) AddMultiple(probes []*ffmpeg.ProbeResult, presetID string, smartShrinkQuality string) ([]*Job, error) {
+	return q.addMultiple(probes, presetID, smartShrinkQuality, false)
+}
+
+// AddMultiplePriority is identical to AddMultiple except the new jobs are
+// inserted at the FRONT of the queue order, so they run before any
+// currently-pending jobs. Used by Manual Add "Start Encode".
+func (q *Queue) AddMultiplePriority(probes []*ffmpeg.ProbeResult, presetID string, smartShrinkQuality string) ([]*Job, error) {
+	return q.addMultiple(probes, presetID, smartShrinkQuality, true)
+}
+
+func (q *Queue) addMultiple(probes []*ffmpeg.ProbeResult, presetID string, smartShrinkQuality string, priority bool) ([]*Job, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -272,8 +284,19 @@ func (q *Queue) AddMultiple(probes []*ffmpeg.ProbeResult, presetID string, smart
 		}
 
 		q.jobs[job.ID] = job
-		q.order = append(q.order, job.ID)
 		jobList = append(jobList, job)
+	}
+
+	if priority {
+		ids := make([]string, len(jobList))
+		for i, job := range jobList {
+			ids[i] = job.ID
+		}
+		q.order = append(ids, q.order...)
+	} else {
+		for _, job := range jobList {
+			q.order = append(q.order, job.ID)
+		}
 	}
 
 	// Batch persist to store
@@ -281,9 +304,14 @@ func (q *Queue) AddMultiple(probes []*ffmpeg.ProbeResult, presetID string, smart
 		if err := q.store.SaveJobs(jobList); err != nil {
 			logger.Warn("Failed to persist jobs batch", "error", err)
 		}
-		// Add all to order
-		for _, job := range jobList {
-			q.persistOrder(job.ID)
+		if priority {
+			if err := q.store.SetOrder(q.order); err != nil {
+				logger.Warn("Failed to persist job order", "error", err)
+			}
+		} else {
+			for _, job := range jobList {
+				q.persistOrder(job.ID)
+			}
 		}
 	}
 
@@ -461,6 +489,94 @@ func (q *Queue) SkipJob(id, reason string) error {
 	q.broadcast(JobEvent{Type: "skipped", Job: job.Copy()})
 
 	return nil
+}
+
+// MarkSkippedByUser marks a currently-running job as skipped at the user's
+// request (as opposed to SkipJob, which is used internally by SmartShrink
+// analysis when a file can't be improved). The caller is responsible for
+// cancelling the worker's in-flight ffmpeg process first (WorkerPool.CancelJob)
+// — this only updates job state, it does not stop the encode itself.
+func (q *Queue) MarkSkippedByUser(id string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	job, exists := q.jobs[id]
+	if !exists {
+		return jobNotFoundError(id)
+	}
+
+	if job.Status != StatusRunning {
+		return jobNotRunningError(id, job.Status)
+	}
+
+	job.Status = StatusSkipped
+	job.SkipReason = "Skipped by user"
+	job.Error = "Skipped by user"
+	job.CompletedAt = time.Now()
+	job.Progress = 0
+	job.Speed = 0
+	job.ETA = ""
+	job.TempPath = ""
+	job.Phase = PhaseNone
+
+	q.persist(job)
+	q.broadcast(JobEvent{Type: "skipped", Job: job.Copy()})
+
+	return nil
+}
+
+// RequeueTerminal resets a Skipped or Cancelled job back to Pending so it
+// runs again, moving it to the front of the queue. This is the user-facing
+// "ReQueue" action (distinct from Requeue, which is used internally when a
+// worker-count resize interrupts a running job). If forceEncode is true, the
+// job is flagged with OverrideAllowSameCodec so a same-codec skip doesn't
+// recur — used when ReQueue-ing a job that was Skipped because the file was
+// already in the target codec.
+func (q *Queue) RequeueTerminal(id string, forceEncode bool) (*Job, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	job, ok := q.jobs[id]
+	if !ok {
+		return nil, jobNotFoundError(id)
+	}
+
+	if job.Status != StatusSkipped && job.Status != StatusCancelled {
+		return nil, fmt.Errorf("can only requeue skipped or cancelled jobs, got: %s", job.Status)
+	}
+
+	job.Status = StatusPending
+	job.Progress = 0
+	job.Speed = 0
+	job.ETA = ""
+	job.TempPath = ""
+	job.StartedAt = time.Time{}
+	job.CompletedAt = time.Time{}
+	job.Error = ""
+	job.SkipReason = ""
+	if forceEncode {
+		allow := true
+		job.OverrideAllowSameCodec = &allow
+	}
+
+	newOrder := []string{id}
+	for _, oid := range q.order {
+		if oid != id {
+			newOrder = append(newOrder, oid)
+		}
+	}
+	q.order = newOrder
+
+	q.persist(job)
+	if q.store != nil {
+		if err := q.store.SetOrder(q.order); err != nil {
+			logger.Warn("Failed to persist job order", "error", err)
+		}
+	}
+
+	q.broadcast(JobEvent{Type: "requeued", Job: job.Copy()})
+
+	return job, nil
 }
 
 // UpdateJobPhase updates the phase of a running SmartShrink job.
@@ -803,6 +919,19 @@ func (q *Queue) SetJobOverrides(id, speed, outputFormat string, crf int) {
 		if crf > 0 {
 			job.OverrideCRF = crf
 		}
+		q.persist(job)
+	}
+}
+
+// SetJobNetworkCopy marks a job's InputPath as a local staging copy made
+// from a network/library source (Manual Add encode-only on a non-staging
+// path). originalPath is kept only for audit/logging.
+func (q *Queue) SetJobNetworkCopy(id, originalPath string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if job, ok := q.jobs[id]; ok {
+		job.IsNetworkCopy = true
+		job.OriginalNetworkPath = originalPath
 		q.persist(job)
 	}
 }

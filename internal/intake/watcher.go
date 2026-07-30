@@ -318,8 +318,14 @@ func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpe
 	// Corrected filename (metadata-identified title/year/season/episode), used for any
 	// Review Queue entry created below so ResolveReviewEntry/ResubmitReviewEntry re-parse
 	// the correction instead of the raw source name. Falls back to the raw name when
-	// buildCorrectedFilename can't resolve one (e.g. not enough metadata).
-	correctedName := buildCorrectedFilename(&w.cfg, &parsed, "."+outFmt)
+	// buildCorrectedFilename can't resolve one (e.g. not enough metadata). When naming
+	// lookup is disabled, the original name is always kept verbatim.
+	var correctedName string
+	if w.cfg.EnableNamingLookup {
+		correctedName = buildCorrectedFilename(&w.cfg, &parsed, "."+outFmt)
+	} else {
+		correctedName = strings.TrimSuffix(filename, filepath.Ext(filename)) + "." + outFmt
+	}
 
 	stagingPath := filepath.Join(w.cfg.StagingFolder, filename)
 	if err := util.SafeMove(path, stagingPath); err != nil {
@@ -346,7 +352,12 @@ func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpe
 		return
 	}
 
-	libraryPath := resolveLibraryPath(&w.cfg, &parsed, "."+outFmt)
+	var libraryPath string
+	if w.cfg.EnableNamingLookup {
+		libraryPath = resolveLibraryPath(&w.cfg, &parsed, "."+outFmt)
+	} else {
+		libraryPath = resolveLibraryPathPassthrough(&w.cfg, &parsed, correctedName)
+	}
 	if libraryPath != "" {
 		w.EncodeQueue.SetLibraryPath(job.ID, libraryPath)
 		logger.Info("Intake: AVC file queued for encode",
@@ -371,7 +382,7 @@ func (w *Watcher) stageAndEnqueue(ctx context.Context, path string, probe *ffmpe
 // parsed and the result is returned with ok=true. When no Orchestrator is configured it
 // returns (nil, true) so callers proceed without metadata.
 func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *ParsedFilename, probe *ffmpeg.ProbeResult) (*LookupResult, bool) {
-	if w.Orchestrator == nil {
+	if !w.cfg.EnableNamingLookup || w.Orchestrator == nil {
 		return nil, true
 	}
 	filename := filepath.Base(path)
@@ -497,9 +508,16 @@ func (w *Watcher) moveHEVCToLibrary(ctx context.Context, path string, probe *ffm
 	ext := filepath.Ext(filename)
 	// Corrected filename (metadata-identified title/year/season/episode), used for any
 	// Review Queue entry created below so ResolveReviewEntry/ResubmitReviewEntry re-parse
-	// the correction instead of the raw source name.
-	correctedName := buildCorrectedFilename(&w.cfg, &parsed, ext)
-	libraryPath := resolveLibraryPath(&w.cfg, &parsed, ext)
+	// the correction instead of the raw source name. When naming lookup is disabled, the
+	// original name is always kept verbatim.
+	var correctedName, libraryPath string
+	if w.cfg.EnableNamingLookup {
+		correctedName = buildCorrectedFilename(&w.cfg, &parsed, ext)
+		libraryPath = resolveLibraryPath(&w.cfg, &parsed, ext)
+	} else {
+		correctedName = filename
+		libraryPath = resolveLibraryPathPassthrough(&w.cfg, &parsed, filename)
+	}
 	if libraryPath == "" {
 		reason := "could not resolve library destination path from metadata"
 		logger.Warn("Intake: HEVC library path resolution failed", "file", filename)

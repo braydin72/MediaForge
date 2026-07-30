@@ -152,7 +152,13 @@ func buildTrayMenu() {
 	// 2. Encode queue control — checked = paused (no new jobs starting).
 	mPauseQueue := systray.AddMenuItemCheckbox("Pause Queue", "Stop starting new jobs from the transcode queue", false)
 
-	// 3. Queue depth — display only.
+	// 3. Combined kill switch — checked = both intake and the encode queue are
+	// stopped. Distinct from the two controls above: this also cancels any
+	// job currently encoding (via WorkerPool.StopAll), where Pause Queue
+	// deliberately lets an in-progress job finish.
+	mStop := systray.AddMenuItemCheckbox("Stop MediaForge", "Stop intake and the encode queue, cancelling any active encode", false)
+
+	// 4. Queue depth — display only.
 	mQueue := systray.AddMenuItem("Transcode Queue (0)", "Number of jobs pending/running")
 	mQueue.Disable()
 
@@ -167,12 +173,22 @@ func buildTrayMenu() {
 
 	mExit := systray.AddMenuItem("Exit", "Stop MediaForge and close this icon") // 9
 
-	// Background: refresh the queue-depth label every 2 seconds.
+	// Background: refresh the queue-depth label and the Stop MediaForge check
+	// state every 2 seconds, so it reflects reality even when changed via the
+	// web UI's own Pause Intake / Stop All controls rather than this menu.
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
 			mQueue.SetTitle(fmt.Sprintf("Transcode Queue (%d)", getQueueCount()))
+
+			intakePaused, queuePaused, running := getSystemState()
+			stopped := intakePaused && queuePaused && running == 0
+			if stopped && !mStop.Checked() {
+				mStop.Check()
+			} else if !stopped && mStop.Checked() {
+				mStop.Uncheck()
+			}
 		}
 	}()
 
@@ -195,6 +211,14 @@ func buildTrayMenu() {
 				} else {
 					mPauseQueue.Check()
 					callQueueAPI("pause")
+				}
+			case <-mStop.ClickedCh:
+				if mStop.Checked() {
+					mStop.Uncheck()
+					callSystemAPI("start")
+				} else {
+					mStop.Check()
+					callSystemAPI("stop")
 				}
 			case <-mConfig.ClickedCh:
 				openFile(configPath())
@@ -276,6 +300,14 @@ func callIntakeAPI(endpoint string) error {
 	return postAPI("/api/intake/" + endpoint)
 }
 
+// callSystemAPI POSTs to /api/system/{endpoint} — the combined kill switch
+// used by "Stop MediaForge" (pauses intake AND stops the encode queue,
+// cancelling any active encode). See buildTrayMenu's doc comment for how
+// this differs from the two finer-grained controls above it.
+func callSystemAPI(endpoint string) error {
+	return postAPI("/api/system/" + endpoint)
+}
+
 // getQueueCount returns the current queue depth (pending + running) from
 // /api/stats, or 0 if the server is unreachable.
 func getQueueCount() int {
@@ -292,6 +324,35 @@ func getQueueCount() int {
 		return 0
 	}
 	return s.Pending + s.Running
+}
+
+// getSystemState returns the current intake-paused and queue-paused flags
+// (from /api/intake/status and /api/stats) plus the running job count, used
+// to keep the "Stop MediaForge" checkbox in sync with reality regardless of
+// which control (tray or web UI) last changed it. Unreachable server reports
+// everything as not-paused/zero.
+func getSystemState() (intakePaused, queuePaused bool, running int) {
+	if resp, err := http.Get(baseURL + "/api/intake/status"); err == nil { //nolint:noctx
+		defer resp.Body.Close()
+		var s struct {
+			Paused bool `json:"paused"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&s) == nil {
+			intakePaused = s.Paused
+		}
+	}
+	if resp, err := http.Get(baseURL + "/api/stats"); err == nil { //nolint:noctx
+		defer resp.Body.Close()
+		var s struct {
+			Running int  `json:"running"`
+			Paused  bool `json:"paused"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&s) == nil {
+			queuePaused = s.Paused
+			running = s.Running
+		}
+	}
+	return intakePaused, queuePaused, running
 }
 
 // openFile opens a text file (config, logs) in Notepad. We invoke notepad.exe

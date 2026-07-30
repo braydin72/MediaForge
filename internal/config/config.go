@@ -52,6 +52,14 @@ type IntakeConfig struct {
 	// required (at equal resolution/codec) to treat the incoming file as an
 	// upgrade, e.g. 0.25 means incoming must be at least 25% higher bitrate.
 	DuplicateBitrateUpgradeThreshold float64 `yaml:"duplicate_bitrate_upgrade_threshold"`
+
+	// EnableNamingLookup controls whether files go through TMDB/TVDB/OMDb
+	// identification and naming-template rename. When false, files pass
+	// through to their output destination with their original filename, no
+	// lookup, and no identification-failure Review Queue entries (since
+	// identification never runs). Defaults to true; see Load()'s handling of
+	// existing config files that predate this field.
+	EnableNamingLookup bool `yaml:"enable_naming_lookup"`
 }
 
 type APIsConfig struct {
@@ -272,6 +280,7 @@ func DefaultConfig() *Config {
 			CacheTimeoutSeconds:              60,
 			DuplicateResolution:              "auto",
 			DuplicateBitrateUpgradeThreshold: 0.25,
+			EnableNamingLookup:               true,
 			Naming: IntakeNamingConfig{
 				MovieFolder: "{title} ({year})",
 				MovieFile:   "{title} ({year})",
@@ -442,6 +451,21 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Intake.Naming.EpisodeFile == "" {
 		cfg.Intake.Naming.EpisodeFile = "{show} - S{season:02d}E{episode:02d} - {episode_title}"
+	}
+
+	// EnableNamingLookup defaults to true. A plain yaml.Unmarshal can't tell
+	// "key absent" from "explicitly false" for a bool, so existing config
+	// files that predate this field (which would otherwise unmarshal it as
+	// false and silently disable identification) are detected via a raw
+	// parse and backfilled to true.
+	var rawCfg map[string]interface{}
+	if yaml.Unmarshal(data, &rawCfg) == nil {
+		intakeRaw, _ := rawCfg["intake"].(map[string]interface{})
+		if _, present := intakeRaw["enable_naming_lookup"]; !present {
+			cfg.Intake.EnableNamingLookup = true
+		}
+	} else {
+		cfg.Intake.EnableNamingLookup = true
 	}
 	if cfg.LLM.OllamaHost == "" {
 		cfg.LLM.OllamaHost = "http://localhost:11434"

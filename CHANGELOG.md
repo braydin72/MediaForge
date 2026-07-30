@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-07-30
+
+### Added
+- Control & workflow redesign: separated intake vs. encode-queue controls
+  throughout, with immediate (no-lag) UI state updates.
+  - Web UI: queue header now has a Play/Pause/Stop transport bar (replacing
+    the old single Pause/Resume button) plus a new Pause/Resume Intake
+    control wired to the previously-unused `/api/intake/pause|resume|status`
+    endpoints. Queue footer's redundant Stop/Resume button removed; added a
+    "Clear All" button alongside the existing filtered "Clear".
+  - File-disposal prompt: Cancel, the new Skip button, Stop All, and Clear
+    All now ask whether an in-progress file's source should be deleted or
+    moved back to the intake watch folder. Files that are local staging
+    copies of a network/library source (Manual Add Encode Only/Custom
+    Encode) skip the prompt and always have their local copy deleted
+    silently — the original is never touched.
+  - Skip button on the currently-running job (`POST /api/jobs/:id/skip`):
+    stops the encode, marks it Skipped, and continues the queue immediately
+    (unlike Stop All, which pauses).
+  - ReQueue button replaces Retry for Skipped/Cancelled queue items
+    (`POST /api/jobs/:id/requeue`); Retry remains only for Failed items via
+    the existing endpoint. Skipped-item ReQueue forces past a same-codec
+    skip for that job specifically, without changing the global setting.
+  - `WorkerPool.StopAll()` (`POST /api/queue/stop`) now has real semantics —
+    cancels the running job(s) and pauses the queue — replacing the
+    previous no-op stub.
+  - Tray: new "Stop MediaForge" menu item, a combined kill switch
+    (`POST /api/system/stop|start`) that pauses intake and stops the encode
+    queue together, distinct from the existing independent Stop
+    Pipeline/Pause Queue items.
+  - Manual Add: "Full Pipeline" now copies the selected file(s) into the
+    intake watch folder and lets the normal folder watcher pick them up,
+    instead of calling the pipeline directly. "Encode Only"/"Custom Encode"
+    split into "Add to Queue" (always visible, appends, never touches
+    pause state) and "Start Encode" (visible only while paused; adds to
+    the front of the queue and runs immediately, auto-repausing once that
+    priority batch finishes if the queue was paused when it started).
+    Files browsed from outside the managed staging folder are copied into
+    staging first, so the disposal "network copy" rule above only ever
+    deletes MediaForge's own local copy.
+  - New Settings toggle "Enable metadata lookup and rename"
+    (`intake.enable_naming_lookup`, default `true`): when off, files pass
+    through to their output destination under their original filename, with
+    no TMDB/TVDB/OMDb lookup and no Review Queue entries for identification
+    failures (since identification never runs).
+  - Files modified: `internal/jobs/{disposal.go (new),job.go,queue.go,
+    worker.go}`, `internal/api/{handler.go,router.go,sse.go}`,
+    `internal/intake/{watcher.go,naming.go}`, `internal/config/config.go`,
+    `cmd/tray/main.go`, `web/templates/index.html`. Tests added:
+    `internal/jobs/disposal_test.go`, new cases in
+    `internal/jobs/queue_test.go`.
+
+### Fixed
+- `internal/upgrade.Decide` auto-discarded (`Keep`) an incoming file whenever
+  its bitrate was meaningfully lower than the existing library file's, at
+  equal resolution/codec tier — even though a smaller re-encode from better
+  encoder settings can score the same or higher on quality despite the size
+  drop. A lower incoming bitrate at equal resolution/codec now always routes
+  to the Review Queue (`Review`) for a manual quality comparison instead of
+  auto-discarding; the higher-bitrate auto-`Replace` path is unchanged.
+  Files modified: `internal/upgrade/upgrade.go`,
+  `internal/upgrade/upgrade_test.go`.
+
 ## [1.7.1] - 2026-07-26
 
 ### Fixed

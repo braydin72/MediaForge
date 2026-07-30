@@ -956,6 +956,38 @@
             color: #eab308;
         }
 
+        .transport-bar {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+        }
+        .transport-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            padding: 0;
+            border: none;
+            background: transparent;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+        }
+        .transport-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+        .transport-btn:hover:not(:disabled) {
+            background: var(--bg-tertiary);
+        }
+        .transport-btn:disabled {
+            opacity: 0.3;
+            cursor: default;
+        }
+        .transport-play { color: var(--success); }
+        .transport-pause { color: var(--warning); }
+        .transport-stop { color: var(--error); }
+
         .dropdown-menu {
             position: relative;
         }
@@ -2624,7 +2656,8 @@
                             <option value="preserve">Preserve</option>
                         </select>
                         <input type="number" id="custom-crf-input" style="display:none;width:110px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;padding:6px 10px;outline:none;" placeholder="CRF: default" title="CRF override">
-                        <button class="btn btn-primary" onclick="startJobs()" id="start-btn" disabled>Start Transcode</button>
+                        <button class="btn btn-primary" onclick="startJobs(false)" id="start-btn" disabled>Add</button>
+                        <button class="btn btn-secondary" onclick="startJobs(true)" id="start-encode-btn" disabled style="display:none">Start Encode</button>
                         <span class="selection-count" id="selection-summary"></span>
                         <span class="schedule-status" id="schedule-status"></span>
                     </div>
@@ -2650,7 +2683,18 @@
                         </span>
                         <div class="queue-controls">
                             <span class="queue-state-badge" id="queue-state-badge" title="Encode queue state">Running</span>
-                            <button class="btn btn-secondary btn-sm" id="queue-pause-btn" onclick="toggleQueuePause()">Pause Encode Queue</button>
+                            <div class="transport-bar" id="queue-transport-bar" title="Queue controls">
+                                <button class="transport-btn transport-play" id="transport-play-btn" onclick="resumeQueue()" title="Resume Queue">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                                </button>
+                                <button class="transport-btn transport-pause" id="transport-pause-btn" onclick="pauseQueue()" title="Pause Queue">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                                </button>
+                                <button class="transport-btn transport-stop" id="transport-stop-btn" onclick="stopAll()" title="Stop All">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                                </button>
+                            </div>
+                            <button class="btn btn-secondary btn-sm" id="intake-pause-btn" onclick="toggleIntakePause()" title="Pause or resume the intake pipeline (file discovery from the watch folder). Files already in progress are unaffected.">Pause Intake</button>
                             <label class="notify-label" id="notify-container" style="display: none">
                                 <input type="checkbox" id="notify-checkbox" onchange="updateNotifySetting(this.checked)">
                                 <span>Notify when done</span>
@@ -2707,8 +2751,8 @@
                     </div>
                     <div class="queue-footer">
                         <div class="queue-footer-buttons">
-                            <button class="btn btn-secondary btn-sm" id="stop-resume-btn" onclick="toggleStopResume()" style="flex: 1">Stop All</button>
                             <button class="btn btn-secondary btn-sm" id="clear-btn" onclick="clearQueue()" style="flex: 1">Clear</button>
+                            <button class="btn btn-secondary btn-sm" id="clear-all-btn" onclick="clearAllQueue()" style="flex: 1">Clear All</button>
                         </div>
                         <div id="queue-error" class="queue-error"></div>
                     </div>
@@ -2968,6 +3012,19 @@
                         </svg>
                     </div>
                     <div class="setting-group-content" id="identification-settings-content">
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">Enable metadata lookup and rename</div>
+                                <div class="setting-desc">When on, files are identified via TMDB/TVDB/OMDb and renamed per the naming templates below. When off, files pass through to their output destination with their original filename — no lookup, and no Review Queue entries for identification failures (since identification never runs).</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle">
+                                    <input type="checkbox" id="setting-enable-naming-lookup"
+                                           onchange="updateSetting('intake_enable_naming_lookup', this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
                         <div class="setting-item setting-item-stacked">
                             <div class="setting-info">
                                 <div class="setting-name">TMDB API Key</div>
@@ -3590,6 +3647,25 @@
         </div>
     </div>
 
+    <div id="disposal-modal" class="modal-overlay" onclick="closeDisposalModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-title" id="disposal-modal-title">Stop encode</div>
+            <div class="modal-message">
+                <div id="disposal-modal-filename" style="font-weight:600;word-break:break-all;"></div>
+                <div id="disposal-modal-status" style="color:var(--text-tertiary);font-size:0.8125rem;margin-top:2px;"></div>
+                <label style="display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer;">
+                    <input type="checkbox" id="disposal-modal-delete">
+                    <span>Delete file?</span>
+                </label>
+                <div style="color:var(--text-tertiary);font-size:0.8125rem;margin-top:4px;">If unchecked, the file is moved back to the intake watch folder.</div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeDisposalModal()">Cancel</button>
+                <button class="btn btn-primary" id="disposal-modal-action">Confirm</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Initialize theme immediately to prevent flash
         (function initTheme() {
@@ -4040,9 +4116,15 @@
             document.getElementById('custom-format-select').style.display = isCustom ? '' : 'none';
             updateCustomCrfVisibility();
 
-            // Button label reflects actual action.
-            document.getElementById('start-btn').textContent =
-                isFullPipeline ? 'Start Pipeline' : 'Start Transcode';
+            // Full Pipeline: single "Add" button (copies into the watch folder,
+            // the normal pipeline picks it up — no priority/pause concept).
+            // Encode Only / Custom Encode: "Add" becomes "Add to Queue" (append,
+            // never touches queue pause state), plus a "Start Encode" button
+            // that's only shown while the queue is paused (adds at the front
+            // and runs immediately, per spec).
+            document.getElementById('start-btn').textContent = isFullPipeline ? 'Add' : 'Add to Queue';
+            const startEncodeBtn = document.getElementById('start-encode-btn');
+            startEncodeBtn.style.display = (!isFullPipeline && queuePaused) ? '' : 'none';
         }
 
         // Show/configure the CRF override input for Compress presets in Custom Encode mode.
@@ -4066,6 +4148,7 @@
         function updateButtons() {
             const hasSelection = selectedPaths.size > 0;
             document.getElementById('start-btn').disabled = !hasSelection;
+            document.getElementById('start-encode-btn').disabled = !hasSelection;
 
             const summary = document.getElementById('selection-summary');
             if (hasSelection) {
@@ -4084,7 +4167,7 @@
             }
         }
 
-        async function startJobs() {
+        async function startJobs(priority) {
             if (selectedPaths.size === 0) return;
 
             const banner = document.getElementById('processing-banner');
@@ -4112,6 +4195,7 @@
                 if (pipelineMode !== 'full_pipeline') {
                     jobBody.preset_id = preset;
                     jobBody.smartshrink_quality = smartshrinkQuality;
+                    jobBody.add_only = !priority;
                 }
                 if (pipelineMode === 'encode_only_custom') {
                     const speed = document.getElementById('custom-speed-select').value;
@@ -4160,25 +4244,41 @@
             }
         }
 
+        // Cancel/Skip both stop a job's encode; the API returns the job so we
+        // can follow up with a file-disposal prompt (network-copy jobs skip
+        // the prompt entirely and are disposed silently, per backend rules).
         async function cancelJob(id) {
             try {
-                await fetch(`/api/jobs/${id}`, { method: 'DELETE' });
+                const resp = await fetch(`/api/jobs/${id}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (data && data.job) await promptDisposal(data.job);
             } catch (err) {
                 console.error('Cancel error:', err);
             }
         }
 
-        async function retryJob(id) {
-            try {
-                const resp = await fetch(`/api/jobs/${id}/retry`, { method: 'POST' });
-                if (!resp.ok) {
-                    const data = await resp.json();
-                    alert(data.error || 'Failed to retry job');
+        function skipJob(id) {
+            showConfirmModal(
+                'Skip encode?',
+                'This will stop the current encode and move on to the next queued item.',
+                async () => {
+                    try {
+                        const resp = await fetch(`/api/jobs/${id}/skip`, { method: 'POST' });
+                        const data = await resp.json();
+                        if (data && data.job) await promptDisposal(data.job);
+                    } catch (err) {
+                        console.error('Skip error:', err);
+                    }
                 }
-                // Job removal handled via SSE 'removed' event
-            } catch (err) {
-                console.error('Retry error:', err);
-            }
+            );
+        }
+
+        function requeueJob(id, forceEncode) {
+            fetch(`/api/jobs/${id}/requeue`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ force_encode: !!forceEncode })
+            }).catch(err => console.error('ReQueue error:', err));
         }
 
         function clearQueue() {
@@ -4203,82 +4303,118 @@
             );
         }
 
-        // Stop/Resume Queue
-        let queuePaused = false;
-
-        function updateStopResumeButton() {
-            const btn = document.getElementById('stop-resume-btn');
-            if (btn) btn.textContent = queuePaused ? 'Resume' : 'Stop All';
-            // Keep the header pause/resume toggle and state badge in sync (Issue #13).
-            const hdrBtn = document.getElementById('queue-pause-btn');
-            if (hdrBtn) hdrBtn.textContent = queuePaused ? 'Resume Encode Queue' : 'Pause Encode Queue';
-            const badge = document.getElementById('queue-state-badge');
-            if (badge) {
-                badge.textContent = queuePaused ? 'Paused' : 'Running';
-                badge.classList.toggle('paused', queuePaused);
-            }
-        }
-
-        // Header toggle: pauses/resumes the encode queue regardless of whether jobs
-        // are currently running (unlike the footer Stop All, which needs a running job).
-        async function toggleQueuePause() {
-            try {
-                if (queuePaused) {
-                    await fetch('/api/queue/start', { method: 'POST' });
-                    queuePaused = false;
-                } else {
-                    await fetch('/api/queue/pause', { method: 'POST' });
-                    queuePaused = true;
-                }
-                updateStopResumeButton();
-                refreshJobs();
-            } catch (err) {
-                console.error('Queue pause toggle error:', err);
-            }
-        }
-
-        function toggleStopResume() {
-            if (queuePaused) {
-                resumeQueue();
-            } else {
-                pauseQueue();
-            }
-        }
-
-        function pauseQueue() {
-            // Check if there are running jobs first
-            const hasRunningJobs = allSortedJobs.some(j => j.status === 'running');
-
-            if (!hasRunningJobs) {
-                showQueueError('No active jobs to stop');
-                return;
-            }
-
+        function clearAllQueue() {
             showConfirmModal(
-                'Stop Queue',
-                'This will stop the queue from starting new jobs. Any job currently running will finish normally.',
+                'Clear All',
+                'This will remove every job from the queue, including anything currently running. You will be asked what to do with any in-progress file.',
                 async () => {
                     try {
-                        await fetch('/api/queue/pause', { method: 'POST' });
-                        queuePaused = true;
-                        updateStopResumeButton();
+                        const running = allSortedJobs.filter(j => j.status === 'running');
+                        for (const job of running) {
+                            const resp = await fetch(`/api/jobs/${job.id}`, { method: 'DELETE' });
+                            const data = await resp.json();
+                            if (data && data.job) await promptDisposal(data.job);
+                        }
+                        await fetch('/api/jobs/clear', { method: 'POST' });
                         refreshJobs();
                     } catch (err) {
-                        console.error('Pause error:', err);
+                        console.error('Clear All error:', err);
                     }
                 }
             );
         }
 
+        // Queue transport bar (Play/Pause/Stop) + Intake pause
+        let queuePaused = false;
+        let intakePaused = false;
+
+        function updateStopResumeButton() {
+            const badge = document.getElementById('queue-state-badge');
+            if (badge) {
+                badge.textContent = queuePaused ? 'Paused' : 'Running';
+                badge.classList.toggle('paused', queuePaused);
+            }
+            const hasRunningJobs = allSortedJobs.some(j => j.status === 'running');
+            const playBtn = document.getElementById('transport-play-btn');
+            const pauseBtn = document.getElementById('transport-pause-btn');
+            const stopBtn = document.getElementById('transport-stop-btn');
+            if (playBtn) playBtn.disabled = !queuePaused;
+            if (pauseBtn) pauseBtn.disabled = queuePaused;
+            if (stopBtn) stopBtn.disabled = !hasRunningJobs;
+
+            // "Start Encode" is only offered while the queue is paused.
+            const pipelineSelect = document.getElementById('pipeline-mode-select');
+            const startEncodeBtn = document.getElementById('start-encode-btn');
+            if (pipelineSelect && startEncodeBtn) {
+                const isFullPipeline = pipelineSelect.value === 'full_pipeline';
+                startEncodeBtn.style.display = (!isFullPipeline && queuePaused) ? '' : 'none';
+            }
+        }
+
+        function updateIntakeButton() {
+            const btn = document.getElementById('intake-pause-btn');
+            if (btn) btn.textContent = intakePaused ? 'Resume Intake' : 'Pause Intake';
+        }
+
+        async function toggleIntakePause() {
+            const next = !intakePaused;
+            intakePaused = next; // update immediately, no lag
+            updateIntakeButton();
+            try {
+                await fetch(`/api/intake/${next ? 'pause' : 'resume'}`, { method: 'POST' });
+            } catch (err) {
+                console.error('Intake pause toggle error:', err);
+                intakePaused = !next;
+                updateIntakeButton();
+            }
+        }
+
+        async function pauseQueue() {
+            queuePaused = true; // update immediately, no lag
+            updateStopResumeButton();
+            try {
+                await fetch('/api/queue/pause', { method: 'POST' });
+                refreshJobs();
+            } catch (err) {
+                console.error('Pause error:', err);
+            }
+        }
+
         async function resumeQueue() {
+            queuePaused = false; // update immediately, no lag
+            updateStopResumeButton();
             try {
                 await fetch('/api/queue/start', { method: 'POST' });
-                queuePaused = false;
-                updateStopResumeButton();
                 refreshJobs();
             } catch (err) {
                 console.error('Resume error:', err);
             }
+        }
+
+        function stopAll() {
+            const hasRunningJobs = allSortedJobs.some(j => j.status === 'running');
+            if (!hasRunningJobs) {
+                showQueueError('No active jobs to stop');
+                return;
+            }
+            showConfirmModal(
+                'Stop All',
+                'This will stop the currently running encode and pause the queue. You will be asked what to do with the in-progress file.',
+                async () => {
+                    queuePaused = true; // update immediately, no lag
+                    updateStopResumeButton();
+                    try {
+                        const resp = await fetch('/api/queue/stop', { method: 'POST' });
+                        const data = await resp.json();
+                        refreshJobs();
+                        for (const job of (data.stopped || [])) {
+                            await promptDisposal(job);
+                        }
+                    } catch (err) {
+                        console.error('Stop All error:', err);
+                    }
+                }
+            );
         }
 
         function showQueueError(message) {
@@ -4312,6 +4448,64 @@
                 confirmCallback();
             }
             closeConfirmModal();
+        });
+
+        // File disposal modal — shown after Cancel/Skip/Stop All interrupts a
+        // running job, asking whether to delete the source file or move it
+        // back to the intake watch folder. Network-copy jobs (a local staging
+        // copy made from a browsed network/library path) skip the prompt
+        // entirely and are always disposed of silently (delete=true has no
+        // effect either way — the backend always deletes the local copy and
+        // never touches the original).
+        let disposalResolve = null;
+
+        function promptDisposal(job) {
+            if (!job || !job.input_path) return Promise.resolve();
+            if (job.is_network_copy) {
+                return disposeJob(job.id, true);
+            }
+            return new Promise(resolve => {
+                document.getElementById('disposal-modal-filename').textContent = job.input_path.split(/[\\/]/).pop();
+                document.getElementById('disposal-modal-status').textContent = `Status: ${job.status}`;
+                document.getElementById('disposal-modal-delete').checked = false;
+                disposalResolve = async confirmed => {
+                    if (confirmed) {
+                        const del = document.getElementById('disposal-modal-delete').checked;
+                        await disposeJob(job.id, del);
+                    }
+                    resolve();
+                };
+                document.getElementById('disposal-modal').classList.add('active');
+            });
+        }
+
+        // Dismissing without confirming (overlay click / Cancel button) leaves
+        // the file exactly where it stopped — no move, no delete.
+        function closeDisposalModal(event) {
+            if (event && event.target !== event.currentTarget) return;
+            document.getElementById('disposal-modal').classList.remove('active');
+            const resolveFn = disposalResolve;
+            disposalResolve = null;
+            if (resolveFn) resolveFn(false);
+        }
+
+        async function disposeJob(id, deleteFile) {
+            try {
+                await fetch(`/api/jobs/${id}/dispose`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ delete: !!deleteFile })
+                });
+            } catch (err) {
+                console.error('Dispose error:', err);
+            }
+        }
+
+        document.getElementById('disposal-modal-action').addEventListener('click', () => {
+            document.getElementById('disposal-modal').classList.remove('active');
+            const resolveFn = disposalResolve;
+            disposalResolve = null;
+            if (resolveFn) resolveFn(true);
         });
 
         async function refreshJobs() {
@@ -4390,11 +4584,17 @@
                     ${job.status === 'pending' || job.status === 'running' ? `
                         <div class="job-actions">
                             <button class="btn btn-secondary btn-sm" onclick="cancelJob('${job.id}')">Cancel</button>
+                            ${job.status === 'running' ? `<button class="btn btn-secondary btn-sm" onclick="skipJob('${job.id}')">Skip</button>` : ''}
                         </div>
                     ` : ''}
-                    ${job.status === 'failed' ? `
+                    ${job.status === 'skipped' ? `
                         <div class="job-actions">
-                            <button class="btn btn-secondary btn-sm" onclick="retryJob('${job.id}')">Retry</button>
+                            <button class="btn btn-secondary btn-sm" onclick="requeueJob('${job.id}', true)">ReQueue</button>
+                        </div>
+                    ` : ''}
+                    ${job.status === 'cancelled' ? `
+                        <div class="job-actions">
+                            <button class="btn btn-secondary btn-sm" onclick="requeueJob('${job.id}', false)">ReQueue</button>
                         </div>
                     ` : ''}
                 </div>
@@ -4866,8 +5066,10 @@
                         <div style="font-size: 0.8125rem; margin-top: 4px; color: var(--text-tertiary)">Select files and start transcoding</div>
                     </div>
                 `;
-                // No jobs, so not paused
-                queuePaused = false;
+                // queuePaused is driven by explicit user actions and the
+                // authoritative /api/stats poll (updateStats), not inferred
+                // from the job list — only the transport bar's disabled
+                // state (no running jobs) needs refreshing here.
                 updateStopResumeButton();
                 return;
             }
@@ -4885,18 +5087,10 @@
                 container.scrollTop = Math.min(savedScrollTop, container.scrollHeight - container.clientHeight);
             });
 
-            // Sync Stop/Resume button state
-            const hasRunningJobs = jobs.some(j => j.status === 'running');
-            const hasPendingJobs = jobs.some(j => j.status === 'pending');
-
-            // If jobs are running, we're not paused
-            if (hasRunningJobs) {
-                queuePaused = false;
-            }
-            // If paused but no pending jobs, clear pause (nothing to resume)
-            if (queuePaused && !hasPendingJobs) {
-                queuePaused = false;
-            }
+            // Refresh the transport bar's disabled state (depends on whether
+            // any job is currently running). queuePaused itself is driven by
+            // explicit user actions and the authoritative /api/stats poll —
+            // not inferred from the job list.
             updateStopResumeButton();
         }
 
@@ -5270,6 +5464,7 @@
                 document.getElementById('setting-intake-cache-timeout').value = config.intake_cache_timeout_seconds ?? 60;
 
                 // Identification settings
+                document.getElementById('setting-enable-naming-lookup').checked = config.intake_enable_naming_lookup !== false;
                 document.getElementById('setting-apis-tmdb').value = config.apis_tmdb_key || '';
                 document.getElementById('setting-apis-tvdb').value = config.apis_tvdb_key || '';
                 document.getElementById('setting-apis-omdb').value = config.apis_omdb_key || '';
@@ -6469,6 +6664,12 @@
         connectSSE();
         loadSettings();
         loadPresets();
+
+        // Initial intake pause state (not carried by the job-queue SSE stream).
+        fetch('/api/intake/status').then(r => r.json()).then(data => {
+            intakePaused = !!(data && data.paused);
+            updateIntakeButton();
+        }).catch(err => console.error('Intake status error:', err));
     </script>
 </body>
 </html>

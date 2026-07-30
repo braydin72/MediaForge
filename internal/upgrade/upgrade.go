@@ -82,9 +82,12 @@ func Decide(incoming, existing FileInfo, bitrateThreshold float64) (Decision, st
 			return Replace, fmt.Sprintf("auto-resolved: incoming bitrate %d bps is >=%.0f%% higher than existing %d bps at equal resolution/codec",
 				incoming.BitrateBps, bitrateThreshold*100, existing.BitrateBps)
 		}
+		// A lower incoming bitrate at equal resolution/codec is never auto-discarded:
+		// a smaller file from better encoding settings can score the same or higher on
+		// quality than the existing one, so this always needs a manual look.
 		if existingBr >= incomingBr*(1+bitrateThreshold) {
-			return Keep, fmt.Sprintf("auto-resolved: existing bitrate %d bps is >=%.0f%% higher than incoming %d bps at equal resolution/codec",
-				existing.BitrateBps, bitrateThreshold*100, incoming.BitrateBps)
+			return Review, fmt.Sprintf("duplicate: incoming bitrate %d bps is lower than existing %d bps at equal resolution/codec — needs manual quality comparison",
+				incoming.BitrateBps, existing.BitrateBps)
 		}
 	}
 

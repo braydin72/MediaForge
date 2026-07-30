@@ -1,7 +1,7 @@
 # MediaForge — Comprehensive Status & Roadmap
 
-**Release Date:** v1.0.0 on 2026-06-24  
-**Current Session Date:** 2026-07-01
+**Release Date:** v1.0.0 on 2026-06-24 (latest release: v1.7.1 on 2026-07-26 — see CHANGELOG.md)  
+**Current Session Date:** 2026-07-27
 
 ---
 

@@ -36,6 +36,7 @@ type StatsStore interface {
 
 // ReviewQueueStore defines the interface for Review Queue read/write operations.
 type ReviewQueueStore interface {
+	AddToReviewQueue(e *store.ReviewEntry) error
 	GetReviewQueue() ([]store.ReviewEntry, error)
 	GetReviewEntry(id string) (*store.ReviewEntry, error)
 	GetReviewQueueCount() (int, error)
@@ -318,6 +319,29 @@ type CreateJobsRequest struct {
 	EncodeSpeed        string   `json:"encode_speed,omitempty"`         // encode_only_custom: override encoder speed preset
 	EncodeOutputFormat string   `json:"encode_output_format,omitempty"` // encode_only_custom: override output container
 	EncodeQualityCRF   int      `json:"encode_quality_crf,omitempty"`   // encode_only_custom: override CRF for Compress presets
+	AddOnly            bool     `json:"add_only,omitempty"`             // encode_only/encode_only_custom: "Add to Queue" (append, no unpause) vs "Start Encode" (priority + auto pause/resume)
+}
+
+// sendSystemFailureToReview writes a Review Queue entry for an out-of-band
+// failure that has nothing to do with identification/encoding (e.g. a
+// Manual Add file-copy error), so it's never silently dropped. No-op if no
+// review store is configured.
+func (h *Handler) sendSystemFailureToReview(path, reason string) {
+	if h.reviewStore == nil {
+		return
+	}
+	entry := store.ReviewEntry{
+		ID:           uuid.New().String(),
+		OriginalPath: path,
+		Filename:     filepath.Base(path),
+		Reason:       reason,
+		Category:     string(store.ReviewCategorySystemFailure),
+		Status:       "pending",
+		CreatedAt:    time.Now().UTC(),
+	}
+	if err := h.reviewStore.AddToReviewQueue(&entry); err != nil {
+		logger.Error("Failed to write system-failure review entry", "file", entry.Filename, "error", err)
+	}
 }
 
 // CreateJobs handles POST /api/jobs
@@ -394,9 +418,6 @@ func (h *Handler) CreateJobs(w http.ResponseWriter, r *http.Request) {
 		"message": fmt.Sprintf("Processing %d paths in background...", len(req.Paths)),
 	})
 
-	// Auto-unpause when adding new jobs (prevents accidental blocking)
-	h.workerPool.Unpause()
-
 	if req.PipelineMode == "full_pipeline" {
 		go func() {
 			// resolveCtx bounds only the directory-scan + initial ffprobe step.
@@ -407,12 +428,17 @@ func (h *Handler) CreateJobs(w http.ResponseWriter, r *http.Request) {
 				logger.Error("full_pipeline: error resolving video files", "error", err)
 				return
 			}
+			// Copy each file into the watch folder and let the normal folder
+			// watcher pick it up on its next scan cycle. This intentionally
+			// does NOT call watcher.ProcessFile directly — Manual Add's job is
+			// only to get the file into the pipeline's front door, not to run
+			// the pipeline itself.
 			for _, p := range probes {
-				// ProcessFile spawns its own goroutine; pass a context that is
-				// not canceled when this goroutine exits so the pipeline's ffprobe
-				// (and subsequent identify/move steps) can run to completion.
-				// runPipeline creates its own probeCtx with a 2-minute timeout.
-				h.watcher.ProcessFile(context.WithoutCancel(resolveCtx), p.Path)
+				dst := filepath.Join(h.cfg.Intake.WatchFolder, filepath.Base(p.Path))
+				if err := util.CopyFile(p.Path, dst); err != nil {
+					logger.Error("full_pipeline: failed to copy file to watch folder", "path", p.Path, "error", err)
+					h.sendSystemFailureToReview(p.Path, fmt.Sprintf("Manual Add: failed to copy file to watch folder: %v", err))
+				}
 			}
 		}()
 		return
@@ -444,13 +470,49 @@ func (h *Handler) CreateJobs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		addedJobs, _ := h.queue.AddMultiple(probes, req.PresetID, smartShrinkQuality)
+		// Files not already under the managed staging folder (i.e. anything
+		// browsed to directly, which may live on a network/library share) are
+		// copied into staging first, so a later "delete on cancel" disposal
+		// decision only ever removes MediaForge's own local copy — never the
+		// original. See jobs.DisposeSource.
+		networkOriginal := make(map[string]string) // staging path -> original path
+		for _, p := range probes {
+			if jobs.IsManagedLocal(p.Path, h.cfg) {
+				continue
+			}
+			dst := filepath.Join(h.cfg.Intake.StagingFolder, filepath.Base(p.Path))
+			if err := util.CopyFile(p.Path, dst); err != nil {
+				logger.Error("encode_only: failed to stage local copy", "path", p.Path, "error", err)
+				h.sendSystemFailureToReview(p.Path, fmt.Sprintf("Manual Add: failed to copy file to staging folder: %v", err))
+				continue
+			}
+			networkOriginal[dst] = p.Path
+			p.Path = dst
+		}
 
-		// Apply per-job overrides for encode_only_custom.
-		if req.PipelineMode == "encode_only_custom" && (req.EncodeSpeed != "" || req.EncodeOutputFormat != "" || req.EncodeQualityCRF != 0) {
-			for _, job := range addedJobs {
+		var addedJobs []*jobs.Job
+		if req.AddOnly {
+			addedJobs, _ = h.queue.AddMultiple(probes, req.PresetID, smartShrinkQuality)
+		} else {
+			addedJobs, _ = h.queue.AddMultiplePriority(probes, req.PresetID, smartShrinkQuality)
+		}
+
+		for _, job := range addedJobs {
+			if orig, ok := networkOriginal[job.InputPath]; ok {
+				h.queue.SetJobNetworkCopy(job.ID, orig)
+			}
+			// Apply per-job overrides for encode_only_custom.
+			if req.PipelineMode == "encode_only_custom" && (req.EncodeSpeed != "" || req.EncodeOutputFormat != "" || req.EncodeQualityCRF != 0) {
 				h.queue.SetJobOverrides(job.ID, req.EncodeSpeed, req.EncodeOutputFormat, req.EncodeQualityCRF)
 			}
+		}
+
+		if !req.AddOnly {
+			ids := make([]string, len(addedJobs))
+			for i, job := range addedJobs {
+				ids[i] = job.ID
+			}
+			h.workerPool.BeginPriorityBatch(ids)
 		}
 	}()
 }
@@ -510,7 +572,105 @@ func (h *Handler) CancelJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
+	cancelled := h.queue.Get(id)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "cancelled", "job": cancelled})
+}
+
+// SkipCurrentJob handles POST /api/jobs/:id/skip
+// Stops the in-flight encode (like Cancel) but records the job as Skipped
+// rather than Cancelled, and does not pause the queue — the next pending job
+// starts immediately. Returns the job so the caller can drive a file-disposal
+// prompt for the interrupted source file.
+func (h *Handler) SkipCurrentJob(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "job ID required")
+		return
+	}
+
+	job := h.queue.Get(id)
+	if job == nil {
+		writeError(w, http.StatusNotFound, "job not found")
+		return
+	}
+	if job.Status != jobs.StatusRunning {
+		writeError(w, http.StatusConflict, "job is not running")
+		return
+	}
+
+	h.workerPool.CancelJob(id)
+	if err := h.queue.MarkSkippedByUser(id); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "skipped", "job": h.queue.Get(id)})
+}
+
+// RequeueJob handles POST /api/jobs/:id/requeue
+// Resets a Skipped or Cancelled job back to Pending at the front of the
+// queue. Body: {"force_encode": bool} — true forces past a same-codec skip
+// (used when ReQueue-ing a Skipped item), false leaves that check as-is
+// (used when ReQueue-ing a Cancelled item).
+func (h *Handler) RequeueJob(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "job ID required")
+		return
+	}
+
+	var req struct {
+		ForceEncode bool `json:"force_encode"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	job, err := h.queue.RequeueTerminal(id, req.ForceEncode)
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "requeued", "job": job})
+}
+
+// DisposeJobSource handles POST /api/jobs/:id/dispose
+// Applies a file-disposal decision to a Cancelled/Skipped job's source file:
+// body {"delete": true} deletes it, {"delete": false} moves it back to the
+// intake watch folder. Network-copy jobs always have their local staging
+// copy deleted regardless of the request body (see jobs.DisposeSource).
+// Must be called after the job has stopped running (Cancel/Skip/Stop All).
+func (h *Handler) DisposeJobSource(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "job ID required")
+		return
+	}
+
+	job := h.queue.Get(id)
+	if job == nil {
+		writeError(w, http.StatusNotFound, "job not found")
+		return
+	}
+	if job.Status == jobs.StatusRunning {
+		writeError(w, http.StatusConflict, "job is still running")
+		return
+	}
+
+	var req struct {
+		Delete bool `json:"delete"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	if err := jobs.DisposeSource(job, h.cfg, req.Delete); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("dispose file: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "disposed"})
 }
 
 // ClearQueue handles POST /api/jobs/clear
@@ -550,15 +710,15 @@ func (h *Handler) StartPipeline(w http.ResponseWriter, r *http.Request) {
 }
 
 // StopPipeline handles POST /api/queue/stop
-// Cancels all in-progress jobs so the pipeline can be torn down or restarted.
-// Called by the tray app menu.
-// Note: workerPool.StopAll() is currently a stub — semantics to be finalized
-// in a follow-up. The paused flag remains set so workers won't pick up new
-// work until /api/queue/start is called.
+// Cancels any currently-running job(s) and pauses the queue so nothing new
+// starts automatically. Pending jobs are left intact. Called by the web UI's
+// Stop icon. Returns the cancelled job(s) so the caller can drive a
+// file-disposal prompt per stopped file.
 func (h *Handler) StopPipeline(w http.ResponseWriter, r *http.Request) {
-	h.workerPool.StopAll()
-	writeJSON(w, http.StatusOK, map[string]string{
-		"status": "pipeline stopped",
+	stopped := h.workerPool.StopAll()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "pipeline stopped",
+		"stopped": stopped,
 	})
 }
 
@@ -623,6 +783,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		"intake_naming_movie_file":     h.cfg.Intake.Naming.MovieFile,
 		"intake_naming_show_folder":    h.cfg.Intake.Naming.ShowFolder,
 		"intake_naming_episode_file":   h.cfg.Intake.Naming.EpisodeFile,
+		"intake_enable_naming_lookup":  h.cfg.Intake.EnableNamingLookup,
 		// Metadata API keys
 		"apis_tmdb_key": h.cfg.APIs.TMDBKey,
 		"apis_tvdb_key": h.cfg.APIs.TVDBKey,
@@ -691,6 +852,7 @@ type UpdateConfigRequest struct {
 	IntakeNamingMovieFile     *string  `json:"intake_naming_movie_file,omitempty"`
 	IntakeNamingShowFolder    *string  `json:"intake_naming_show_folder,omitempty"`
 	IntakeNamingEpisodeFile   *string  `json:"intake_naming_episode_file,omitempty"`
+	IntakeEnableNamingLookup  *bool    `json:"intake_enable_naming_lookup,omitempty"`
 	// Metadata API keys
 	APIsTMDBKey *string `json:"apis_tmdb_key,omitempty"`
 	APIsTVDBKey *string `json:"apis_tvdb_key,omitempty"`
@@ -922,6 +1084,9 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.cfg.Intake.ReviewThreshold = val
+	}
+	if req.IntakeEnableNamingLookup != nil {
+		h.cfg.Intake.EnableNamingLookup = *req.IntakeEnableNamingLookup
 	}
 	if req.IntakeCacheTimeoutSeconds != nil {
 		val := *req.IntakeCacheTimeoutSeconds
@@ -2033,6 +2198,33 @@ func (h *Handler) IntakeStatus(w http.ResponseWriter, r *http.Request) {
 		"enabled": true,
 		"paused":  h.watcher.Paused(),
 	})
+}
+
+// SystemStop handles POST /api/system/stop
+// Combined kill switch used by the tray "Stop MediaForge" menu item: pauses
+// intake (no new files picked up from the watch folder) and stops the encode
+// queue (cancels any in-progress job(s), pauses the queue). Distinct from the
+// web UI's per-control Pause Intake / Stop All buttons, which act on one
+// subsystem at a time.
+func (h *Handler) SystemStop(w http.ResponseWriter, r *http.Request) {
+	if h.watcher != nil {
+		h.watcher.Pause()
+	}
+	stopped := h.workerPool.StopAll()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "stopped",
+		"stopped": stopped,
+	})
+}
+
+// SystemStart handles POST /api/system/start
+// Reverses SystemStop: resumes intake and unpauses the encode queue.
+func (h *Handler) SystemStart(w http.ResponseWriter, r *http.Request) {
+	if h.watcher != nil {
+		h.watcher.Resume()
+	}
+	h.workerPool.Unpause()
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "started"})
 }
 
 // DispatchNotification dispatches a notification event from outside the handler

@@ -39,6 +39,14 @@ func TestDecide_Bitrate(t *testing.T) {
 	if d, _ := Decide(close, existing, 0.25); d != Review {
 		t.Errorf("bitrate within threshold: got %v, want Review", d)
 	}
+
+	// A lower incoming bitrate (e.g. a re-encode with a better shrink ratio) is
+	// never auto-discarded — quality could be equal or better despite the size
+	// drop, so it always needs a manual look rather than an auto-Keep.
+	lower := FileInfo{Codec: "hevc", Width: 1920, Height: 1080, BitrateBps: 2_000_000}
+	if d, _ := Decide(lower, existing, 0.25); d != Review {
+		t.Errorf("lower incoming bitrate at equal res/codec: got %v, want Review", d)
+	}
 }
 
 func TestDecide_Ambiguous(t *testing.T) {

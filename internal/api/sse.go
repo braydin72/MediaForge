@@ -32,12 +32,18 @@ func (h *Handler) JobStream(w http.ResponseWriter, r *http.Request) {
 	eventCh := h.queue.Subscribe()
 	defer h.queue.Unsubscribe(eventCh)
 
-	// Send initial state
+	// Send initial state. stats.paused mirrors GET /api/stats's shape (Issue
+	// #13) so the frontend's queuePaused sync path works identically whether
+	// it's fed by the SSE init event or a REST poll — without this, the
+	// badge/toggle showed the wrong state until the first reactive poll.
 	initialJobs := h.queue.GetAll()
 	initialData, _ := json.Marshal(map[string]interface{}{
-		"type":  "init",
-		"jobs":  initialJobs,
-		"stats": h.queue.Stats(),
+		"type": "init",
+		"jobs": initialJobs,
+		"stats": struct {
+			jobs.Stats
+			Paused bool `json:"paused"`
+		}{Stats: h.queue.Stats(), Paused: h.workerPool.IsPaused()},
 	})
 	fmt.Fprintf(w, "data: %s\n\n", initialData)
 	flusher.Flush()

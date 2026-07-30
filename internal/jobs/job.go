@@ -69,6 +69,9 @@ type Job struct {
 	OverrideSpeed       string `json:"override_speed,omitempty"`        // Per-job encoder speed preset (encode_only_custom)
 	OverrideOutputFormat string `json:"override_output_format,omitempty"` // Per-job output container (encode_only_custom)
 	OverrideCRF          int    `json:"override_crf,omitempty"`          // Per-job CRF override for Compress presets (encode_only_custom)
+	OverrideAllowSameCodec *bool `json:"override_allow_same_codec,omitempty"` // Per-job override forcing encode even if already in target codec (ReQueue after Skip)
+	IsNetworkCopy        bool   `json:"is_network_copy,omitempty"`       // True if InputPath is a local staging copy made from a network/library source (Manual Add encode-only)
+	OriginalNetworkPath  string `json:"original_network_path,omitempty"` // Audit-only: the original network/library path the staging copy was made from
 	CreatedAt          time.Time `json:"created_at"`
 	StartedAt   time.Time `json:"started_at,omitempty"`
 	CompletedAt time.Time `json:"completed_at,omitempty"`
