@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-07-30
+
 ### Added
 - Control & workflow redesign: separated intake vs. encode-queue controls
   throughout, with immediate (no-lag) UI state updates.
