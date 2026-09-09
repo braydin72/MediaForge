@@ -568,6 +568,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		"skip_smartshrink_for_av1":    h.cfg.SkipSmartShrinkForAV1,
 		"smartshrink_adaptive_target": h.cfg.SmartShrinkAdaptiveTarget,
 		"vmaf_sample_count":           h.cfg.VMafSampleCount,
+		"vmaf_encoder":                h.cfg.VMafEncoder,
 		// Intake pipeline
 		"intake_enabled":               h.cfg.Intake.Enabled,
 		"intake_watch_folder":          h.cfg.Intake.WatchFolder,
@@ -636,6 +637,7 @@ type UpdateConfigRequest struct {
 	SkipSmartShrinkForAV1     *bool   `json:"skip_smartshrink_for_av1,omitempty"`
 	SmartShrinkAdaptiveTarget *bool   `json:"smartshrink_adaptive_target,omitempty"`
 	VMafSampleCount           *int    `json:"vmaf_sample_count,omitempty"`
+	VMafEncoder               *string `json:"vmaf_encoder,omitempty"`
 	// Intake pipeline
 	IntakeEnabled             *bool    `json:"intake_enabled,omitempty"`
 	IntakeWatchFolder         *string  `json:"intake_watch_folder,omitempty"`
@@ -824,6 +826,14 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 			val = 6
 		}
 		h.cfg.VMafSampleCount = val
+	}
+	if req.VMafEncoder != nil {
+		val := strings.ToLower(*req.VMafEncoder)
+		if val != "auto" && val != "libx265" {
+			writeError(w, http.StatusBadRequest, "vmaf_encoder must be 'auto' or 'libx265'")
+			return
+		}
+		h.cfg.VMafEncoder = val
 	}
 
 	// Handle log level
