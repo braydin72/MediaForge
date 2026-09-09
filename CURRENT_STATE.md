@@ -1,6 +1,38 @@
 CURRENT STATE NOTE
 
-=== Latest session (cont.): fixed episode title matching for multi-part episodes ===
+=== Latest session (cont.): identified manual Review Queue resolution skipping encode step ===
+
+Identified new issue from user's workflow: when a video file fails metadata lookup
+before encoding to HEVC, and the user manually searches for and selects the correct
+match from the Review Queue ("Pick Selected"), the file is copied directly to the
+library in its original codec (e.g., H.264) instead of being re-encoded to HEVC
+as expected.
+
+Issue: The manual metadata resolution flow doesn't trigger the encode pipeline
+after resolving metadata — it treats the resolved file as "metadata now correct,
+move to library as-is" rather than "metadata resolved, now encode to configured codec."
+
+Root cause: Likely in `ResolveReviewEntry` handler (internal/api/handler.go) which
+resolves the metadata but doesn't re-queue the job for encoding.
+
+Expected behavior: After successfully resolving metadata via manual search:
+1. Metadata is corrected/confirmed
+2. File should be re-queued for encoding with the resolved metadata
+3. Encoding to HEVC should proceed (or configured codec)
+4. Final file moved to library with correct codec
+
+Actual behavior: File moves to library immediately in original codec.
+
+This is a critical workflow issue because it defeats the purpose of manual
+resolution — users expect to transcode to HEVC but get the original format instead.
+
+Added to CURRENT_KNOW_ISSUES.md as Issue #15 (High Priority).
+Not yet investigated for root cause — recommend examining:
+- `ResolveReviewEntry` handler flow
+- How metadata resolution triggers (or should trigger) encoding
+- Whether the handler calls re-queue logic or just moves the file
+
+=== Prior session (cont.): fixed episode title matching for multi-part episodes ===
 
 Investigated issue from user's own intake pipeline testing: episode title
 matching failed for multi-part episodes with different naming conventions
