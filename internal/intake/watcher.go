@@ -253,7 +253,7 @@ func (w *Watcher) runPipeline(ctx context.Context, path string) {
 		return
 	}
 
-	switch classifyCodec(probe.VideoCodec) {
+	switch ClassifyCodec(probe.VideoCodec) {
 	case "hevc":
 		logger.Info("Intake: modern codec — routing to library",
 			"file", filename, "codec", probe.VideoCodec,
@@ -712,12 +712,12 @@ var knownVideoCodecs = map[string]struct{}{
 	"indeo2": {}, "indeo3": {}, "indeo4": {}, "indeo5": {},
 }
 
-// classifyCodec maps a raw ffprobe codec_name to one of "hevc", "encode", or "unknown".
+// ClassifyCodec maps a raw ffprobe codec_name to one of "hevc", "encode", or "unknown".
 //
 //   - "hevc"    — already a modern codec; move directly to library (HEVC and AV1).
 //   - "encode"  — known video codec that needs transcoding to HEVC.
 //   - "unknown" — not a recognized video codec; route to Review Queue.
-func classifyCodec(codec string) string {
+func ClassifyCodec(codec string) string {
 	lower := strings.ToLower(codec)
 	switch lower {
 	case "hevc", "h265", "x265", "av1", "libaom-av1", "libsvtav1":

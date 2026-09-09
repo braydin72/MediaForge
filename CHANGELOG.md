@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Manual Review Queue metadata resolution now correctly re-encodes files to the
+  configured target codec instead of copying them to the library as-is. When a
+  file fails metadata lookup before encoding and the user manually searches for
+  and selects the correct match via "Pick Selected", the file is now moved to
+  staging and queued for HEVC encoding with the resolved metadata, rather than
+  being moved directly to the library in its original codec (e.g., H.264). The
+  resolved metadata is used to determine the correct library destination path.
+  Fixes the workflow where manually resolved metadata entries would bypass
+  encoding, leaving the user with the original codec instead of the expected
+  HEVC transcoded output.
+
 ## [1.9.0] - 2026-09-09
 
 ### Fixed

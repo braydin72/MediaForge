@@ -10,14 +10,6 @@ Most of the backlog that used to live in this file (tray process management, log
 
 ### Intake Pipeline
 
-**Issue #15: Manual metadata search resolution skips encoding when resolving failed lookups**
-- **Description:** When a file fails metadata lookup before encoding to HEVC, and the user manually searches for and selects a match from the Review Queue, the file is copied directly to the library in its original codec (e.g., H.264) instead of being re-encoded to HEVC as expected.
-- **Impact:** User intends to transcode to HEVC but gets original codec instead, defeating the purpose of manual resolution.
-- **Root Cause:** The "Pick Selected" flow in Review Queue doesn't trigger encoding after resolving metadata—it just moves the file to library as-is.
-- **Fix:** After successful metadata resolution via manual search ("Pick Selected"), the job should re-enter the encode pipeline with the resolved metadata, not skip to direct-move.
-- **Files:** `internal/api/handler.go` (ResolveReviewEntry handler), possibly `internal/jobs/worker.go` (post-resolution job handling)
-- **User Report:** Observed during manual Review Queue metadata resolution workflow
-
 **Issue #14: Ingest pipeline doesn't clean up staging directories**
 - **Description:** After moving a file from staging to library, empty show/season folders are left behind.
 - **Impact:** Staging directory grows with orphaned folders; disk clutter.

@@ -1,36 +1,37 @@
 CURRENT STATE NOTE
 
-=== Latest session (cont.): identified manual Review Queue resolution skipping encode step ===
+=== Latest session: fixed manual Review Queue resolution skipping encode step (Issue #15) ===
 
-Identified new issue from user's workflow: when a video file fails metadata lookup
-before encoding to HEVC, and the user manually searches for and selects the correct
-match from the Review Queue ("Pick Selected"), the file is copied directly to the
-library in its original codec (e.g., H.264) instead of being re-encoded to HEVC
-as expected.
+Investigated and fixed issue from user's workflow: when a video file fails metadata
+lookup before encoding to HEVC, and the user manually searches for and selects the
+correct match from the Review Queue ("Pick Selected"), the file was being copied
+directly to the library in its original codec instead of being re-encoded to HEVC.
 
-Issue: The manual metadata resolution flow doesn't trigger the encode pipeline
-after resolving metadata — it treats the resolved file as "metadata now correct,
-move to library as-is" rather than "metadata resolved, now encode to configured codec."
+Root cause: The `ResolveReviewEntry` handler was moving the file directly to the
+library without checking if it needed to be transcoded first. The handler resolved
+the metadata but didn't re-queue the file for encoding.
 
-Root cause: Likely in `ResolveReviewEntry` handler (internal/api/handler.go) which
-resolves the metadata but doesn't re-queue the job for encoding.
+Solution implemented in `internal/api/handler.go`:
+1. After metadata resolution, the handler now probes the file's codec
+   (using stored FFProbeInfo from the Review Queue entry if available, or probing
+   if necessary)
+2. Codec classification determines the route:
+   - HEVC/modern codecs: Move directly to library (no re-encode needed)
+   - H.264/AVC: Move to staging directory and queue for HEVC encoding with the
+     resolved metadata using the configured DefaultPreset and DefaultQuality
+   - Unknown codecs: Return to Review Queue with specific error
+3. For queued files, SetLibraryPath is called on the job so the worker knows where
+   to move the file after encoding completes
 
-Expected behavior: After successfully resolving metadata via manual search:
-1. Metadata is corrected/confirmed
-2. File should be re-queued for encoding with the resolved metadata
-3. Encoding to HEVC should proceed (or configured codec)
-4. Final file moved to library with correct codec
+Additional changes:
+- Exported `classifyCodec()` as `ClassifyCodec()` in `internal/intake/watcher.go`
+  so it can be used by the handler
+- Updated tests to include FFProbeInfo in test ReviewEntry for HEVC codec
 
-Actual behavior: File moves to library immediately in original codec.
+Test results: All tests pass including handler tests for ResolveReviewEntry.
 
-This is a critical workflow issue because it defeats the purpose of manual
-resolution — users expect to transcode to HEVC but get the original format instead.
-
-Added to CURRENT_KNOW_ISSUES.md as Issue #15 (High Priority).
-Not yet investigated for root cause — recommend examining:
-- `ResolveReviewEntry` handler flow
-- How metadata resolution triggers (or should trigger) encoding
-- Whether the handler calls re-queue logic or just moves the file
+Removed Issue #15 from High Priority issues list in CURRENT_KNOW_ISSUES.md.
+Updated CHANGELOG.md with fix description under [Unreleased] section.
 
 === Prior session (cont.): fixed episode title matching for multi-part episodes ===
 
