@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-09-09
+
 ### Fixed
 - Episode title matching now correctly recognizes multi-part episode numbering
   format variations ("Part II" vs "(2)", "Part 1" vs "(1)", etc.) as equivalent
