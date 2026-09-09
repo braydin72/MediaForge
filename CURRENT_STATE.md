@@ -1,6 +1,46 @@
 CURRENT STATE NOTE
 
-=== Latest session: added vmaf_encoder config option for encoder selection in VMAF sampling ===
+=== Latest session (cont.): fixed episode title matching for multi-part episodes ===
+
+Investigated issue from user's own intake pipeline testing: episode title
+matching failed for multi-part episodes with different naming conventions
+between filename and TVDB (e.g., "Part II" vs "(2)"). Root cause: before
+similarity scoring, both title strings were normalized by `normTitle()`, which
+removed punctuation and non-letter characters but did NOT recognize that
+"Part II", "Part 2", and "(2)" are semantically identical.
+
+Solution: Added `normalizeEpisodePartSuffix()` function that converts all
+multi-part episode numbering formats to a common form BEFORE calling
+`normTitle()`. Handles:
+- Roman numerals: "Part I/II/III/IV/V/VI" → " 1/2/3/4/5/6"
+- Numeric parts: "Part 1/2/3" → " 1/2/3"
+- Parenthetical: "(1)/(2)/(3)" → " 1/2/3"
+- Case-insensitive matching
+
+Implementation:
+- `internal/intake/confidence.go`: New normalizeEpisodePartSuffix() function
+  using regex with word boundaries to avoid partial matches (e.g., "Part I"
+  within "Part II"). Processes longer patterns first (VI, IV, III before I)
+  to prevent overlap. Called in stringSimilarity() before normTitle().
+- `internal/intake/confidence_test.go`: 6 new tests covering all format
+  combinations and edge cases.
+
+Test results: All 15+ packages pass; all tests pass including 6 new tests for
+part suffix normalization.
+
+Before fix: "My Episode, Part II" vs "My Episode (2)" scored 0.56 similarity
+After fix: Both normalize to "my episode 2", exact match (1.0), skips review queue
+
+Verified: `go build ./...`, `go vet ./...`, `go test ./...` all pass.
+Commit: fix(intake): normalize episode part numbering formats in title matching
+
+NOT yet verified against a live intake run with real multi-part episode file —
+recommend testing with a file named like "Show Name - S01E01 - Episode, Part II.mp4"
+where TVDB lists it as "Episode (2)" and confirming it moves to library instead of
+review queue. The normalization is straightforward (regex-based) and the similarity
+scoring integration is proven, so high confidence pending real verification.
+
+=== Prior session: added vmaf_encoder config option for encoder selection in VMAF sampling ===
 
 Investigated user-reported VMAF analysis failures on a system with Intel
 Quick Sync HEVC as primary encoder (error code 0xb1b4b1ab during VMAF sample

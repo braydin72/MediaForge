@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Episode title matching now correctly recognizes multi-part episode numbering
+  format variations ("Part II" vs "(2)", "Part 1" vs "(1)", etc.) as equivalent
+  before similarity scoring. Previously, files with multi-part episode titles
+  that used different naming conventions than TVDB were unnecessarily sent to
+  Review Queue despite having correct series/season/episode match. New
+  `normalizeEpisodePartSuffix()` function converts all part numbering formats
+  (Roman numerals, numeric, parenthetical) to a common form, so "My Episode,
+  Part II" now correctly matches TVDB's "My Episode (2)".
+
 ### Added
 - New `vmaf_encoder` config option (default `'auto'`, options `'auto'` or
   `'libx265'`, also exposed as a Settings dropdown: "VMAF Sample Encoder",
