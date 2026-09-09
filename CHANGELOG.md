@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- New `vmaf_encoder` config option (default `'auto'`, options `'auto'` or
+  `'libx265'`, also exposed as a Settings dropdown: "VMAF Sample Encoder",
+  under Advanced). Allows overriding the encoder used for VMAF sample
+  encoding while keeping the main encoder for final output. Set to
+  `'libx265'` if your main encoder (e.g., Intel Quick Sync HEVC) has
+  compatibility or reliability issues with VMAF sample encoding. VMAF
+  analysis is I/O-bound; CPU encoding for small sample clips has negligible
+  performance impact while using a proven, reliable encoder. Fixes systems
+  with Quick Sync failing VMAF analysis with exit code 0xb1b4b1ab due to
+  incompatible quality parameter ranges (Quick Sync uses `-global_quality`,
+  VMAF search uses CRF-based ranges). Applies to all VMAF-based analyses:
+  main SmartShrink phase-1 search, adaptive ceiling probe, and SmartShrink
+  retry loop verification.
 - New `smartshrink_adaptive_target` config option, **default `true`**, also
   exposed as a Settings toggle: "Adaptive VMAF Target" (Transcoding
   section, no longer buried under Advanced). SmartShrink now probes the

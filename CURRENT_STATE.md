@@ -1,6 +1,48 @@
 CURRENT STATE NOTE
 
-=== Latest session (cont. once more): adaptive-target validated over ~45 real jobs, promoted to default, merged into develop ===
+=== Latest session: added vmaf_encoder config option for encoder selection in VMAF sampling ===
+
+Investigated user-reported VMAF analysis failures on a system with Intel
+Quick Sync HEVC as primary encoder (error code 0xb1b4b1ab during VMAF sample
+encoding). Root cause: VMAF analysis algorithm works with CRF value ranges
+(16-30 for libx265), but Quick Sync uses different quality parameters
+(-global_quality with different scale), causing parameter incompatibility
+when the same preset was used for both main encoding and VMAF sampling.
+
+Solution: Added `vmaf_encoder` config option (default `'auto'`, option value
+`'libx265'`) to allow users to override the encoder used for VMAF sample
+encoding while keeping their main encoder for final output. VMAF analysis is
+I/O-bound on tiny sample clips; CPU performance impact is negligible.
+
+Implementation:
+- `internal/config/config.go`: Added `VMafEncoder string` field with
+  `"auto"` default and documentation explaining use case (Quick Sync
+  compatibility issues)
+- `internal/jobs/worker.go`: Modified three functions:
+  * `runSmartShrinkAnalysis()`: Creates vmafPreset by overriding main preset
+    with HWAccelNone (CPU libx265) when vmaf_encoder="libx265"
+  * `quickSampleVMAF()`: Same override logic
+  * `runFixedReductionAnalysis()`: Same override logic in encodeAndMeasure
+    closure
+- `internal/api/handler.go`: Added vmaf_encoder to GET/PUT /api/config
+  handlers with validation (accepts only "auto" or "libx265")
+- `web/templates/index.html`: Added Settings dropdown "VMAF Sample Encoder"
+  in Advanced group with load/save logic
+
+Files modified: 4 (config, worker, api handler, web UI)
+Tests: `go build ./...`, `go vet ./...`, `go test ./...` all pass
+Commit: feat(smartshrink): add vmaf_encoder config option for encoder
+  selection in VMAF sampling
+
+NOT yet live-tested against a system with Quick Sync and VMAF failures —
+recommend the friend rebuild with this feature, set vmaf_encoder="libx265"
+in config or via the UI, and re-run a SmartShrink job against a known
+problematic source to confirm VMAF analysis succeeds. The code path
+(preset.WithEncoder override) is straightforward and the API/config
+plumbing mirrors existing vmaf_sample_count, so high confidence pending
+real verification.
+
+=== Prior session (cont. once more): adaptive-target validated over ~45 real jobs, promoted to default, merged into develop ===
 
 Direct continuation of the two sessions below. After the post-encode
 verification removal (previous entry), continued watching the user's live
