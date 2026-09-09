@@ -1352,10 +1352,17 @@ func (wp *WorkerPool) runSmartShrinkAnalysis(ctx context.Context, job *Job, pres
 	analyzer.SampleCount = wp.cfg.VMafSampleCount
 	analyzer.Adaptive = wp.cfg.SmartShrinkAdaptiveTarget
 
+	// Determine VMAF encoder: override main preset if configured
+	vmafPreset := preset
+	if wp.cfg.VMafEncoder == "libx265" {
+		// Force CPU software encoder for VMAF sampling
+		vmafPreset = preset.WithEncoder(ffmpeg.HWAccelNone)
+	}
+
 	// Create encode callback
 	encodeSample := func(ctx context.Context, samplePath string, quality int, modifier float64) (string, error) {
 		inputArgs, outputArgs := ffmpeg.BuildSampleEncodeArgs(
-			preset, job.Width, job.Height,
+			vmafPreset, job.Width, job.Height,
 			quality, modifier,
 			true, // Force software decode for FFV1 samples
 		)
@@ -1422,7 +1429,13 @@ func (w *Worker) quickSampleVMAF(ctx context.Context, job *Job, preset *ffmpeg.P
 	}
 	defer vmaf.CleanupSamples(refSamples)
 
-	inputArgs, outputArgs := ffmpeg.BuildSampleEncodeArgs(preset, job.Width, job.Height, crf, 0, true)
+	// Determine VMAF encoder: override main preset if configured
+	vmafPreset := preset
+	if w.cfg.VMafEncoder == "libx265" {
+		vmafPreset = preset.WithEncoder(ffmpeg.HWAccelNone)
+	}
+
+	inputArgs, outputArgs := ffmpeg.BuildSampleEncodeArgs(vmafPreset, job.Width, job.Height, crf, 0, true)
 	encodedPath := refSamples[0].Path + ".encoded.mkv"
 
 	numThreads := vmaf.GetEncodingThreads()
@@ -1483,8 +1496,14 @@ func (wp *WorkerPool) runFixedReductionAnalysis(ctx context.Context, job *Job, p
 		return true, "could not measure reference sample sizes", 0, nil
 	}
 
+	// Determine VMAF encoder: override main preset if configured
+	vmafPreset := preset
+	if wp.cfg.VMafEncoder == "libx265" {
+		vmafPreset = preset.WithEncoder(ffmpeg.HWAccelNone)
+	}
+
 	encodeAndMeasure := func(crf int) (float64, error) {
-		inputArgs, outputArgs := ffmpeg.BuildSampleEncodeArgs(preset, job.Width, job.Height, crf, 0, true)
+		inputArgs, outputArgs := ffmpeg.BuildSampleEncodeArgs(vmafPreset, job.Width, job.Height, crf, 0, true)
 		var distSize int64
 		for i, ref := range refSamples {
 			encodedPath := fmt.Sprintf("%s/enc_%d_%d.mkv", analysisDir, crf, i)

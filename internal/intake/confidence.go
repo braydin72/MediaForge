@@ -1,6 +1,7 @@
 package intake
 
 import (
+	"regexp"
 	"time"
 )
 
@@ -100,10 +101,55 @@ func RuntimeCrossCheck(probeDurationSecs float64, apiRuntimeMinutes int) (within
 	return delta <= 5, delta
 }
 
+// normalizeEpisodePartSuffix converts multi-part episode numbering formats to a
+// common form before title comparison. Handles:
+//   - "Part I/II/III/IV" → " 1/2/3/4"
+//   - "Part 1/2/3/4" → " 1/2/3/4"
+//   - "(1)/(2)/(3)" → " 1/2/3"
+//
+// This ensures "My Episode, Part II" and "My Episode (2)" are recognized as
+// equivalent before similarity scoring.
+func normalizeEpisodePartSuffix(s string) string {
+	// Use regex to handle case-insensitive Roman numerals with word boundaries.
+	// Must match longer numbers first (VI before V, IV before I) to avoid partial matches.
+	// This pattern matches "Part VI", "part vi", "Part VI", etc.
+	romanReplacements := []struct {
+		pattern string
+		replace string
+	}{
+		{`(?i)\bPart\s+VI\b`, " 6"},
+		{`(?i)\bPart\s+IV\b`, " 4"},
+		{`(?i)\bPart\s+III\b`, " 3"},
+		{`(?i)\bPart\s+II\b`, " 2"},
+		{`(?i)\bPart\s+I\b`, " 1"},
+		{`(?i)\bPart\s+V\b`, " 5"},
+	}
+
+	for _, repl := range romanReplacements {
+		re := regexp.MustCompile(repl.pattern)
+		s = re.ReplaceAllString(s, repl.replace)
+	}
+
+	// Also handle numeric part numbers: "Part 1" → " 1", "Part 2" → " 2", etc.
+	numericRe := regexp.MustCompile(`(?i)\bPart\s+(\d+)\b`)
+	s = numericRe.ReplaceAllString(s, " $1")
+
+	// Convert parenthetical numbers (1)/(2)/(3) to space-separated versions
+	// (1) → " 1", (2) → " 2", etc.
+	parenRe := regexp.MustCompile(`\((\d+)\)`)
+	s = parenRe.ReplaceAllString(s, " $1")
+
+	return s
+}
+
 // stringSimilarity returns a value in [0, 1] representing how similar two strings
 // are, using normalised Levenshtein distance over Unicode runes. Both strings are
 // lowercased and trimmed before comparison.
 func stringSimilarity(a, b string) float64 {
+	// Normalize episode part suffixes (Part II → 2, (2) → 2) before title comparison
+	a = normalizeEpisodePartSuffix(a)
+	b = normalizeEpisodePartSuffix(b)
+
 	a = normTitle(a)
 	b = normTitle(b)
 	if a == b {

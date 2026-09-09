@@ -221,6 +221,84 @@ func TestStringSimilarity_EmptyString(t *testing.T) {
 	}
 }
 
+// --- Episode part suffix normalization ---
+
+func TestNormalizeEpisodePartSuffix_RomanNumerals(t *testing.T) {
+	tests := []struct {
+		input, want string
+	}{
+		{"My Episode, Part I", "My Episode,  1"},
+		{"My Episode, Part II", "My Episode,  2"},
+		{"My Episode, Part III", "My Episode,  3"},
+		{"My Episode, Part IV", "My Episode,  4"},
+		{"My Episode, Part V", "My Episode,  5"},
+		{"My Episode, Part VI", "My Episode,  6"},
+	}
+	for _, tt := range tests {
+		if got := normalizeEpisodePartSuffix(tt.input); got != tt.want {
+			t.Errorf("input %q: want %q, got %q", tt.input, tt.want, got)
+		}
+	}
+}
+
+func TestNormalizeEpisodePartSuffix_Parenthetical(t *testing.T) {
+	tests := []struct {
+		input, want string
+	}{
+		{"My Episode (1)", "My Episode  1"},
+		{"My Episode (2)", "My Episode  2"},
+		{"My Episode (3)", "My Episode  3"},
+		{"My Episode (10)", "My Episode  10"},
+	}
+	for _, tt := range tests {
+		if got := normalizeEpisodePartSuffix(tt.input); got != tt.want {
+			t.Errorf("input %q: want %q, got %q", tt.input, tt.want, got)
+		}
+	}
+}
+
+func TestStringSimilarity_PartIIVsParenthetical(t *testing.T) {
+	// The main bug: "My Episode, Part II" should match "My Episode (2)"
+	// After normalization: "My Episode,  2" vs "My Episode  2"
+	// After normTitle: "my episode 2" vs "my episode 2"
+	got := stringSimilarity("My Episode, Part II", "My Episode (2)")
+	if got != 1.0 {
+		t.Errorf("Part II vs (2): want 1.0, got %f", got)
+	}
+}
+
+func TestStringSimilarity_Part1VsParenthetical1(t *testing.T) {
+	// "My Episode Part 1" should match "My Episode (1)"
+	got := stringSimilarity("My Episode Part 1", "My Episode (1)")
+	if got != 1.0 {
+		t.Errorf("Part 1 vs (1): want 1.0, got %f", got)
+	}
+}
+
+func TestStringSimilarity_PartIIIVsParenthetical3(t *testing.T) {
+	// "My Episode, Part III" should match "My Episode (3)"
+	got := stringSimilarity("My Episode, Part III", "My Episode (3)")
+	if got != 1.0 {
+		t.Errorf("Part III vs (3): want 1.0, got %f", got)
+	}
+}
+
+func TestStringSimilarity_MultiPartEpisodeMixedCaps(t *testing.T) {
+	// Case-insensitive handling of Roman numerals
+	got := stringSimilarity("My Episode Part II", "my episode (2)")
+	if got != 1.0 {
+		t.Errorf("Part II (caps) vs (2) (lower): want 1.0, got %f", got)
+	}
+}
+
+func TestStringSimilarity_NoPartSuffix_Unchanged(t *testing.T) {
+	// Ensure non-part episodes still work normally
+	got := stringSimilarity("Breaking Bad", "breaking bad")
+	if got != 1.0 {
+		t.Errorf("exact match: want 1.0, got %f", got)
+	}
+}
+
 // --- Orchestrator mock helpers ---
 
 func makeTVDBSuccessMock() roundTripFunc {
