@@ -7,310 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.8.0] - 2026-07-30
+### Fixed
+- Episode title matching now correctly recognizes multi-part episode numbering
+  format variations ("Part II" vs "(2)", "Part 1" vs "(1)", etc.) as equivalent
+  before similarity scoring. Previously, files with multi-part episode titles
+  that used different naming conventions than TVDB were unnecessarily sent to
+  Review Queue despite having correct series/season/episode match. New
+  `normalizeEpisodePartSuffix()` function converts all part numbering formats
+  (Roman numerals, numeric, parenthetical) to a common form, so "My Episode,
+  Part II" now correctly matches TVDB's "My Episode (2)".
 
 ### Added
-- Control & workflow redesign: separated intake vs. encode-queue controls
-  throughout, with immediate (no-lag) UI state updates.
-  - Web UI: queue header now has a Play/Pause/Stop transport bar (replacing
-    the old single Pause/Resume button) plus a new Pause/Resume Intake
-    control wired to the previously-unused `/api/intake/pause|resume|status`
-    endpoints. Queue footer's redundant Stop/Resume button removed; added a
-    "Clear All" button alongside the existing filtered "Clear".
-  - File-disposal prompt: Cancel, the new Skip button, Stop All, and Clear
-    All now ask whether an in-progress file's source should be deleted or
-    moved back to the intake watch folder. Files that are local staging
-    copies of a network/library source (Manual Add Encode Only/Custom
-    Encode) skip the prompt and always have their local copy deleted
-    silently — the original is never touched.
-  - Skip button on the currently-running job (`POST /api/jobs/:id/skip`):
-    stops the encode, marks it Skipped, and continues the queue immediately
-    (unlike Stop All, which pauses).
-  - ReQueue button replaces Retry for Skipped/Cancelled queue items
-    (`POST /api/jobs/:id/requeue`); Retry remains only for Failed items via
-    the existing endpoint. Skipped-item ReQueue forces past a same-codec
-    skip for that job specifically, without changing the global setting.
-  - `WorkerPool.StopAll()` (`POST /api/queue/stop`) now has real semantics —
-    cancels the running job(s) and pauses the queue — replacing the
-    previous no-op stub.
-  - Tray: new "Stop MediaForge" menu item, a combined kill switch
-    (`POST /api/system/stop|start`) that pauses intake and stops the encode
-    queue together, distinct from the existing independent Stop
-    Pipeline/Pause Queue items.
-  - Manual Add: "Full Pipeline" now copies the selected file(s) into the
-    intake watch folder and lets the normal folder watcher pick them up,
-    instead of calling the pipeline directly. "Encode Only"/"Custom Encode"
-    split into "Add to Queue" (always visible, appends, never touches
-    pause state) and "Start Encode" (visible only while paused; adds to
-    the front of the queue and runs immediately, auto-repausing once that
-    priority batch finishes if the queue was paused when it started).
-    Files browsed from outside the managed staging folder are copied into
-    staging first, so the disposal "network copy" rule above only ever
-    deletes MediaForge's own local copy.
-  - New Settings toggle "Enable metadata lookup and rename"
-    (`intake.enable_naming_lookup`, default `true`): when off, files pass
-    through to their output destination under their original filename, with
-    no TMDB/TVDB/OMDb lookup and no Review Queue entries for identification
-    failures (since identification never runs).
-  - Files modified: `internal/jobs/{disposal.go (new),job.go,queue.go,
-    worker.go}`, `internal/api/{handler.go,router.go,sse.go}`,
-    `internal/intake/{watcher.go,naming.go}`, `internal/config/config.go`,
-    `cmd/tray/main.go`, `web/templates/index.html`. Tests added:
-    `internal/jobs/disposal_test.go`, new cases in
-    `internal/jobs/queue_test.go`.
-
-### Fixed
-- `internal/upgrade.Decide` auto-discarded (`Keep`) an incoming file whenever
-  its bitrate was meaningfully lower than the existing library file's, at
-  equal resolution/codec tier — even though a smaller re-encode from better
-  encoder settings can score the same or higher on quality despite the size
-  drop. A lower incoming bitrate at equal resolution/codec now always routes
-  to the Review Queue (`Review`) for a manual quality comparison instead of
-  auto-discarding; the higher-bitrate auto-`Replace` path is unchanged.
-  Files modified: `internal/upgrade/upgrade.go`,
-  `internal/upgrade/upgrade_test.go`.
-
-## [1.7.1] - 2026-07-26
-
-### Fixed
-- `ResolveReviewEntry` (the "Pick Selected" manual-search resolve flow, used
-  for metadata_failure/unresolved_multipart entries) had its own separate,
-  older duplicate-at-destination check that never applied the new
-  auto-resolution rules and never gave a comparison/Replace/Keep-Existing UI
-  on conflict — it just left a dead-end plain-text reason with nothing
-  actionable. Confirmed live: a manually-identified multi-part episode hit
-  exactly this dead end. Fixed by running the same `internal/upgrade` check
-  used everywhere else first (auto-replaces/auto-keeps unambiguous upgrades
-  the same way), and, for ambiguous cases, converting the entry in place
-  into a proper duplicate-conflict entry (new
-  `SQLiteStore.ConvertReviewEntryToDuplicate`) with populated
-  `DuplicateInfo`/category so refreshing the Review Queue shows the
-  incoming/existing comparison and working actions instead of a dead end.
-  Files modified: `internal/api/handler.go`, `internal/store/sqlite.go`.
-
-## [1.7.0] - 2026-07-26
-
-### Fixed
-- Intake's in-memory "already seen" tracking (`Watcher.known`) resets on every
-  process restart, so a restart could make the next folder scan treat a file
-  still sitting in `Incoming` as brand new — even if it already had a pending
-  Review Queue duplicate entry a human hadn't acted on yet. Combined with the
-  new auto-resolution feature above, this let a routine restart (e.g. a
-  redeploy) silently auto-replace/auto-keep a file whose fate was already
-  queued for manual review, leaving the original entry orphaned (pointing at
-  a source file that no longer existed). Confirmed live: a redeploy caused
-  24 pending duplicate entries to be silently auto-resolved by the intake
-  pipeline before their matching Review Queue entries could be acted on.
-  Fixed with a new `SQLiteStore.HasPendingReviewEntry(originalPath)` check at
-  the top of the intake pipeline (`runPipeline`, shared by both the watcher's
-  scan path and the manual `ProcessFile` API path) — any file that already
-  has a pending review entry is now skipped entirely, full stop, regardless
-  of restart timing. Files modified: `internal/store/sqlite.go`,
-  `internal/intake/watcher.go`. New test:
-  `internal/store/review_queue_test.go`'s `TestHasPendingReviewEntry`.
-- Bulk Review Queue "Replace" fired every entry's file move as a concurrent
-  goroutine, hammering the same network-share destination with simultaneous
-  renames at the same instant — confirmed live against a real `\\TOWER\Media`
-  SMB share, every single move in an 11-item batch failed with a Windows
-  sharing-violation error ("The process cannot access the file because it is
-  being used by another process"). No data was lost (source files are only
-  removed after a successful move, and the review entry is only marked
-  resolved on success), but nothing replaced. Fixed by serializing the actual
-  move I/O behind a new `Handler.reviewMoveMu` mutex — moves still run
-  asynchronously from the HTTP response/progress-bar's perspective, but only
-  one file move happens at a time, matching the old synchronous loop's
-  behavior. Files modified: `internal/api/handler.go`.
-
-### Added
-- Intelligent duplicate auto-resolution: unambiguous upgrades (higher
-  resolution; HEVC/AV1 over AVC at equal resolution; ≥25% higher bitrate at
-  equal resolution/codec) now replace or discard automatically instead of
-  always going to the Review Queue. Ambiguous cases still route to the
-  Review Queue as before. New config: `intake.duplicate_resolution`
-  (`"manual"`|`"auto"`, default `"auto"`) and
-  `intake.duplicate_bitrate_upgrade_threshold` (default `0.25`). Applied
-  consistently to both the HEVC direct-to-library duplicate check and the
-  post-encode (AVC→HEVC) duplicate check.
-- Review Queue "Replace" (single and bulk) now runs the file move
-  asynchronously with a live byte-progress bar on the card instead of
-  blocking the request and silently swapping the file in place.
-- Files modified: `internal/upgrade/upgrade.go` (new — shared auto-resolution
-  decision logic), `internal/config/config.go` (new config fields),
-  `internal/intake/duplicate.go`, `internal/intake/watcher.go`,
-  `internal/jobs/worker.go` (post-encode duplicate path wired to the same
-  decision logic), `internal/util/file.go` (`SafeMoveWithProgress`),
-  `internal/jobs/job.go`/`queue.go` (`Job.Kind`, `BroadcastMoveEvent`),
-  `internal/api/handler.go` (async `ReplaceReviewEntry`/
-  `BulkReplaceReviewEntries`), `web/templates/index.html` (move-progress bar
-  on Review Queue cards, SSE handling for move events).
-
-## [1.6.0] - 2026-07-26
-
-### Added
-- Review Queue entries now carry a structured `Category` (duplicate,
-  metadata_failure, encode_failure, unresolved_multipart, system_failure),
-  set explicitly at every point a file is routed to review. Action buttons
-  are now context-aware per category instead of a single generic set —
-  this fixes a real dead button where "Pick Selected" rendered (and did
-  nothing) on encode-failure entries like "SmartShrink: no viable encode".
-  A category badge is shown on each card. Pre-upgrade rows without a
-  category keep working via a metadata_failure-equivalent fallback.
-- New bulk Review Queue actions: Replace (duplicates) and Re-encode Custom
-  (encode failures, via a shared settings panel applied to every selected
-  entry) alongside the existing bulk Discard — all three now go through
-  real bulk API endpoints (`PUT /api/review/bulk/{discard,replace,resubmit}`)
-  instead of a client-side loop over single-item endpoints. A mixed-category
-  selection only shows actions valid for every selected entry.
-- Files modified: `internal/store/sqlite.go` (schema v11, `Category` field,
-  `BulkUpdateReviewQueueStatus`), `internal/jobs/queue.go`,
-  `internal/intake/watcher.go`, `internal/jobs/worker.go` (category set at
-  every review-queue write site), `internal/api/handler.go` (category
-  validation on Resolve/Resubmit, new bulk handlers),
-  `internal/api/router.go` (bulk routes), `web/templates/index.html`
-  (category-aware `actionsHTML`, category badges, bulk action bar).
-
-## [1.5.1] - 2026-07-25
-
-### Fixed
-- Two related bugs found from a real Stargate SG-1 batch that caused two
-  different-titled episodes ("Politics" and "There But For the Grace of
-  God") to both try filing to the same destination path:
-  1. When episode-title reconciliation detected a mismatch but couldn't
-     find a confident replacement episode, it silently fell back to the
-     original (wrong) episode and scored it as a normal match — high
-     enough to sail past both review thresholds on name+year+"an episode
-     exists here" alone, since the title-similarity component (15% weight)
-     wasn't enough to catch it on its own. New `TVDBResult.TitleMismatchUnresolved`
-     is set whenever reconciliation fails to find a confident match;
-     `resolveAndGate` now checks it before ever consulting `Confidence`
-     and routes to Review Queue instead of guessing.
-  2. The reconciliation search itself was rejecting genuinely correct
-     matches: TVDB appends `" (N)"` to disambiguate a title reused across
-     a multi-part story (e.g. `"Politics (1)"`), even when the other part
-     has an unrelated title. Raw string similarity between `"Politics"`
-     and `"Politics (1)"` scored only 0.80 — just under the 0.90
-     confidence bar — so a real match was rejected as "not confident
-     enough." New `bestTitleSimilarity` (`internal/intake/tvdb.go`) strips
-     a trailing `" (N)"` suffix before comparing, used in both
-     `findEpisodeByTitle` and `findAdjacentSeasonEpisode`. This is what
-     actually resolves "Politics" to its real TVDB episode (S01E21)
-     instead of leaving it stuck on the wrong one.
-  Files modified: `internal/intake/tvdb.go`, `internal/intake/orchestrator.go`,
-  `internal/intake/watcher.go`, plus new/updated tests in
-  `internal/intake/tvdb_test.go` and `internal/intake/watcher_test.go`.
-
-## [1.5.0] - 2026-07-24
-
-### Added
-- Combined multi-part episode detection for TV intake: a source that merges
-  two consecutive TVDB episodes into one file numbered as a single episode
-  (e.g. a two-part pilot like Stargate SG-1's "Children of the Gods Parts 1
-  & 2", numbered `S01E01` by the source but covering TVDB's E01+E02) is now
-  detected and named `S01E01-E02` instead of silently filing under just
-  `E01` and losing the second episode. Detection requires two independent
-  signals before acting: (1) the filename's parsed episode title matches a
-  "Parts 1 & 2" / "Part 1 and 2" pattern, and (2) the probed file duration
-  matches the sum of both TVDB episodes' listed runtimes within 15%
-  tolerance. If the title signal fires but duration can't confirm it (no
-  TVDB runtime data, or no probe duration available), the file routes to
-  Review Queue with a distinct reason rather than guessing — consistent
-  with the project's no-silent-failures principle. Per an explicit design
-  decision: the destination file keeps the *source's own* episode title
-  (it was written for this exact file) rather than being overwritten with
-  TVDB's single-episode title, which would only describe half the content.
-  `internal/intake/naming.go`'s `{episode:02d}` template token now also
-  correctly renders a range for the pre-existing (but previously
-  ineffective) case where the filename itself already encodes a range like
-  `S01E01E02` — that case parsed `Episode2` before this change but the
-  naming template never read it, silently dropping the second episode.
-  Files modified: `internal/intake/tvdb.go`, `internal/intake/orchestrator.go`,
-  `internal/intake/watcher.go`, `internal/intake/naming.go`,
-  `internal/api/handler.go` (LookupTV call site updated for the new
-  probeDuration param), plus new tests in `internal/intake/tvdb_test.go`,
-  `internal/intake/watcher_test.go`, `internal/intake/naming_test.go`.
-
-## [1.4.2] - 2026-07-24
-
-### Fixed
-- Tray menu had no way to stop intake independently of the encode queue —
-  "Pipeline", "Pause Queue", and "Stop Queue" all called `/api/queue/*`
-  (`internal/jobs/WorkerPool`) and cross-toggled each other, so pausing one
-  always paused the other too. The backend already had a fully separate,
-  correctly-scoped intake control (`POST /api/intake/pause` /
-  `/api/intake/resume`, wired to `Watcher.Pause()`/`Resume()`, which only
-  suspends scanning the Incoming folder for new files and leaves anything
-  already in the pipeline untouched) — it just wasn't exposed anywhere in
-  the tray. Restructured the tray menu (`cmd/tray/main.go`) into two
-  independent checkboxes with no cross-toggling: "Stop Pipeline" (calls
-  `/api/intake/pause`/`resume`, intake only) and "Pause Queue" (calls
-  `/api/queue/pause`/`start`, encode queue only — unaffected by the pause
-  fix above other than sharing that endpoint). Removed the old "Start
-  Queue"/"Stop Queue" buttons, which duplicated the checkbox and, in Stop
-  Queue's case, called the still-unimplemented `/api/queue/stop` stub.
-  Files modified: `cmd/tray/main.go`.
-- Pausing the encode queue (tray "Pause Queue", or either pause control in
-  the web UI) cancelled and requeued whatever job was currently running,
-  killing the in-flight ffmpeg process — the intended behavior is a soft
-  pause: block new jobs from starting, let the current one finish. Root
-  cause: `WorkerPool.Pause()` (`internal/jobs/worker.go`) explicitly
-  cancelled and requeued every running job; the "let it finish" half of
-  pause already existed (the worker loop rechecks the paused flag before
-  picking up a new job) but was never reached because the running job was
-  killed first. Fixed: `Pause()` now only sets the paused flag and reports
-  how many jobs are still running to finish — it no longer touches
-  `Worker.currentJob` or the queue at all. API response field renamed
-  `requeued` → `in_progress` to reflect this (`POST /api/queue/pause`,
-  `internal/api/handler.go`). The web UI's "Stop Queue" confirmation dialog
-  (`web/templates/index.html`) previously promised "will stop all running
-  jobs ... must restart from the beginning" — updated to describe the
-  actual (soft-pause) behavior instead of promising a hard cancel the code
-  no longer performs. `docs/api/jobs.md` updated to match.
-  Files modified: `internal/jobs/worker.go`, `internal/jobs/worker_test.go`
-  (new `TestWorkerPoolPause_DoesNotCancelRunningJob`), `internal/api/handler.go`,
-  `web/templates/index.html`, `docs/api/jobs.md`.
-  Note: a true hard-cancel ("stop everything now, including the running
-  job") is not currently implemented anywhere — `WorkerPool.StopAll()` /
-  `POST /api/queue/stop` remain an unimplemented stub, unchanged by this
-  fix. If that's wanted later, it's a separate feature.
-
-## [1.4.1] - 2026-07-24
-
-### Fixed
-- `internal/jobs/worker.go`: SmartShrink's size-retry loop crashed job
-  finalization when a retry encode failed (e.g. the in-flight ffmpeg
-  process gets killed because the user paused the queue mid-retry) —
-  logged `Job failed - finalization error: ... The system cannot find the
-  file specified`. Root cause: each retry attempt reused the same temp
-  path as the previous (already-successful) attempt, deleting it before
-  re-encoding; if that re-encode then failed, the loop fell through to
-  finalize using the last good in-memory result even though its backing
-  file no longer existed on disk. Fixed by encoding each retry to a
-  separate `.retry` path and only promoting it (delete-then-rename onto
-  the real temp path) when it actually succeeds and beats the current
-  best, so a failed or worse retry never destroys the previously-best
-  output. Also added explicit cancellation handling after the retry loop
-  (mirroring the existing check around the initial encode attempt): if
-  the job's context was cancelled mid-retry, the job is treated as
-  cancelled/already-requeued (by `WorkerPool.Pause()`) instead of
-  attempting finalization/Review-Queue routing.
-- `internal/intake/tvdb.go`: episode-name reconciliation (trusting the
-  filename's episode title over a mismatched S/E number, and correcting
-  the number instead of overwriting the title) always failed silently.
-  `findEpisodeByTitle`'s whole-series page scan built the pagination URL
-  as a path segment (`/v4/series/{id}/episodes/default/page/{n}`), which
-  isn't a valid TVDB v4 route and returned HTTP 400 on every call — so
-  the fallback never found a match, and files with an off-by-one/combined
-  source episode (e.g. Stargate SG-1 S01E02 "The Enemy Within" being
-  filed as "Children of the Gods (2)") kept the wrong episode number with
-  only the title overwritten. Fixed to send `page` as a query parameter,
-  matching the working `fetchEpisode` request shape.
-- Files modified: `internal/intake/tvdb.go`, `internal/intake/tvdb_test.go`
-  (two mock routes updated from path-based to query-param-based page
-  detection to match the corrected request shape).
-
-## [1.4.0] - 2026-07-23
-
-### Added
+- New `vmaf_encoder` config option (default `'auto'`, options `'auto'` or
+  `'libx265'`, also exposed as a Settings dropdown: "VMAF Sample Encoder",
+  under Advanced). Allows overriding the encoder used for VMAF sample
+  encoding while keeping the main encoder for final output. Set to
+  `'libx265'` if your main encoder (e.g., Intel Quick Sync HEVC) has
+  compatibility or reliability issues with VMAF sample encoding. VMAF
+  analysis is I/O-bound; CPU encoding for small sample clips has negligible
+  performance impact while using a proven, reliable encoder. Fixes systems
+  with Quick Sync failing VMAF analysis with exit code 0xb1b4b1ab due to
+  incompatible quality parameter ranges (Quick Sync uses `-global_quality`,
+  VMAF search uses CRF-based ranges). Applies to all VMAF-based analyses:
+  main SmartShrink phase-1 search, adaptive ceiling probe, and SmartShrink
+  retry loop verification.
 - New `smartshrink_adaptive_target` config option, **default `true`**, also
   exposed as a Settings toggle: "Adaptive VMAF Target" (Transcoding
   section, no longer buried under Advanced). SmartShrink now probes the
@@ -342,20 +62,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `internal/api/handler.go`, `web/templates/index.html`,
   `MEDIAFORGE_SPEC.md`. Set `smartshrink_adaptive_target: false` to
   restore the old fixed-threshold-only behavior.
-
-### Fixed
-- Filenames with 3-digit episode numbers (e.g. `S23E250`, common on
-  syndicated daily shows like Judge Judy) were parsed with the episode
-  truncated to 2 digits (`S23E25`), causing TVDB to match a real but
-  wrong episode. The name+season/episode-found confidence weighting
-  scored that wrong match at 0.90 — high enough to bypass Review Queue
-  and LLM verification entirely — even though the parsed episode title
-  didn't match. Fixed by widening the episode capture group in all three
-  TV filename regexes (`internal/intake/parse.go`) from `\d{1,2}` to
-  `\d{1,3}`. Verified against the real failing filename: now parses as
-  `S23E250` and TVDB match confidence correctly reaches 1.0 on the actual
-  episode. Files modified: `internal/intake/parse.go`,
-  `internal/intake/parse_test.go`.
 
 ### Removed
 - The post-encode VMAF re-verification pass described in an earlier version

@@ -246,6 +246,15 @@ type Config struct {
 	// reduce sensitivity to any single atypical clip (e.g. a recap card or
 	// black frame) skewing the average. Range: 3-6.
 	VMafSampleCount int `yaml:"vmaf_sample_count"`
+
+	// VMafEncoder specifies which encoder to use for VMAF sample encoding.
+	// Options: "auto" (use main encoder), "libx265" (CPU software encoder).
+	// Default: "auto" (existing behavior).
+	// Set to "libx265" if your main encoder (e.g., Quick Sync) has reliability
+	// issues with VMAF sample encoding. VMAF analysis is I/O-bound; using CPU
+	// for samples while keeping hardware encoding for main output is a good
+	// tradeoff for reliability.
+	VMafEncoder string `yaml:"vmaf_encoder"`
 }
 
 // defaultPosterCachePath returns a platform-appropriate poster cache directory.
@@ -319,6 +328,7 @@ func DefaultConfig() *Config {
 		SkipSmartShrinkForAV1:     false,
 		SmartShrinkAdaptiveTarget: true,
 		VMafSampleCount:           4,
+		VMafEncoder:               "auto",
 		Notifications: NotificationsConfig{
 			Events: NotificationEventsConfig{
 				EncodeComplete:  false,
