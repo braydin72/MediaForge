@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-10-29
+
 ### Fixed
 - Manual Review Queue metadata resolution now correctly re-encodes files to the
   configured target codec instead of copying them to the library as-is. When a
@@ -18,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Fixes the workflow where manually resolved metadata entries would bypass
   encoding, leaving the user with the original codec instead of the expected
   HEVC transcoded output.
+- Files modified: internal/api/handler.go, internal/api/handler_test.go,
+  internal/intake/watcher.go, internal/intake/watcher_test.go
 - TVDB series selection picked the wrong show when a remake shared its name
   with older series (real case: "Treasure Island (2026) - S01E02 - Chapter 2_
   Great Britain" was matched to "Treasure Island (2012)" and sent to Review
