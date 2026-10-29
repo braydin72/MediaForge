@@ -85,3 +85,33 @@ func TestApplyNamingTemplateSingleEpisodeUnaffected(t *testing.T) {
 		t.Errorf("applyNamingTemplate = %q, want %q", got, want)
 	}
 }
+
+// TestApplyNamingTemplateTVDBYearSuffixNotDoubled reproduces a real output
+// bug: TVDB names remakes "Treasure Island (2026)", and the default show
+// folder template "{show} ({year})" rendered "Treasure Island (2026) (2026)".
+func TestApplyNamingTemplateTVDBYearSuffixNotDoubled(t *testing.T) {
+	parsed := &ParsedFilename{
+		Title:        "Treasure Island (2026)",
+		Year:         2026,
+		MediaType:    "tv",
+		Season:       1,
+		Episode:      2,
+		EpisodeTitle: "Great Britain",
+	}
+	cases := []struct{ tmpl, want string }{
+		{"{show} ({year})", "Treasure Island (2026)"},
+		// No {year} in the template: the suffix stays, it's part of the name.
+		{"{show} - S{season:02d}E{episode:02d} - {episode_title}", "Treasure Island (2026) - S01E02 - Great Britain"},
+	}
+	for _, c := range cases {
+		if got := applyNamingTemplate(c.tmpl, parsed); got != c.want {
+			t.Errorf("applyNamingTemplate(%q) = %q, want %q", c.tmpl, got, c.want)
+		}
+	}
+
+	// The suffix year identifies the show; it wins over a differing parsed year.
+	parsed.Year = 2027
+	if got, want := applyNamingTemplate("{show} ({year})", parsed), "Treasure Island (2026)"; got != want {
+		t.Errorf("with differing parsed year: got %q, want %q", got, want)
+	}
+}

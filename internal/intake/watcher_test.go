@@ -51,9 +51,9 @@ func TestClassifyCodec(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		got := classifyCodec(c.raw)
+		got := ClassifyCodec(c.raw)
 		if got != c.want {
-			t.Errorf("classifyCodec(%q) = %q, want %q", c.raw, got, c.want)
+			t.Errorf("ClassifyCodec(%q) = %q, want %q", c.raw, got, c.want)
 		}
 	}
 }

@@ -1520,21 +1520,142 @@ func (h *Handler) ResolveReviewEntry(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := util.SafeMove(entry.OriginalPath, libraryPath); err != nil {
-		newReason := fmt.Sprintf("library move failed: %v", err)
-		logger.Warn("Review resolve: move failed",
-			"entry_id", id, "src", entry.OriginalPath, "dst", libraryPath, "error", err)
-		_ = h.reviewStore.UpdateReviewEntryReason(id, newReason)
-		writeError(w, http.StatusInternalServerError, newReason)
+	// Try to use the stored FFProbeInfo first (if available from when the entry was created).
+	// If that's not available, probe the file directly.
+	var probe *ffmpeg.ProbeResult
+	if entry.FFProbeInfo != "" {
+		if err := json.Unmarshal([]byte(entry.FFProbeInfo), &probe); err != nil {
+			logger.Warn("Review resolve: could not parse stored FFProbeInfo",
+				"entry_id", id, "error", err)
+			probe = nil
+		}
+	}
+
+	// If we don't have probe info from the entry, re-probe the file to determine its codec.
+	if probe == nil {
+		probeCtx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+		defer cancel()
+
+		var err error
+		probe, err = h.browser.ProbeFile(probeCtx, entry.OriginalPath)
+		if err != nil {
+			newReason := fmt.Sprintf("probe failed after metadata resolution: %v", err)
+			logger.Warn("Review resolve: probe failed", "entry_id", id, "src", entry.OriginalPath, "error", err)
+			_ = h.reviewStore.UpdateReviewEntryReason(id, newReason)
+			writeError(w, http.StatusInternalServerError, newReason)
+			return
+		}
+	}
+
+	// Classify the codec and route: HEVC to library, H.264/AVC to staging/encode queue.
+	codecClass := intake.ClassifyCodec(probe.VideoCodec)
+
+	if codecClass == "hevc" {
+		// File is already HEVC; move directly to library.
+		if err := util.SafeMove(entry.OriginalPath, libraryPath); err != nil {
+			newReason := fmt.Sprintf("library move failed: %v", err)
+			logger.Warn("Review resolve: move failed",
+				"entry_id", id, "src", entry.OriginalPath, "dst", libraryPath, "error", err)
+			_ = h.reviewStore.UpdateReviewEntryReason(id, newReason)
+			writeError(w, http.StatusInternalServerError, newReason)
+			return
+		}
+
+		logger.Info("Review resolve: moved to library (HEVC)",
+			"entry_id", id, "dst", libraryPath)
+		if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "resolved", "library_path": libraryPath})
 		return
 	}
 
-	logger.Info("Review resolve: moved to library", "entry_id", id, "dst", libraryPath)
-	if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	if codecClass == "encode" {
+		// File is H.264/AVC; move to staging and queue for encoding with resolved metadata.
+		if h.queue == nil {
+			newReason := "encode queue not configured"
+			_ = h.reviewStore.UpdateReviewEntryReason(id, newReason)
+			writeError(w, http.StatusInternalServerError, newReason)
+			return
+		}
+
+		if h.cfg.Intake.StagingFolder == "" {
+			newReason := "staging folder not configured for encoding"
+			_ = h.reviewStore.UpdateReviewEntryReason(id, newReason)
+			writeError(w, http.StatusInternalServerError, newReason)
+			return
+		}
+
+		stagingPath := filepath.Join(h.cfg.Intake.StagingFolder, entry.Filename)
+		if err := util.SafeMove(entry.OriginalPath, stagingPath); err != nil {
+			newReason := fmt.Sprintf("staging move failed: %v", err)
+			logger.Warn("Review resolve: failed to move to staging",
+				"entry_id", id, "src", entry.OriginalPath, "dst", stagingPath, "error", err)
+			_ = h.reviewStore.UpdateReviewEntryReason(id, newReason)
+			writeError(w, http.StatusInternalServerError, newReason)
+			return
+		}
+
+		// Determine preset and quality settings from config.
+		presetID := h.cfg.DefaultPreset
+		if presetID == "" {
+			presetID = "smartshrink-hevc"
+		}
+		quality := h.cfg.DefaultQuality
+		if quality == "" {
+			quality = "good"
+		}
+
+		// Queue the file for encoding.
+		addedJobs, err := h.queue.AddMultiple([]*ffmpeg.ProbeResult{probe}, presetID, quality)
+		if err != nil {
+			newReason := fmt.Sprintf("failed to queue for encoding: %v", err)
+			logger.Warn("Review resolve: failed to queue for encoding",
+				"entry_id", id, "src", stagingPath, "error", err)
+			// Try to move the file back; if that fails too, leave it in staging and
+			// update the entry reason so the user can see what happened.
+			if mvErr := util.SafeMove(stagingPath, entry.OriginalPath); mvErr != nil {
+				newReason = fmt.Sprintf("queuing failed and rollback failed: queuing: %v, rollback: %v", err, mvErr)
+			}
+			_ = h.reviewStore.UpdateReviewEntryReason(id, newReason)
+			writeError(w, http.StatusInternalServerError, newReason)
+			return
+		}
+
+		// Set the library destination path on the queued job(s) so the worker
+		// knows where to move the file after encoding completes.
+		for _, job := range addedJobs {
+			h.queue.SetLibraryPath(job.ID, libraryPath)
+		}
+
+		logger.Info("Review resolve: moved to staging and queued for encoding",
+			"entry_id", id, "staging_path", stagingPath, "library_path", libraryPath)
+		if err := h.reviewStore.UpdateReviewQueueStatus(id, "resolved"); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]string{
+			"status":          "queued_for_encoding",
+			"staging_path":    stagingPath,
+			"library_path":    libraryPath,
+			"job_count":       fmt.Sprintf("%d", len(addedJobs)),
+		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "resolved", "library_path": libraryPath})
+
+	// Unknown codec; put the entry back in the review queue.
+	var reason string
+	if probe.VideoCodec == "" {
+		reason = "codec detection failed: no video stream found"
+	} else {
+		reason = fmt.Sprintf("unrecognized codec after metadata resolution: %s", probe.VideoCodec)
+	}
+	logger.Warn("Review resolve: unrecognized codec after metadata resolution",
+		"entry_id", id, "codec", probe.VideoCodec)
+	_ = h.reviewStore.UpdateReviewEntryReason(id, reason)
+	_ = h.reviewStore.UpdateReviewQueueStatus(id, "pending")
+	writeError(w, http.StatusConflict, reason)
 }
 
 // DiscardReviewEntry handles PUT /api/review/{id}/discard

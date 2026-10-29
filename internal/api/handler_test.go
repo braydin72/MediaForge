@@ -511,12 +511,21 @@ func resolveTestSetup(t *testing.T) (*Handler, *mockReviewStore, *store.ReviewEn
 		t.Fatalf("write src: %v", err)
 	}
 
+	// Create a probe result JSON indicating HEVC codec
+	probeResult := &ffmpeg.ProbeResult{
+		VideoCodec: "hevc",
+		Duration:   time.Duration(60 * time.Second),
+		Size:       1000,
+	}
+	probeJSON, _ := json.Marshal(probeResult)
+
 	entry := &store.ReviewEntry{
 		ID:           "entry-1",
 		OriginalPath: src,
 		Filename:     "Big Movie 2020.mkv",
 		Reason:       "low confidence match",
 		Status:       "pending",
+		FFProbeInfo:  string(probeJSON),
 	}
 	ms := newMockReviewStore(entry)
 	handler.SetReviewStore(ms)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -253,7 +254,7 @@ func (w *Watcher) runPipeline(ctx context.Context, path string) {
 		return
 	}
 
-	switch classifyCodec(probe.VideoCodec) {
+	switch ClassifyCodec(probe.VideoCodec) {
 	case "hevc":
 		logger.Info("Intake: modern codec — routing to library",
 			"file", filename, "codec", probe.VideoCodec,
@@ -424,15 +425,18 @@ func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *Parse
 		return nil, false
 	}
 
-	if result.TitleMismatchUnresolved {
-		reason := fmt.Sprintf("episode title in filename (%q) does not match TVDB's episode at S%02dE%02d (%q), and no confident alternate episode was found — needs manual review",
-			parsed.ParsedEpisodeTitle, result.Season, result.Episode, result.EpisodeTitle)
-		logger.Warn("Intake: unresolved episode title mismatch", "file", filename, "reason", reason)
-		w.sendToReviewQueue(path, reason, probe, "", store.ReviewCategoryUnresolvedMultipart)
-		return nil, false
-	}
-
-	if result.Confidence < reviewThreshold {
+	if result.TitleMismatchUnresolved || result.SeriesAmbiguous {
+		resolved, reason := w.resolveUncertainTVDBMatch(ctx, filename, parsed, result, confThreshold)
+		if resolved == nil {
+			category := store.ReviewCategoryMetadataFailure
+			if result.TitleMismatchUnresolved {
+				category = store.ReviewCategoryUnresolvedMultipart
+			}
+			w.sendToReviewQueue(path, reason, probe, "", category)
+			return nil, false
+		}
+		result = resolved
+	} else if result.Confidence < reviewThreshold {
 		reason := fmt.Sprintf("low confidence match (%.0f%%) for %q", result.Confidence*100, result.Title)
 		logger.Warn("Intake: confidence below review threshold", "file", filename, "confidence", result.Confidence)
 		w.sendToReviewQueue(path, reason, probe, "", store.ReviewCategoryMetadataFailure)
@@ -495,6 +499,70 @@ func (w *Watcher) resolveAndGate(ctx context.Context, path string, parsed *Parse
 		parsed.EpisodeTitle = result.EpisodeTitle
 	}
 	return result, true
+}
+
+// resolveUncertainTVDBMatch handles a TVDB result whose series pick was a
+// near-tie (SeriesAmbiguous) or whose episode title couldn't be reconciled on
+// the chosen series (TitleMismatchUnresolved). The chosen series and its
+// alternates are offered to the LLM together; the LLM's pick is accepted only
+// at or above confThreshold, since these are exactly the close calls that must
+// not be guessed. Returns the accepted candidate, or nil and a Review Queue
+// reason explaining why it couldn't be resolved.
+func (w *Watcher) resolveUncertainTVDBMatch(ctx context.Context, filename string, parsed *ParsedFilename, result *LookupResult, confThreshold float64) (*LookupResult, string) {
+	candidates := make([]*LookupResult, 0, 1+len(result.Alternates))
+	candidates = append(candidates, result)
+	candidates = append(candidates, result.Alternates...)
+
+	var reason string
+	if result.TitleMismatchUnresolved {
+		reason = fmt.Sprintf("episode title in filename (%q) does not match TVDB's episode at S%02dE%02d (%q), and no confident alternate episode was found",
+			parsed.ParsedEpisodeTitle, result.Season, result.Episode, result.EpisodeTitle)
+	} else {
+		names := make([]string, 0, len(candidates))
+		for _, c := range candidates {
+			names = append(names, fmt.Sprintf("%q", c.Title))
+		}
+		reason = fmt.Sprintf("TVDB series match for %q is ambiguous — candidates scored too close to call: %s",
+			parsed.Title, strings.Join(names, ", "))
+	}
+	logger.Warn("Intake: uncertain TVDB match", "file", filename, "reason", reason, "candidates", len(candidates))
+
+	if w.LLMClient == nil {
+		return nil, reason + " — LLM not configured, needs manual review"
+	}
+	logger.Info("Intake: querying LLM to resolve uncertain TVDB match",
+		"file", filename, "candidates", len(candidates))
+	llmResult, err := w.LLMClient.Verify(ctx, parsed, candidates)
+	if err != nil {
+		logger.Warn("Intake: LLM verification error", "file", filename, "error", err)
+		return nil, fmt.Sprintf("%s — LLM verification failed (%v), needs manual review", reason, err)
+	}
+	if llmResult.Disabled {
+		return nil, reason + " — LLM not configured, needs manual review"
+	}
+	logger.Info("Intake: LLM verification result",
+		"file", filename, "candidate_id", llmResult.CandidateID,
+		"confidence", llmResult.Confidence, "reasoning", llmResult.Reasoning)
+
+	idx, convErr := strconv.Atoi(llmResult.CandidateID)
+	if convErr != nil || idx < 1 || idx > len(candidates) {
+		return nil, fmt.Sprintf("%s — LLM found no matching candidate (%s), needs manual review", reason, llmResult.Reasoning)
+	}
+	chosen := candidates[idx-1]
+	if llmResult.Confidence < confThreshold {
+		return nil, fmt.Sprintf("%s — LLM suggested %q S%02dE%02d (%q) at only %.0f%% confidence (%s), needs manual review",
+			reason, chosen.Title, chosen.Season, chosen.Episode, chosen.EpisodeTitle, llmResult.Confidence*100, llmResult.Reasoning)
+	}
+
+	logger.Info("Intake: LLM resolved uncertain TVDB match",
+		"file", filename, "series", chosen.Title, "tvdb_id", chosen.TVDBSeriesID,
+		"season", chosen.Season, "episode", chosen.Episode, "episode_title", chosen.EpisodeTitle)
+	resolved := *chosen
+	resolved.TitleMismatchUnresolved = false
+	resolved.SeriesAmbiguous = false
+	resolved.Alternates = nil
+	resolved.Confidence = llmResult.Confidence
+	return &resolved, ""
 }
 
 func (w *Watcher) moveHEVCToLibrary(ctx context.Context, path string, probe *ffmpeg.ProbeResult) {
@@ -712,12 +780,12 @@ var knownVideoCodecs = map[string]struct{}{
 	"indeo2": {}, "indeo3": {}, "indeo4": {}, "indeo5": {},
 }
 
-// classifyCodec maps a raw ffprobe codec_name to one of "hevc", "encode", or "unknown".
+// ClassifyCodec maps a raw ffprobe codec_name to one of "hevc", "encode", or "unknown".
 //
 //   - "hevc"    — already a modern codec; move directly to library (HEVC and AV1).
 //   - "encode"  — known video codec that needs transcoding to HEVC.
 //   - "unknown" — not a recognized video codec; route to Review Queue.
-func classifyCodec(codec string) string {
+func ClassifyCodec(codec string) string {
 	lower := strings.ToLower(codec)
 	switch lower {
 	case "hevc", "h265", "x265", "av1", "libaom-av1", "libsvtav1":
