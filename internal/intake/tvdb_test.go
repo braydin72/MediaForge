@@ -328,9 +328,9 @@ func TestSelectBestSeries_ExactMatchWins(t *testing.T) {
 		t.Errorf("expected exact match to win, got %q", best.Name)
 	}
 	// selectBestSeries uses the old additive formula for candidate selection only:
-	// exact (0.50+0.30) + year (0.10) = 0.90
-	if !approxEqual(score, 0.90) {
-		t.Errorf("score: want ~0.90, got %f", score)
+	// exact (0.50+0.30) + year existed (0.10) + exact year (0.10) = 1.00
+	if !approxEqual(score, 1.00) {
+		t.Errorf("score: want ~1.00, got %f", score)
 	}
 }
 

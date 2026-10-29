@@ -108,6 +108,9 @@ func buildVerificationPrompt(parsed *ParsedFilename, candidates []*LookupResult)
 
 	if parsed.IsTV {
 		fmt.Fprintf(&sb, "\nType: TV show S%02dE%02d", parsed.Season, parsed.Episode)
+		if parsed.ParsedEpisodeTitle != "" {
+			fmt.Fprintf(&sb, "\nEpisode title (parsed): %q", parsed.ParsedEpisodeTitle)
+		}
 	} else {
 		sb.WriteString("\nType: Movie")
 	}
@@ -119,8 +122,14 @@ func buildVerificationPrompt(parsed *ParsedFilename, candidates []*LookupResult)
 		} else {
 			fmt.Fprintf(&sb, "%d. %s [%s] — confidence: %.0f%%", i+1, r.Title, r.Source, r.Confidence*100)
 		}
-		if r.EpisodeTitle != "" {
+		switch {
+		case r.EpisodeTitle != "" && r.Season > 0:
+			fmt.Fprintf(&sb, "\n   Episode S%02dE%02d: %q", r.Season, r.Episode, r.EpisodeTitle)
+		case r.EpisodeTitle != "":
 			fmt.Fprintf(&sb, "\n   Episode: %q", r.EpisodeTitle)
+		}
+		if r.EpisodeAirDate != "" {
+			fmt.Fprintf(&sb, " (aired %s)", r.EpisodeAirDate)
 		}
 		sb.WriteString("\n")
 	}

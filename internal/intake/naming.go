@@ -120,10 +120,25 @@ func ResolveLibraryPath(cfg *config.IntakeConfig, parsed *ParsedFilename, ext st
 
 // applyNamingTemplate replaces template tokens in tmpl with values from parsed.
 // Supported tokens: {title}, {show}, {year}, {season:02d}, {episode:02d}, {episode_title}.
+//
+// TVDB names remakes with a " (YYYY)" disambiguator ("Treasure Island (2026)").
+// When the template supplies its own {year}, that suffix is moved out of the
+// title so the result reads "Treasure Island (2026)", not "Treasure Island
+// (2026) (2026)". The suffix year wins over parsed.Year in that case: it is the
+// year that identifies the show, and parsed.Year may be an episode/air year.
+// Templates without {year} keep the title as-is, suffix included.
 func applyNamingTemplate(tmpl string, parsed *ParsedFilename) string {
+	title := parsed.Title
+	year := parsed.Year
+	if strings.Contains(tmpl, "{year}") {
+		if base, suffixYear := splitSeriesYearSuffix(title); suffixYear > 0 {
+			title, year = base, suffixYear
+		}
+	}
+
 	var yearStr string
-	if parsed.Year > 0 {
-		yearStr = fmt.Sprintf("%d", parsed.Year)
+	if year > 0 {
+		yearStr = fmt.Sprintf("%d", year)
 	}
 
 	// A file covering two consecutive episodes (either the filename itself
@@ -136,8 +151,8 @@ func applyNamingTemplate(tmpl string, parsed *ParsedFilename) string {
 	}
 
 	replacer := strings.NewReplacer(
-		"{title}", sanitizePathComponent(parsed.Title),
-		"{show}", sanitizePathComponent(parsed.Title),
+		"{title}", sanitizePathComponent(title),
+		"{show}", sanitizePathComponent(title),
 		"{year}", yearStr,
 		"{season:02d}", fmt.Sprintf("%02d", parsed.Season),
 		"{episode:02d}", episodeStr,

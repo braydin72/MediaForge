@@ -18,6 +18,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Fixes the workflow where manually resolved metadata entries would bypass
   encoding, leaving the user with the original codec instead of the expected
   HEVC transcoded output.
+- TVDB series selection picked the wrong show when a remake shared its name
+  with older series (real case: "Treasure Island (2026) - S01E02 - Chapter 2_
+  Great Britain" was matched to "Treasure Island (2012)" and sent to Review
+  Queue). All 26 candidates tied at 0.40 and TVDB's result order decided it,
+  because (1) TVDB's " (YYYY)" name disambiguator blocked the exact-name bonus,
+  (2) the year bonus only checked premiere <= filename year, and (3) "Chapter 2
+  Great Britain" vs "Great Britain" scored 0.57, just under the 0.60 bar.
+  - Episode title comparison now strips a leading "Chapter/Episode/Part N"
+    prefix (from one side only) and scores whole-word containment of a 2+ word
+    title at 0.85 (confirms the episode at the parsed S/E, but stays below the
+    0.90 bar needed to relocate a file to a different S/E).
+  - Series names are compared with TVDB's " (YYYY)" suffix stripped. When the
+    suffix year equals the filename year it counts as a full exact match
+    (+0.30); otherwise +0.25, just under a true exact match. An exact
+    filename-year match now also adds +0.10 on top of the existing premiere <=
+    year bonus. Year is still never sent to TVDB as a search filter.
+  - Near-ties (within 0.05) between series candidates when the filename has an
+    episode title are no longer resolved by TVDB's result order: the match is
+    flagged ambiguous instead.
+  - Ambiguous series matches and unresolved episode-title mismatches are now
+    sent to the configured LLM with the chosen series plus up to 5 alternates
+    (each with its episode at the parsed S/E). The LLM's pick is accepted only
+    at or above `confidence_threshold`; otherwise, or with no LLM configured,
+    the file goes to Review Queue with a reason naming the candidates and the
+    LLM's answer. Previously these skipped the LLM entirely.
+  - LLM verification prompt now includes the filename's episode title and
+    each candidate's S/E and air date.
+- Library folder for TVDB shows whose name carries a year disambiguator was
+  written as "Treasure Island (2026) (2026)". When a naming template contains
+  {year}, a trailing " (YYYY)" on the title is now moved into {year} instead
+  of being repeated (the suffix year wins over a differing parsed year).
+  Templates without {year}, like the default episode file name, keep the
+  suffix. Already-misnamed folders in the library are not renamed.
+- Files modified: internal/intake/tvdb.go, internal/intake/orchestrator.go,
+  internal/intake/watcher.go, internal/intake/llm.go, internal/intake/naming.go,
+  internal/intake/tvdb_test.go, internal/intake/naming_test.go,
+  internal/intake/tvdb_ambiguity_test.go (new)
 
 ## [1.9.0] - 2026-09-09
 

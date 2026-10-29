@@ -1,6 +1,37 @@
 CURRENT STATE NOTE
 
-=== Latest session: fixed manual Review Queue resolution skipping encode step (Issue #15) ===
+=== Latest session: fixed TVDB remake series selection + LLM fallback for uncertain matches ===
+
+- Real case: "Treasure Island (2026) - S01E02 - Chapter 2_ Great Britain.mp4"
+  matched "Treasure Island (2012)" (26-way tie at 0.40, first-wins) and went
+  to Review Queue without ever asking the LLM. See CHANGELOG [Unreleased].
+- internal/intake/tvdb.go: bestTitleSimilarity now strips leading
+  "Chapter/Episode/Part N" prefixes and scores whole-word containment (0.85);
+  used everywhere TVDB titles are compared (selection, mismatch check,
+  confidence). baseSeriesScore strips TVDB's " (YYYY)" name suffix (+0.25) and
+  adds +0.10 for an exact year match. selectBestSeries now wraps
+  scoreSeriesCandidates (sorted, ties broken by episode similarity). New
+  TVDBResult.SeriesAmbiguous (near-tie within 0.05 when an episode title is
+  present) and TVDBResult.Alternates (up to 5 runner-ups with their episodes).
+- internal/intake/watcher.go: new resolveUncertainTVDBMatch — ambiguous or
+  title-mismatch-unresolved results go to the LLM with all candidates; accepted
+  only at >= confidence_threshold, otherwise Review Queue with a specific reason.
+- internal/intake/llm.go: prompt includes parsed episode title, candidate S/E,
+  air date.
+- baseSeriesScore: suffix year == filename year counts as an exact name (+0.30).
+- internal/intake/naming.go: applyNamingTemplate moves a TVDB " (YYYY)" title
+  suffix into {year} when the template has {year}, fixing "Show (2026) (2026)"
+  folders. Existing misnamed library folders were NOT migrated; fix by hand.
+- New file: internal/intake/tvdb_ambiguity_test.go (regression tests).
+- No new config fields, endpoints, or CLI flags. Scoring defaults changed
+  (noted above).
+- Follow-up: ambiguity detection only applies when the filename has an episode
+  title; files without one still take the top-scored series on ties. Not yet
+  verified against a live intake run; re-drop the Treasure Island file to
+  confirm. go build, vet, test, and golangci-lint v2.8.0 (run under
+  GOTOOLCHAIN=go1.25.5 to match CI) all pass.
+
+=== Prior session: fixed manual Review Queue resolution skipping encode step (Issue #15) ===
 
 Investigated and fixed issue from user's workflow: when a video file fails metadata
 lookup before encoding to HEVC, and the user manually searches for and selects the

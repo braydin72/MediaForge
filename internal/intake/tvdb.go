@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -54,19 +55,113 @@ func stripTrailingPartSuffix(s string) string {
 // against "Politics (1)" even though it's the correct episode — a real
 // production case (TVDB episode 85770) that caused a genuinely-matching
 // episode to be rejected as unconfident and routed to Review Queue.
+//
+// It also strips a leading ordinal prefix ("Chapter 2 -", "Episode Two:",
+// "Part 3") from one side at a time, and scores a whole-word containment of
+// one title inside the other (see tokenContainmentSimilarity). Filename
+// "Chapter 2 Great Britain" vs TVDB "Great Britain" previously scored 0.57 on
+// raw edit distance, below every match threshold, which let the correct series
+// tie with unrelated ones during selection and lose on TVDB's result order.
 func bestTitleSimilarity(a, b string) float64 {
 	sim := stringSimilarity(a, b)
-	if strippedA := stripTrailingPartSuffix(a); strippedA != a {
-		if s := stringSimilarity(strippedA, b); s > sim {
+	try := func(x, y string) {
+		if s := stringSimilarity(x, y); s > sim {
 			sim = s
 		}
+	}
+	if strippedA := stripTrailingPartSuffix(a); strippedA != a {
+		try(strippedA, b)
 	}
 	if strippedB := stripTrailingPartSuffix(b); strippedB != b {
-		if s := stringSimilarity(a, strippedB); s > sim {
-			sim = s
-		}
+		try(a, strippedB)
+	}
+	// Only strip the ordinal prefix from one side: when both carry one
+	// ("Chapter 2 X" vs "Chapter 5 X") the numbers are real information and
+	// the raw comparison above already accounts for them.
+	if strippedA := stripLeadingOrdinalPrefix(a); strippedA != a {
+		try(strippedA, b)
+	}
+	if strippedB := stripLeadingOrdinalPrefix(b); strippedB != b {
+		try(a, strippedB)
+	}
+	if s := tokenContainmentSimilarity(a, b); s > sim {
+		sim = s
 	}
 	return sim
+}
+
+// reLeadingOrdinalPrefix matches a leading "Chapter 2", "Episode Two:",
+// "Ep. 3 -", "Part IV" style prefix that some sources (and some networks'
+// official titles) put in front of the real episode name.
+var reLeadingOrdinalPrefix = regexp.MustCompile(`(?i)^\s*(?:chapter|chap\.?|episode|ep\.?|part|pt\.?)\s*` +
+	`(?:\d+|[ivx]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\b` +
+	`\s*[:\-_.,–—]*\s*`)
+
+// stripLeadingOrdinalPrefix removes a leading ordinal prefix (see
+// reLeadingOrdinalPrefix). When nothing would remain (the whole title is just
+// "Part Two" or "Episode 2") the title is returned unchanged.
+func stripLeadingOrdinalPrefix(s string) string {
+	stripped := reLeadingOrdinalPrefix.ReplaceAllString(s, "")
+	if normTitle(stripped) == "" {
+		return s
+	}
+	return stripped
+}
+
+// tokenContainmentScore is the similarity assigned when one title appears as
+// a contiguous whole-word run inside the other. It is deliberately below the
+// 0.90 "confident" bar used for season/episode correction, but above the 0.60
+// mismatch bar, so containment alone can confirm an episode at the parsed S/E
+// but never relocate a file to a different episode.
+const tokenContainmentScore = 0.85
+
+// tokenContainmentSimilarity returns tokenContainmentScore when the shorter
+// normalized title (at least two words, so a lone "Pilot" can't match
+// anything containing it) appears as a contiguous word sequence in the longer
+// one, and 0 otherwise. A shorter title that is nothing but an ordinal
+// ("Episode 2", "Chapter Two") never counts — it carries no identifying text.
+func tokenContainmentSimilarity(a, b string) float64 {
+	ta := strings.Fields(normTitle(normalizeEpisodePartSuffix(a)))
+	tb := strings.Fields(normTitle(normalizeEpisodePartSuffix(b)))
+	shorter := a
+	if len(ta) > len(tb) {
+		ta, tb = tb, ta
+		shorter = b
+	}
+	if len(ta) < 2 || len(ta) == len(tb) {
+		return 0
+	}
+	if normTitle(reLeadingOrdinalPrefix.ReplaceAllString(shorter, "")) == "" {
+		return 0
+	}
+	for i := 0; i+len(ta) <= len(tb); i++ {
+		match := true
+		for j := range ta {
+			if tb[i+j] != ta[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return tokenContainmentScore
+		}
+	}
+	return 0
+}
+
+// reSeriesYearSuffix matches the " (YYYY)" TVDB appends to a series name to
+// disambiguate remakes, e.g. "Treasure Island (2026)".
+var reSeriesYearSuffix = regexp.MustCompile(`\s*\((\d{4})\)\s*$`)
+
+// splitSeriesYearSuffix returns name without a trailing " (YYYY)"
+// disambiguator and the year it carried (0 when there was none).
+func splitSeriesYearSuffix(name string) (string, int) {
+	m := reSeriesYearSuffix.FindStringSubmatchIndex(name)
+	if m == nil {
+		return name, 0
+	}
+	year, _ := strconv.Atoi(name[m[2]:m[3]])
+	return name[:m[0]], year
 }
 
 // TVDBResult holds the matched metadata from a successful TVDB lookup.
@@ -100,7 +195,23 @@ type TVDBResult struct {
 	// (mismatched) episode in this case — callers must not treat it as a
 	// normal match; route to Review Queue instead.
 	TitleMismatchUnresolved bool
+	// SeriesAmbiguous is set when the filename carries an episode title and
+	// one or more other series candidates scored within seriesAmbiguityMargin
+	// of the chosen one, i.e. the pick came down to TVDB's result order rather
+	// than evidence. Callers must not treat the result as a normal match.
+	SeriesAmbiguous bool
+	// Alternates holds other series candidates (each with its episode at the
+	// parsed S/E) for the caller to offer an LLM or a human when the match is
+	// SeriesAmbiguous or TitleMismatchUnresolved. Empty otherwise.
+	Alternates []*TVDBResult
 }
+
+// seriesAmbiguityMargin is how close a runner-up's selection score must be to
+// the winner's for the series choice to count as ambiguous.
+const seriesAmbiguityMargin = 0.05
+
+// maxSeriesAlternates caps how many alternate series are carried on a result.
+const maxSeriesAlternates = 5
 
 // TVDBError is a structured TVDB API error. The Reason field is safe to surface
 // in the Review Queue as a human-readable failure description.
@@ -182,7 +293,8 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename, probeDu
 		"filename_episode", parsed.ParsedEpisodeTitle,
 		"season", parsed.Season, "episode", parsed.Episode)
 
-	best, selScore := c.selectBestSeries(ctx, candidates, parsed)
+	scored, validated := c.scoreSeriesCandidates(ctx, candidates, parsed)
+	best, selScore := scored[0].s, scored[0].score
 	logger.Debug("TVDB: best series candidate",
 		"name", best.Name, "year", best.Year,
 		"tvdb_id", best.TVDBIDStr, "selection_score", fmt.Sprintf("%.2f", selScore))
@@ -192,6 +304,15 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename, probeDu
 		SeriesName:     best.Name,
 		FirstAiredYear: best.parsedYear(),
 		Network:        best.Network,
+	}
+
+	// With an episode title to check against, a near-tie means the pick came
+	// down to TVDB's result order, not evidence — flag it rather than guess.
+	if validated && len(scored) > 1 && selScore-scored[1].score < seriesAmbiguityMargin {
+		result.SeriesAmbiguous = true
+		logger.Warn("TVDB: series match ambiguous, top candidates scored within margin",
+			"best", best.Name, "best_score", fmt.Sprintf("%.2f", selScore),
+			"runner_up", scored[1].s.Name, "runner_up_score", fmt.Sprintf("%.2f", scored[1].score))
 	}
 
 	if parsed.IsTV && parsed.Season > 0 && parsed.Episode > 0 {
@@ -223,7 +344,7 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename, probeDu
 		// hit, correct the season/episode rather than filing under the wrong episode.
 		if parsed.ParsedEpisodeTitle != "" {
 			mismatch := !result.EpisodeFound ||
-				stringSimilarity(result.EpisodeTitle, parsed.ParsedEpisodeTitle) < 0.60
+				bestTitleSimilarity(result.EpisodeTitle, parsed.ParsedEpisodeTitle) < 0.60
 			if mismatch {
 				logger.Debug("TVDB: episode name mismatch, searching series for title",
 					"series", best.Name, "tvdb_id", best.intID(),
@@ -313,14 +434,54 @@ func (c *TVDBClient) Lookup(ctx context.Context, parsed *ParsedFilename, probeDu
 
 	result.Confidence = computeTVDBConfidence(parsed, result)
 	logger.Debug("TVDB: confidence", "score", fmt.Sprintf("%.2f", result.Confidence))
+
+	if result.SeriesAmbiguous || result.TitleMismatchUnresolved {
+		result.Alternates = seriesAlternates(parsed, scored, result.TitleMismatchUnresolved)
+	}
 	return result, nil
+}
+
+// seriesAlternates builds alternate results from the runner-up candidates whose
+// episode at the parsed S/E was fetched during selection. When the episode
+// title couldn't be resolved on the chosen series, any runner-up may be the
+// real show, so the top few are offered; when the choice was merely a near-tie,
+// only the candidates inside the ambiguity margin are.
+func seriesAlternates(parsed *ParsedFilename, scored []scoredSeries, anyRunnerUp bool) []*TVDBResult {
+	var alts []*TVDBResult
+	for _, sc := range scored[1:] {
+		if len(alts) >= maxSeriesAlternates {
+			break
+		}
+		if !anyRunnerUp && scored[0].score-sc.score >= seriesAmbiguityMargin {
+			break
+		}
+		if sc.ep == nil {
+			continue
+		}
+		alt := &TVDBResult{
+			SeriesID:       sc.s.intID(),
+			SeriesName:     sc.s.Name,
+			FirstAiredYear: sc.s.parsedYear(),
+			Network:        sc.s.Network,
+			EpisodeFound:   true,
+			Season:         sc.ep.SeasonNumber,
+			Episode:        sc.ep.Number,
+			EpisodeTitle:   sc.ep.Name,
+			EpisodeAirDate: sc.ep.Aired,
+		}
+		alt.Confidence = computeTVDBConfidence(parsed, alt)
+		alts = append(alts, alt)
+	}
+	return alts
 }
 
 // computeTVDBConfidence scores a TVDB result against the parsed filename using a
 // 4-component weighted formula.  See Lookup for the component weights and override rules.
 func computeTVDBConfidence(parsed *ParsedFilename, r *TVDBResult) float64 {
-	// Component 1: show name match (40%)
-	nameSim := stringSimilarity(r.SeriesName, parsed.Title)
+	// Component 1: show name match (40%). TVDB's " (YYYY)" remake
+	// disambiguator isn't part of the show's name, so it's compared without it.
+	seriesName, _ := splitSeriesYearSuffix(r.SeriesName)
+	nameSim := stringSimilarity(seriesName, parsed.Title)
 	var nameScore float64
 	switch {
 	case nameSim == 1.0:
@@ -330,7 +491,7 @@ func computeTVDBConfidence(parsed *ParsedFilename, r *TVDBResult) float64 {
 	default:
 		// Substring containment is a strong signal even when edit-distance similarity
 		// is below 0.80 (e.g. "Walking Dead" ⊂ "The Walking Dead", sim ≈ 0.75).
-		a := strings.ToLower(r.SeriesName)
+		a := strings.ToLower(seriesName)
 		b := strings.ToLower(parsed.Title)
 		if strings.Contains(a, b) || strings.Contains(b, a) {
 			nameScore = 0.40
@@ -346,7 +507,7 @@ func computeTVDBConfidence(parsed *ParsedFilename, r *TVDBResult) float64 {
 	// Component 3: episode title match (15%) — only when filename carries a title
 	var titleScore float64
 	if parsed.ParsedEpisodeTitle != "" && r.EpisodeTitle != "" {
-		titleScore = stringSimilarity(r.EpisodeTitle, parsed.ParsedEpisodeTitle) * 0.15
+		titleScore = bestTitleSimilarity(r.EpisodeTitle, parsed.ParsedEpisodeTitle) * 0.15
 	}
 
 	// Component 4: year match — premiere year OR episode air year, ±1 tolerance (5%)
@@ -367,7 +528,7 @@ func computeTVDBConfidence(parsed *ParsedFilename, r *TVDBResult) float64 {
 	// Override shortcuts: exact name + episode found → shortcut based on title presence.
 	if nameSim == 1.0 && r.EpisodeFound {
 		if parsed.ParsedEpisodeTitle != "" {
-			if stringSimilarity(r.EpisodeTitle, parsed.ParsedEpisodeTitle) >= 0.90 {
+			if bestTitleSimilarity(r.EpisodeTitle, parsed.ParsedEpisodeTitle) >= 0.90 {
 				return 1.0
 			}
 		} else {
@@ -495,10 +656,22 @@ func (c *TVDBClient) searchSeries(ctx context.Context, name string) ([]tvdbSearc
 func baseSeriesScore(s tvdbSearchResult, parsed *ParsedFilename, queryNorm string) float64 {
 	score := 0.50
 	nameNorm := normTitle(s.Name)
+	// TVDB disambiguates remakes by appending the premiere year to the name
+	// ("Treasure Island (2026)"), which used to cost the real show its exact-name
+	// bonus. When that suffix year is the filename's year, the name is exactly
+	// what the filename said ("Treasure Island (2026)") and scores as an exact
+	// match. Otherwise it scores just below one, so an un-suffixed original still
+	// edges out remakes when nothing else (year, episode title) tells them apart.
+	baseName, nameYear := splitSeriesYearSuffix(s.Name)
 
-	if nameNorm == queryNorm {
+	switch {
+	case nameNorm == queryNorm:
 		score += 0.30
-	} else if strings.Contains(nameNorm, queryNorm) || strings.Contains(queryNorm, nameNorm) {
+	case nameYear > 0 && normTitle(baseName) == queryNorm && nameYear == parsed.Year:
+		score += 0.30
+	case nameYear > 0 && normTitle(baseName) == queryNorm:
+		score += 0.25
+	case strings.Contains(nameNorm, queryNorm) || strings.Contains(queryNorm, nameNorm):
 		score += 0.10
 	}
 
@@ -507,14 +680,39 @@ func baseSeriesScore(s tvdbSearchResult, parsed *ParsedFilename, queryNorm strin
 	// so an exact match is not expected — we only need the series to have existed.
 	// Guard against implausible/garbage years (e.g. a mis-parsed "0099") getting a
 	// free bonus just because they're trivially <= the filename year.
-	if seriesYear := s.parsedYear(); parsed.Year > 0 && seriesYear >= 1900 && seriesYear <= parsed.Year {
+	seriesYear := s.parsedYear()
+	if parsed.Year > 0 && seriesYear >= 1900 && seriesYear <= parsed.Year {
+		score += 0.10
+	}
+	// An exact year match is additional evidence on top of that: when the
+	// filename's year is the premiere year (the usual "Show (YYYY)" convention),
+	// a remake from that year beats older same-named series instead of tying.
+	if parsed.Year > 0 && (seriesYear == parsed.Year || nameYear == parsed.Year) {
 		score += 0.10
 	}
 
 	return score
 }
 
+// scoredSeries is one series candidate with its selection score and, when the
+// episode title was validated, the episode TVDB has at the parsed S/E.
+type scoredSeries struct {
+	s     tvdbSearchResult
+	score float64
+	ep    *tvdbEpisode // nil when not fetched or the fetch failed
+	epSim float64
+}
+
 // selectBestSeries picks the candidate with the highest confidence score.
+// See scoreSeriesCandidates for how candidates are scored.
+func (c *TVDBClient) selectBestSeries(ctx context.Context, candidates []tvdbSearchResult, parsed *ParsedFilename) (tvdbSearchResult, float64) {
+	scored, _ := c.scoreSeriesCandidates(ctx, candidates, parsed)
+	return scored[0].s, scored[0].score
+}
+
+// scoreSeriesCandidates scores every candidate and returns them best first.
+// The second return value reports whether episode titles were validated.
+// candidates must be non-empty.
 //
 // When the filename carries an episode title (and a season/episode number), the
 // episode name is the primary differentiator between similarly-named shows: for
@@ -525,27 +723,26 @@ func baseSeriesScore(s tvdbSearchResult, parsed *ParsedFilename, queryNorm strin
 // series (S01E01="Downsize").
 //
 // The base name+year score is used alone when no episode title is available.
-func (c *TVDBClient) selectBestSeries(ctx context.Context, candidates []tvdbSearchResult, parsed *ParsedFilename) (tvdbSearchResult, float64) {
+// Equal scores are ordered by episode-title similarity, then by TVDB's order.
+func (c *TVDBClient) scoreSeriesCandidates(ctx context.Context, candidates []tvdbSearchResult, parsed *ParsedFilename) ([]scoredSeries, bool) {
 	queryNorm := normTitle(parsed.Title)
 	validateEpisode := parsed.IsTV && parsed.Season > 0 && parsed.Episode > 0 && parsed.ParsedEpisodeTitle != ""
 
-	bestIdx := 0
-	bestScore := -1.0
-
-	for i, s := range candidates {
-		score := baseSeriesScore(s, parsed, queryNorm)
+	scored := make([]scoredSeries, 0, len(candidates))
+	for _, s := range candidates {
+		sc := scoredSeries{s: s, score: baseSeriesScore(s, parsed, queryNorm)}
 
 		if validateEpisode {
 			ep, err := c.fetchEpisode(ctx, s.intID(), parsed.Season, parsed.Episode)
 			switch {
 			case err != nil:
 				// Missing episode is evidence against this being the right series.
-				score -= 0.20
+				sc.score -= 0.20
 				logger.Debug("TVDB: candidate episode fetch failed, penalizing",
 					"candidate", s.Name, "year", s.Year, "tvdb_id", s.TVDBIDStr,
 					"season", parsed.Season, "episode", parsed.Episode, "error", err)
 			default:
-				sim := stringSimilarity(ep.Name, parsed.ParsedEpisodeTitle)
+				sim := bestTitleSimilarity(ep.Name, parsed.ParsedEpisodeTitle)
 				var epAdj float64
 				switch {
 				case sim >= 0.90:
@@ -555,7 +752,8 @@ func (c *TVDBClient) selectBestSeries(ctx context.Context, candidates []tvdbSear
 				default:
 					epAdj = -0.30 // episode name disagrees → wrong series
 				}
-				score += epAdj
+				sc.score += epAdj
+				sc.ep, sc.epSim = ep, sim
 				logger.Debug("TVDB: candidate episode name compared",
 					"candidate", s.Name, "year", s.Year, "tvdb_id", s.TVDBIDStr,
 					"filename_episode", parsed.ParsedEpisodeTitle, "tvdb_episode", ep.Name,
@@ -566,15 +764,17 @@ func (c *TVDBClient) selectBestSeries(ctx context.Context, candidates []tvdbSear
 
 		logger.Debug("TVDB: candidate scored",
 			"candidate", s.Name, "year", s.Year, "tvdb_id", s.TVDBIDStr,
-			"score", fmt.Sprintf("%.2f", score))
-
-		if score > bestScore {
-			bestScore = score
-			bestIdx = i
-		}
+			"score", fmt.Sprintf("%.2f", sc.score))
+		scored = append(scored, sc)
 	}
 
-	return candidates[bestIdx], bestScore
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		return scored[i].epSim > scored[j].epSim
+	})
+	return scored, validateEpisode
 }
 
 // findAdjacentSeasonEpisode checks season+1 and season-1 (same episode number)

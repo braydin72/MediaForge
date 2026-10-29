@@ -38,6 +38,13 @@ type LookupResult struct {
 	// the original mismatched episode. Callers must route to Review Queue
 	// rather than treat this as a normal match.
 	TitleMismatchUnresolved bool
+	// SeriesAmbiguous is set (TVDB only) when other series candidates scored
+	// within a hair of this one despite an episode title to check against.
+	// Callers must not treat this as a normal match.
+	SeriesAmbiguous bool
+	// Alternates (TVDB only) are the other series candidates worth offering an
+	// LLM or a human when SeriesAmbiguous or TitleMismatchUnresolved is set.
+	Alternates []*LookupResult
 }
 
 // NoMatchError is returned when all configured lookup sources fail or produce
@@ -170,22 +177,27 @@ func (o *Orchestrator) LookupTV(ctx context.Context, parsed *ParsedFilename, pro
 // recomputes confidence using the unified scorer.
 
 func fromTVDB(r *TVDBResult, parsed *ParsedFilename) *LookupResult {
-	return &LookupResult{
-		Source:         "tvdb",
-		MediaType:      "tv",
-		Title:          r.SeriesName,
-		Year:           r.FirstAiredYear,
-		TVDBSeriesID:   r.SeriesID,
-		TVDBNetwork:    r.Network,
-		Season:         r.Season,
-		Episode:        r.Episode,
+	out := &LookupResult{
+		Source:                  "tvdb",
+		MediaType:               "tv",
+		Title:                   r.SeriesName,
+		Year:                    r.FirstAiredYear,
+		TVDBSeriesID:            r.SeriesID,
+		TVDBNetwork:             r.Network,
+		Season:                  r.Season,
+		Episode:                 r.Episode,
 		EpisodeTitle:            r.EpisodeTitle,
 		EpisodeAirDate:          r.EpisodeAirDate,
 		Confidence:              r.Confidence,
 		Episode2:                r.Episode2,
 		MultiPartUnconfirmed:    r.MultiPartUnconfirmed,
 		TitleMismatchUnresolved: r.TitleMismatchUnresolved,
+		SeriesAmbiguous:         r.SeriesAmbiguous,
 	}
+	for _, alt := range r.Alternates {
+		out.Alternates = append(out.Alternates, fromTVDB(alt, parsed))
+	}
+	return out
 }
 
 func fromTMDBMovie(r *TMDBResult, parsed *ParsedFilename, probeDuration time.Duration) *LookupResult {
